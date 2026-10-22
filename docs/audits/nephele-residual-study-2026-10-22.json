@@ -1,0 +1,4680 @@
+{
+  "status": "STEP_3_INCOMPLETE",
+  "input_sha256": {
+    "docs/audits/nephele-correction-study-2026-10-22.py": "182f0a128265bba49e97904bd7587c20310903a513c62cf5d62478ca2eccddd4",
+    "docs/audits/nephele_transport_cpu.py": "090ecd6cf11dd9c2ed15baefc1a7200c19de1bee536364f61cd83d50af46aba1",
+    "docs/audits/nephele-release-analysis-2026-10-22.py": "be30c6256b359695fc399405f2d202c9760531944e5daa21cbfa0c9658d40eba",
+    ".release-evidence/2026-10-22/continuation-study/source_operator.py": "964c8faaab05b76e0f9c835cdbd2af2f13d756067303897af8e4164571eb51b2",
+    ".release-evidence/2026-10-22/first-order/nephele_first_order_ablation.py": "b07b14e2da1ca6e0cee94ac9e74e4593d6e49de73d6db876038e5f607c734e07",
+    "tests/nephele/fixture/atmosphere.json": "86c32891d5390696f21d9cd5b37c505e65ff2f81922b34f62862a9d2d91c1e47",
+    "tests/nephele/fixture/camera.json": "3d39f374e831eba962a0c57acabb962d2c500efbee11f8dca28f74a5883aa6d1",
+    "tests/nephele/fixture/cloud-shadow-mask.npy": "4cdbf4a232a521157e1428a5d72423f2e82352b206e0b6865c574972af69cd4e",
+    "tests/nephele/fixture/crop.json": "065419f7e21660a582b2326cde605ef8fc9fe030d3db1e07b32bb0026d878c04",
+    "tests/nephele/fixture/exposure.json": "8d27a721074814a7a2494d69be7842a32dff39eb4e7ed8d287588bbc3546fd31",
+    "tests/nephele/fixture/godray-roi-mask.npy": "bfa5e46e8cf884a271cac6ffd1d1b8a58a173d48e7c26a6752c1ac5a30fe2d20",
+    "tests/nephele/fixture/mask-rules.json": "48a16b48747151e06b01669e91d7ed9e21c612aa87baddf1071f56f484681008",
+    "tests/nephele/fixture/material.json": "9104fa8bd20fa69d3c08f3fe57c32cab48d74d690c22872777fbe834b06b8789",
+    "tests/nephele/fixture/medium.json": "40cb93a104db8217de4dae011d1d19dba4fe54c8942d0171e6767fb7746e9cf9",
+    "tests/nephele/fixture/reference-cloud-shadow-aov.npy": "2ed192c66493e0151142623f2d88eed35ccfaacd427eb947f6ff7917a5d58667",
+    "tests/nephele/fixture/reference-in-scatter.npy": "34b4d583b6dd726366c4c8ebad0ce15f4a43363bafab6f1ca0a0e813a2910e5e",
+    "tests/nephele/fixture/reference-media-lighting-visibility.npy": "1d9ab6bb4e88dbeb5f2f31196cdfc885181cba7744097e1b4aa33f64d8273159",
+    "tests/nephele/fixture/reference-optical-depth.npy": "f5bf53a7bf3b0932edad06de18ab4623f241bb4c83b20b3402add7c3132c02b6",
+    "tests/nephele/fixture/reference-provenance.json": "d083b146ff4e7fe1bac1874717bf8d527e9c2357d4be8f661203c63123144a67",
+    "tests/nephele/fixture/reference-rgb.npy": "d0a5ff2c46e746f76fe726873821b569324eb59c9cba87bd9be07a5e7dfcf5dd",
+    "tests/nephele/fixture/reference-terrain-hit.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    "tests/nephele/fixture/reference-terrain-slice.npy": "3d743b53af51a536ee462a89fa59cf4a1c41d9a1b1607e8901e87619eafcc1e5",
+    "tests/nephele/fixture/reference-transmittance.npy": "25fe0d4176f8a8bc9df05faccc3a353a8583aa57d69d18182f80bc2f67e57d20",
+    "tests/nephele/fixture/shaft-mask.npy": "dae7955e935586a3f85022cfc7bed9f0b3491ece6f44544cdc80c8f9bbe29177",
+    "tests/nephele/fixture/sky-cloud-mask.npy": "288e3868f1a06922441af4da195b5db590a5386e647cfc394c7be52f52b5a7b2",
+    "tests/nephele/fixture/sun.json": "fc074b48eb2cbdf2569ebd742a5ef4220514a6ae265a8ad1d298efd4a0722b02",
+    "tests/nephele/fixture/terrain-dem.npy": "4ae0b3517e1e7a7e09ab4a572f5b1c06cfff60074e640ed593638810ec9d36cf",
+    "tests/nephele/fixture/terrain-mask.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    "tests/nephele/fixture/terrain.json": "f8fa80ecb8c4312707ae198bc40ea2e93c7e158ca15f21739d5c3956b1bce315",
+    "tests/nephele/fixture/tonemap.json": "15cbb4e5e289d6d4fcbfdcebad8ad67c8cf8e2f74c032e5d2eeb0271d83d7034",
+    ".release-evidence/2026-10-22/continuation-study/coupled-surface.npz": "28bca25dec4b3951a98b785caee97f5085fd010133f81a6f13a0d2f4d864acdc",
+    ".release-evidence/2026-10-22/continuation-study/source-operator-hammersley-environment-quadrature.npz": "edd3106a30822e77c1e3aff00fb5298174fdcc74a494f09e71c29683d4eb00df",
+    ".release-evidence/2026-10-22/continuation-study/source-operator-hammersley-physical-boundary.npz": "e3d77c4d98cd5528d94e04ff13480d00f18b424c4beba15cea854f3983963132",
+    ".release-evidence/2026-10-22/continuation-study/source-operator-hammersley.npz": "f1a4c40288abd2bc77eb9191b3f01597ed3e37795293a74f846d14a638e80e12",
+    ".release-evidence/2026-10-22/continuation-study/source-operator-shifted.npz": "a3164feed5144ecbeac3ebaf26818e33178aae43a7ee9007ac0c7ee8bbb6a6cd",
+    ".release-evidence/2026-10-22/continuation-study/source-operator.npz": "9bc6af93380e9dca383ff503f94b101a7dbcb82649f773646c5db6140332f28b",
+    ".release-evidence/2026-10-22/continuation-study/sun-ablation.npz": "a0cbbfd1066867a2694ec5e0b597a75d7cf44061f6bcb6532396e806d0c31e28",
+    ".release-evidence/2026-10-22/continuation-study/surface-world-sun.npz": "c2a34dbcdf01c0c549d1b6c04b4fcb4f64a54c50b965468f4696842e45ccfd62",
+    ".release-evidence/2026-10-22/first-order/first-order.npz": "973f5fb1d5cc23f423062360c2ad47a70cb21f27b8cc62ebb3004cf2ac7721fe",
+    ".release-evidence/2026-10-22/first-order/geometry.npz": "9ecf65810b657ce1acf0155753b29208a5accdcc3542b8d6e5f368d087acd1d4",
+    ".release-evidence/2026-10-22/review-models/source-operator-hammersley-environment-quadrature.npz": "edd3106a30822e77c1e3aff00fb5298174fdcc74a494f09e71c29683d4eb00df",
+    ".release-evidence/2026-10-22/review-models/source-operator-hammersley-physical-boundary-environment-quadrature.npz": "e73ea826f05a56059d64628c508f31bde14aae6f6813b758d0923107a64cc9bc",
+    ".release-evidence/2026-10-22/review-models/source-operator-hammersley-physical-boundary.npz": "02f3b89e05bb7ec9dd89e5910020a1862e8cb2759f109a4f82f184f4c30aded9",
+    ".release-evidence/2026-10-22/review-models/source-operator-hammersley.npz": "db84e2152ce8c519821a64f218ff079dd7d7a87ce87cce059ededd463aaf9fce",
+    ".release-evidence/2026-10-22/review-models/source-operator-tented-hammersley-environment-quadrature.npz": "ea5d2273878cf109ace5acfcc11bdffe723a9a92101ca40ee116880a6e64a3ea",
+    ".release-evidence/2026-10-22/review-models/source_operator.py": "ba6f2ec4e0a446458d5f051e344993bb5a4c943a027718b98abc32f0c233840b",
+    ".release-evidence/2026-10-22/review-models/source_operator_tented.py": "58930e44d61ec384f3c4443bbf9b80939570793c5286cf294386bebaf7fdc36b",
+    "D:/forge3d/cache/tmp/claude/C--Users-milos-forge3d/31619710-8e55-46bc-9aed-7e46d0719848/scratchpad/recheck/first-order/analysis.json": "d205500cee6f24c0718167ae0a0fa670a27fff1dddb121fdd4e8fc76cdb60dd8",
+    "D:/forge3d/cache/tmp/claude/C--Users-milos-forge3d/31619710-8e55-46bc-9aed-7e46d0719848/scratchpad/recheck/first-order/fine.npz": "282455a01fd6eb4aa35597e04ee83d0701d7a14741c0b218641543d2666c0727",
+    ".release-evidence/2026-10-22/ci-39566600606/realtime-rgb.npy": "91d42a83486f0d055bb37d89d91d6c3615a0da5ea792b92207197ee302e25560",
+    ".release-evidence/2026-10-22/ci-39566600606/terrain-occlusion-disabled-rgb.npy": "47fe4691610ba890ef998c187423d4cbe10e193436d0193158ded45148cbfb2f",
+    ".release-evidence/2026-10-22/ci-39566600606/in-scatter.npy": "8aaad008aba195da28f6fb243870ad1cf4d86ec8f4d593fd11f33186c371bd44",
+    ".release-evidence/2026-10-22/ci-39566600606/transmittance.npy": "f1cc596f64b9b6c15f1aa596bfc23efcfb95dbd5bfff4a0d1595e4553451b5b7",
+    ".release-evidence/2026-10-22/ci-39566600606/medium-disabled-rgb.npy": "92ebb84f45c32e48d4e94d47ea36fd6601878aabee39eb2615622f2fcf39eb3e",
+    ".release-evidence/2026-10-22/ci-39580065706/realtime-rgb.npy": "b0a85054a34eb603812566fb7afe196f0456d537f52695e815813cc5a849b2ed",
+    ".release-evidence/2026-10-22/ci-39580065706/terrain-occlusion-disabled-rgb.npy": "3ef43a25be99361937aa09aa9314c2f22f9f2e7f6d0f068772b069060171e420",
+    ".release-evidence/2026-10-22/ci-39580065706/in-scatter.npy": "725635a3a9653b4db0f66b398ba367b9c3ed970f4bcc2e7e42ec1b9bf0d1e434",
+    ".release-evidence/2026-10-22/ci-39580065706/transmittance.npy": "f1cc596f64b9b6c15f1aa596bfc23efcfb95dbd5bfff4a0d1595e4553451b5b7",
+    ".release-evidence/2026-10-22/ci-39580065706/medium-disabled-rgb.npy": "92ebb84f45c32e48d4e94d47ea36fd6601878aabee39eb2615622f2fcf39eb3e",
+    ".release-evidence/2026-10-22/first-order/surface-cloudlight.npy": "99406ab05d37919833ae45aa8fec516a1d9c33e4171ae6c9df0dd5fa7f998c20"
+  },
+  "candidates": {
+    "archived-source-operator-hammersley-environment-quadrature-current": {
+      "metrics": {
+        "b1_fraction": 0.611899133175729,
+        "shaft_ssim": 0.8992561374176917,
+        "g4a_fraction": 0.6885035324341683,
+        "medium_changed_fraction": 0.28433889602053913,
+        "g4b_response": 0.02953853606565217,
+        "g4b_relative_error": 0.20843735557485407,
+        "margins": {
+          "b1_fraction": -0.338100866824271,
+          "shaft_ssim": -0.05074386258230823,
+          "g4a_fraction": -0.26149646756583167,
+          "medium_changed_fraction": 0.18433889602053913,
+          "g4b_relative_error": -0.00843735557485406
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": false,
+        "order": "current"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.0024211304078593098,
+          0.002562128984135645,
+          0.002404968843284967
+        ],
+        "shadow": [
+          0.0008695131706838681,
+          0.0008174563518690779,
+          0.0006676843606251737
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.5689519306540584,
+          0.6166272655634357
+        ],
+        "shaft_ssim": [
+          0.8931885560108729,
+          0.902560323956786
+        ],
+        "g4a_fraction": [
+          0.6165703275529865,
+          0.6551059730250481
+        ],
+        "medium_changed_fraction": [
+          0.27599486521181,
+          0.2952503209242619
+        ],
+        "g4b_response": [
+          0.02813475492144942,
+          0.03075741945912285
+        ],
+        "g4b_relative_error": [
+          0.17577417416203328,
+          0.24605535777474577
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-environment-quadrature-current-surface": {
+      "metrics": {
+        "b1_fraction": 0.611899133175729,
+        "shaft_ssim": 0.9017437982238006,
+        "g4a_fraction": 0.703917790622993,
+        "medium_changed_fraction": 0.26957637997432604,
+        "g4b_response": 0.029648751200846105,
+        "g4b_relative_error": 0.20548385159361807,
+        "margins": {
+          "b1_fraction": -0.338100866824271,
+          "shaft_ssim": -0.04825620177619938,
+          "g4a_fraction": -0.24608220937700698,
+          "medium_changed_fraction": 0.16957637997432604,
+          "g4b_relative_error": -0.005483851593618055
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": true,
+        "order": "current"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.0024211304078593098,
+          0.002562128984135645,
+          0.002404968843284967
+        ],
+        "shadow": [
+          -0.0014332751957227994,
+          -0.004875649794799855,
+          -0.009579389341590546
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.5689519306540584,
+          0.6166272655634357
+        ],
+        "shaft_ssim": [
+          0.8964732167765584,
+          0.9035820296664753
+        ],
+        "g4a_fraction": [
+          0.6795118818240206,
+          0.6878612716763006
+        ],
+        "medium_changed_fraction": [
+          0.2663671373555841,
+          0.27471116816431324
+        ],
+        "g4b_response": [
+          0.02821939108721539,
+          0.030745131320782704
+        ],
+        "g4b_relative_error": [
+          0.17610346709848643,
+          0.2437873094517411
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-environment-quadrature-converged": {
+      "metrics": {
+        "b1_fraction": 0.8400315208825847,
+        "shaft_ssim": 0.8921024278214147,
+        "g4a_fraction": 0.8021836865767502,
+        "medium_changed_fraction": 0.32413350449293965,
+        "g4b_response": 0.032432624903728516,
+        "g4b_relative_error": 0.13088264505103608,
+        "margins": {
+          "b1_fraction": -0.10996847911741525,
+          "shaft_ssim": -0.057897572178585266,
+          "g4a_fraction": -0.14781631342324975,
+          "medium_changed_fraction": 0.22413350449293964,
+          "g4b_relative_error": 0.06911735494896393
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": false,
+        "order": "converged"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.040181249835782126,
+          0.03158575774233768,
+          0.02315135580067927
+        ],
+        "shadow": [
+          0.012875730017690554,
+          0.0099790818430632,
+          0.007182553961787072
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.8250591016548463,
+          0.8479117415287628
+        ],
+        "shaft_ssim": [
+          0.8855528531198916,
+          0.8955091725505161
+        ],
+        "g4a_fraction": [
+          0.7225433526011561,
+          0.7822736030828517
+        ],
+        "medium_changed_fraction": [
+          0.3189987163029525,
+          0.3228498074454429
+        ],
+        "g4b_response": [
+          0.031037273734720632,
+          0.03363475601353581
+        ],
+        "g4b_relative_error": [
+          0.09866838507180545,
+          0.16827474392779582
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-environment-quadrature-converged-surface": {
+      "metrics": {
+        "b1_fraction": 0.8400315208825847,
+        "shaft_ssim": 0.8944869392991753,
+        "g4a_fraction": 0.8420038535645472,
+        "medium_changed_fraction": 0.3189987163029525,
+        "g4b_response": 0.03241452170436987,
+        "g4b_relative_error": 0.13136776781829296,
+        "margins": {
+          "b1_fraction": -0.10996847911741525,
+          "shaft_ssim": -0.055513060700824624,
+          "g4a_fraction": -0.10799614643545274,
+          "medium_changed_fraction": 0.2189987163029525,
+          "g4b_relative_error": 0.06863223218170705
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": true,
+        "order": "converged"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.040181249835782126,
+          0.03158575774233768,
+          0.02315135580067927
+        ],
+        "shadow": [
+          0.01057294165128388,
+          0.004285975696394263,
+          -0.0030645197404286393
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.8250591016548463,
+          0.8479117415287628
+        ],
+        "shaft_ssim": [
+          0.8891520158108502,
+          0.8966236494991202
+        ],
+        "g4a_fraction": [
+          0.8220937700706487,
+          0.8259473346178549
+        ],
+        "medium_changed_fraction": [
+          0.31643132220795894,
+          0.3189987163029525
+        ],
+        "g4b_response": [
+          0.031019559041669004,
+          0.03367481193322487
+        ],
+        "g4b_relative_error": [
+          0.09759498151370491,
+          0.16874945564830765
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-physical-boundary-current": {
+      "metrics": {
+        "b1_fraction": 0.598896769109535,
+        "shaft_ssim": 0.9907632307996015,
+        "g4a_fraction": 0.5921644187540142,
+        "medium_changed_fraction": 0.2625160462130937,
+        "g4b_response": 0.02078128680791406,
+        "g4b_relative_error": 0.443110846669284,
+        "margins": {
+          "b1_fraction": -0.3511032308904649,
+          "shaft_ssim": 0.040763230799601535,
+          "g4a_fraction": -0.3578355812459858,
+          "medium_changed_fraction": 0.1625160462130937,
+          "g4b_relative_error": -0.243110846669284
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": false,
+        "order": "current"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          -0.0076774669898711945,
+          -0.006941988713635245,
+          -0.006164284522316944
+        ],
+        "shadow": [
+          -0.00649297253380241,
+          -0.00578529768255861,
+          -0.005094238416297112
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.5697399527186762,
+          0.5965327029156816
+        ],
+        "shaft_ssim": [
+          0.9867067404108996,
+          0.9911780589599181
+        ],
+        "g4a_fraction": [
+          0.5260115606936416,
+          0.5703275529865125
+        ],
+        "medium_changed_fraction": [
+          0.2637997432605905,
+          0.2811296534017972
+        ],
+        "g4b_response": [
+          0.019664033042868456,
+          0.02229167525810649
+        ],
+        "g4b_relative_error": [
+          0.40263602174613083,
+          0.4730505953009644
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-physical-boundary-current-surface": {
+      "metrics": {
+        "b1_fraction": 0.598896769109535,
+        "shaft_ssim": 0.9912781223194843,
+        "g4a_fraction": 0.6178548490687219,
+        "medium_changed_fraction": 0.2650834403080873,
+        "g4b_response": 0.020836688149837284,
+        "g4b_relative_error": 0.4416262222241193,
+        "margins": {
+          "b1_fraction": -0.3511032308904649,
+          "shaft_ssim": 0.041278122319484356,
+          "g4a_fraction": -0.33214515093127805,
+          "medium_changed_fraction": 0.16508344030808728,
+          "g4b_relative_error": -0.24162622222411928
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": true,
+        "order": "current"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          -0.0076774669898711945,
+          -0.006941988713635245,
+          -0.006164284522316944
+        ],
+        "shadow": [
+          -0.008795760900209096,
+          -0.011478403829227548,
+          -0.01534131211851285
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.5697399527186762,
+          0.5965327029156816
+        ],
+        "shaft_ssim": [
+          0.9879135487295713,
+          0.9908227178925216
+        ],
+        "g4a_fraction": [
+          0.5850995504174695,
+          0.6056518946692357
+        ],
+        "medium_changed_fraction": [
+          0.2702182284980745,
+          0.2734274711168164
+        ],
+        "g4b_response": [
+          0.019755931050575028,
+          0.02233689438132671
+        ],
+        "g4b_relative_error": [
+          0.4014242565904296,
+          0.47058794685298655
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-physical-boundary-converged": {
+      "metrics": {
+        "b1_fraction": 0.9692671394799054,
+        "shaft_ssim": 0.9906831670751028,
+        "g4a_fraction": 0.8169556840077071,
+        "medium_changed_fraction": 0.32734274711168165,
+        "g4b_response": 0.022458173889862848,
+        "g4b_relative_error": 0.3981742536695645,
+        "margins": {
+          "b1_fraction": 0.019267139479905437,
+          "shaft_ssim": 0.04068316707510289,
+          "g4a_fraction": -0.13304431599229283,
+          "medium_changed_fraction": 0.22734274711168165,
+          "g4b_relative_error": -0.19817425366956448
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": false,
+        "order": "converged"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.029967488785469894,
+          0.02199933709404436,
+          0.014511319566228132
+        ],
+        "shadow": [
+          0.005783290165287629,
+          0.003582268751127641,
+          0.0015633649289117616
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.9562647754137116,
+          0.970843183609141
+        ],
+        "shaft_ssim": [
+          0.987644090007307,
+          0.9903288284451314
+        ],
+        "g4a_fraction": [
+          0.7289659601798331,
+          0.7854849068721901
+        ],
+        "medium_changed_fraction": [
+          0.31835686777920413,
+          0.3324775353016688
+        ],
+        "g4b_response": [
+          0.021089453768080288,
+          0.023719572775372347
+        ],
+        "g4b_relative_error": [
+          0.36437175799849864,
+          0.43485270370067275
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-physical-boundary-converged-surface": {
+      "metrics": {
+        "b1_fraction": 0.9692671394799054,
+        "shaft_ssim": 0.9906058896729887,
+        "g4a_fraction": 0.8503532434168273,
+        "medium_changed_fraction": 0.3138639281129653,
+        "g4b_response": 0.0223916341960529,
+        "g4b_relative_error": 0.39995735950373235,
+        "margins": {
+          "b1_fraction": 0.019267139479905437,
+          "shaft_ssim": 0.040605889672988726,
+          "g4a_fraction": -0.09964675658317268,
+          "medium_changed_fraction": 0.2138639281129653,
+          "g4b_relative_error": -0.19995735950373233
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": true,
+        "order": "converged"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.029967488785469894,
+          0.02199933709404436,
+          0.014511319566228132
+        ],
+        "shadow": [
+          0.003480501798880931,
+          -0.0021108373955412967,
+          -0.008683708773303959
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.9562647754137116,
+          0.970843183609141
+        ],
+        "shaft_ssim": [
+          0.9883460809091078,
+          0.9895696388158935
+        ],
+        "g4a_fraction": [
+          0.8169556840077071,
+          0.8310854206807964
+        ],
+        "medium_changed_fraction": [
+          0.3196405648267009,
+          0.3209242618741977
+        ],
+        "g4b_response": [
+          0.021099365561882563,
+          0.023732963486464816
+        ],
+        "g4b_relative_error": [
+          0.36401291872970315,
+          0.4345870911565816
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-current": {
+      "metrics": {
+        "b1_fraction": 0.7127659574468085,
+        "shaft_ssim": 0.9916001251541653,
+        "g4a_fraction": 0.7109826589595376,
+        "medium_changed_fraction": 0.3215661103979461,
+        "g4b_response": 0.019629758417801648,
+        "g4b_relative_error": 0.4739690738875221,
+        "margins": {
+          "b1_fraction": -0.23723404255319147,
+          "shaft_ssim": 0.041600125154165335,
+          "g4a_fraction": -0.23901734104046235,
+          "medium_changed_fraction": 0.22156611039794608,
+          "g4b_relative_error": -0.27396907388752206
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": false,
+        "order": "current"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "shadow": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6713947990543735,
+          0.7084318360914106
+        ],
+        "shaft_ssim": [
+          0.9873948998661438,
+          0.9913475342729315
+        ],
+        "g4a_fraction": [
+          0.6107899807321773,
+          0.6557482337829159
+        ],
+        "medium_changed_fraction": [
+          0.31514762516046213,
+          0.334403080872914
+        ],
+        "g4b_response": [
+          0.01823597324742364,
+          0.021015826063344754
+        ],
+        "g4b_relative_error": [
+          0.43682575140127233,
+          0.5113192077185573
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-current-surface": {
+      "metrics": {
+        "b1_fraction": 0.7127659574468085,
+        "shaft_ssim": 0.9918579215150097,
+        "g4a_fraction": 0.8086062941554271,
+        "medium_changed_fraction": 0.29717586649550704,
+        "g4b_response": 0.01963195575072108,
+        "g4b_relative_error": 0.47391019058157485,
+        "margins": {
+          "b1_fraction": -0.23723404255319147,
+          "shaft_ssim": 0.04185792151500978,
+          "g4a_fraction": -0.1413937058445729,
+          "medium_changed_fraction": 0.19717586649550703,
+          "g4b_relative_error": -0.27391019058157484
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": true,
+        "order": "current"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "shadow": [
+          -0.0023027883664066677,
+          -0.005693106146668936,
+          -0.010247073702215725
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6713947990543735,
+          0.7084318360914106
+        ],
+        "shaft_ssim": [
+          0.9887191137717585,
+          0.9911636916067398
+        ],
+        "g4a_fraction": [
+          0.766859344894027,
+          0.7803468208092486
+        ],
+        "medium_changed_fraction": [
+          0.3010269576379974,
+          0.3010269576379974
+        ],
+        "g4b_response": [
+          0.01830424660435707,
+          0.020972588279125407
+        ],
+        "g4b_relative_error": [
+          0.43798442137529137,
+          0.5094896438282583
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-converged": {
+      "metrics": {
+        "b1_fraction": 0.9988179669030733,
+        "shaft_ssim": 0.9903843483933793,
+        "g4a_fraction": 0.7822736030828517,
+        "medium_changed_fraction": 0.36713735558408217,
+        "g4b_response": 0.02091144207896384,
+        "g4b_relative_error": 0.43962299438340735,
+        "margins": {
+          "b1_fraction": 0.048817966903073384,
+          "shaft_ssim": 0.04038434839337934,
+          "g4a_fraction": -0.1677263969171483,
+          "medium_changed_fraction": 0.26713735558408214,
+          "g4b_relative_error": -0.23962299438340734
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": false,
+        "order": "converged"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.03885446010354997,
+          0.0298654621179614,
+          0.021343476373954926
+        ],
+        "shadow": [
+          0.012741053438100352,
+          0.009709983407556608,
+          0.006912249698033929
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.9948778565799843,
+          0.9984239558707644
+        ],
+        "shaft_ssim": [
+          0.9875771356254179,
+          0.9899255651043587
+        ],
+        "g4a_fraction": [
+          0.7186897880539499,
+          0.7662170841361593
+        ],
+        "medium_changed_fraction": [
+          0.3626444159178434,
+          0.36713735558408217
+        ],
+        "g4b_response": [
+          0.01955119386886381,
+          0.02222880103057165
+        ],
+        "g4b_relative_error": [
+          0.40432090178565117,
+          0.4760744172930681
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-converged-surface": {
+      "metrics": {
+        "b1_fraction": 0.9988179669030733,
+        "shaft_ssim": 0.9904988191619233,
+        "g4a_fraction": 0.945407835581246,
+        "medium_changed_fraction": 0.3453145057766367,
+        "g4b_response": 0.020840807261182478,
+        "g4b_relative_error": 0.44151583981851067,
+        "margins": {
+          "b1_fraction": 0.048817966903073384,
+          "shaft_ssim": 0.04049881916192333,
+          "g4a_fraction": -0.004592164418753986,
+          "medium_changed_fraction": 0.2453145057766367,
+          "g4b_relative_error": -0.24151583981851066
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": true,
+        "order": "converged"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.03885446010354997,
+          0.0298654621179614,
+          0.021343476373954926
+        ],
+        "shadow": [
+          0.01043826507169367,
+          0.004016877260887679,
+          -0.0033348240041817905
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.9948778565799843,
+          0.9984239558707644
+        ],
+        "shaft_ssim": [
+          0.9883663902460545,
+          0.9890952717038329
+        ],
+        "g4a_fraction": [
+          0.9177906229929351,
+          0.9254977520873474
+        ],
+        "medium_changed_fraction": [
+          0.3465982028241335,
+          0.3478818998716303
+        ],
+        "g4b_response": [
+          0.019562474273386067,
+          0.022171601798446607
+        ],
+        "g4b_relative_error": [
+          0.4058537054201764,
+          0.4757721292306544
+        ]
+      }
+    },
+    "archived-source-operator-shifted-current": {
+      "metrics": {
+        "b1_fraction": 0.7828999211977935,
+        "shaft_ssim": 0.989813681755682,
+        "g4a_fraction": 0.7514450867052023,
+        "medium_changed_fraction": 0.3228498074454429,
+        "g4b_response": 0.02175077494618267,
+        "g4b_relative_error": 0.41713086605138644,
+        "margins": {
+          "b1_fraction": -0.16710007880220645,
+          "shaft_ssim": 0.03981368175568201,
+          "g4a_fraction": -0.19855491329479769,
+          "medium_changed_fraction": 0.2228498074454429,
+          "g4b_relative_error": -0.21713086605138643
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": false,
+        "order": "current"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.010108174833776852,
+          0.008683196643790345,
+          0.00691991171899545
+        ],
+        "shadow": [
+          0.00425285880781647,
+          0.003693574898208553,
+          0.002992968923016624
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.7596532702915682,
+          0.7884160756501182
+        ],
+        "shaft_ssim": [
+          0.9848970903219513,
+          0.9916078255428148
+        ],
+        "g4a_fraction": [
+          0.6679511881824021,
+          0.7597944765574823
+        ],
+        "medium_changed_fraction": [
+          0.31065468549422337,
+          0.3209242618741977
+        ],
+        "g4b_response": [
+          0.020363695197357472,
+          0.02303829477712494
+        ],
+        "g4b_relative_error": [
+          0.3826283910517684,
+          0.45430131050294364
+        ]
+      }
+    },
+    "archived-source-operator-shifted-current-surface": {
+      "metrics": {
+        "b1_fraction": 0.7828999211977935,
+        "shaft_ssim": 0.9902082282985175,
+        "g4a_fraction": 0.867694283879255,
+        "medium_changed_fraction": 0.2952503209242619,
+        "g4b_response": 0.02169646020121733,
+        "g4b_relative_error": 0.4185863722775747,
+        "margins": {
+          "b1_fraction": -0.16710007880220645,
+          "shaft_ssim": 0.04020822829851756,
+          "g4a_fraction": -0.082305716120745,
+          "medium_changed_fraction": 0.1952503209242619,
+          "g4b_relative_error": -0.21858637227757471
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": true,
+        "order": "current"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.010108174833776852,
+          0.008683196643790345,
+          0.00691991171899545
+        ],
+        "shadow": [
+          0.001950070441409798,
+          -0.001999531248460372,
+          -0.007254104779199101
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.7596532702915682,
+          0.7884160756501182
+        ],
+        "shaft_ssim": [
+          0.9859830449311975,
+          0.9910358378715797
+        ],
+        "g4a_fraction": [
+          0.8503532434168273,
+          0.8509955041746949
+        ],
+        "medium_changed_fraction": [
+          0.2926829268292683,
+          0.30166880616174585
+        ],
+        "g4b_response": [
+          0.020373768966270432,
+          0.023021427410057967
+        ],
+        "g4b_relative_error": [
+          0.38308039644737596,
+          0.4540313574104021
+        ]
+      }
+    },
+    "archived-source-operator-shifted-converged": {
+      "metrics": {
+        "b1_fraction": 0.9495665878644602,
+        "shaft_ssim": 0.9891286331345617,
+        "g4a_fraction": 0.7315350032113038,
+        "medium_changed_fraction": 0.37676508344030807,
+        "g4b_response": 0.0232544933667906,
+        "g4b_relative_error": 0.3768347820869784,
+        "margins": {
+          "b1_fraction": -0.0004334121355397125,
+          "shaft_ssim": 0.03912863313456172,
+          "g4a_fraction": -0.21846499678869613,
+          "medium_changed_fraction": 0.27676508344030804,
+          "g4b_relative_error": -0.1768347820869784
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": false,
+        "order": "converged"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.05314061660506909,
+          0.0418062018292081,
+          0.03061217624817205
+        ],
+        "shadow": [
+          0.01903544552301374,
+          0.015033950428802668,
+          0.011090276752516481
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.9405043341213554,
+          0.946414499605989
+        ],
+        "shaft_ssim": [
+          0.9843962440707275,
+          0.9901280472276243
+        ],
+        "g4a_fraction": [
+          0.6685934489402697,
+          0.7276814386640976
+        ],
+        "medium_changed_fraction": [
+          0.3774069319640565,
+          0.38189987163029526
+        ],
+        "g4b_response": [
+          0.02211080982526726,
+          0.02457788468586971
+        ],
+        "g4b_relative_error": [
+          0.3413710363613517,
+          0.4074827859860756
+        ]
+      }
+    },
+    "archived-source-operator-shifted-converged-surface": {
+      "metrics": {
+        "b1_fraction": 0.9495665878644602,
+        "shaft_ssim": 0.9892880105573495,
+        "g4a_fraction": 0.8908156711624919,
+        "medium_changed_fraction": 0.3607188703465982,
+        "g4b_response": 0.023230630601850828,
+        "g4b_relative_error": 0.37747424753905895,
+        "margins": {
+          "b1_fraction": -0.0004334121355397125,
+          "shaft_ssim": 0.03928801055734954,
+          "g4a_fraction": -0.059184328837508016,
+          "medium_changed_fraction": 0.26071887034659824,
+          "g4b_relative_error": -0.17747424753905894
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": true,
+        "order": "converged"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.05314061660506909,
+          0.0418062018292081,
+          0.03061217624817205
+        ],
+        "shadow": [
+          0.01673265715660709,
+          0.009340844282133713,
+          0.0008432030503007555
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.9405043341213554,
+          0.946414499605989
+        ],
+        "shaft_ssim": [
+          0.9854116644482446,
+          0.9896078389450719
+        ],
+        "g4a_fraction": [
+          0.8715478484264612,
+          0.8831085420680796
+        ],
+        "medium_changed_fraction": [
+          0.3607188703465982,
+          0.3632862644415918
+        ],
+        "g4b_response": [
+          0.022076085885945805,
+          0.02453060005757892
+        ],
+        "g4b_relative_error": [
+          0.34263815214959953,
+          0.4084133051280215
+        ]
+      }
+    },
+    "review-source-operator-hammersley-physical-boundary-environment-quadrature-current": {
+      "metrics": {
+        "b1_fraction": 0.4933018124507486,
+        "shaft_ssim": 0.902449191670286,
+        "g4a_fraction": 0.5799614643545279,
+        "medium_changed_fraction": 0.22528883183568676,
+        "g4b_response": 0.03195461850401497,
+        "g4b_relative_error": 0.1436920818141996,
+        "margins": {
+          "b1_fraction": -0.45669818754925134,
+          "shaft_ssim": -0.04755080832971392,
+          "g4a_fraction": -0.37003853564547207,
+          "medium_changed_fraction": 0.12528883183568676,
+          "g4b_relative_error": 0.056307918185800415
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": false,
+        "order": "current"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          -0.005955409763675911,
+          -0.005017992883675794,
+          -0.004333362540421852
+        ],
+        "shadow": [
+          -0.006857511021024146,
+          -0.006079310997145258,
+          -0.005415933165599549
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.4487785657998424,
+          0.5015760441292356
+        ],
+        "shaft_ssim": [
+          0.8949637321508682,
+          0.9063829480801843
+        ],
+        "g4a_fraction": [
+          0.5305073859987155,
+          0.5639049454078355
+        ],
+        "medium_changed_fraction": [
+          0.22721437740693196,
+          0.22978177150192555
+        ],
+        "g4b_response": [
+          0.03049283021685363,
+          0.033096341345919995
+        ],
+        "g4b_relative_error": [
+          0.11309662001032839,
+          0.1828645377410397
+        ]
+      }
+    },
+    "review-source-operator-hammersley-physical-boundary-environment-quadrature-current-surface": {
+      "metrics": {
+        "b1_fraction": 0.4933018124507486,
+        "shaft_ssim": 0.905070315351081,
+        "g4a_fraction": 0.5549132947976878,
+        "medium_changed_fraction": 0.22978177150192555,
+        "g4b_response": 0.0319877006668908,
+        "g4b_relative_error": 0.14280555838354983,
+        "margins": {
+          "b1_fraction": -0.45669818754925134,
+          "shaft_ssim": -0.044929684648919,
+          "g4a_fraction": -0.39508670520231215,
+          "medium_changed_fraction": 0.12978177150192555,
+          "g4b_relative_error": 0.05719444161645018
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": true,
+        "order": "current"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          -0.005955409763675911,
+          -0.005017992883675794,
+          -0.004333362540421852
+        ],
+        "shadow": [
+          -0.009160299387430798,
+          -0.011772417143814195,
+          -0.015663006867815254
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.4487785657998424,
+          0.5015760441292356
+        ],
+        "shaft_ssim": [
+          0.8988331508295473,
+          0.907940856018751
+        ],
+        "g4a_fraction": [
+          0.5228002569043031,
+          0.5581245985870263
+        ],
+        "medium_changed_fraction": [
+          0.22978177150192555,
+          0.24005134788189988
+        ],
+        "g4b_response": [
+          0.030561226872697585,
+          0.03311220931401608
+        ],
+        "g4b_relative_error": [
+          0.11267139613464701,
+          0.1810316697326406
+        ]
+      }
+    },
+    "review-source-operator-hammersley-physical-boundary-environment-quadrature-converged": {
+      "metrics": {
+        "b1_fraction": 0.7880220646178093,
+        "shaft_ssim": 0.8954172422780854,
+        "g4a_fraction": 0.7360308285163777,
+        "medium_changed_fraction": 0.2785622593068036,
+        "g4b_response": 0.03485344891880667,
+        "g4b_relative_error": 0.06601030829053602,
+        "margins": {
+          "b1_fraction": -0.16197793538219063,
+          "shaft_ssim": -0.054582757721914565,
+          "g4a_fraction": -0.21396917148362227,
+          "medium_changed_fraction": 0.1785622593068036,
+          "g4b_relative_error": 0.133989691709464
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": false,
+        "order": "converged"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.030567926640053145,
+          0.023059698531393533,
+          0.01573008159858361
+        ],
+        "shadow": [
+          0.004672906775828037,
+          0.0027191654532343307,
+          0.0008407001749779677
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.7671394799054374,
+          0.793144208037825
+        ],
+        "shaft_ssim": [
+          0.8878492119018869,
+          0.8996486215055434
+        ],
+        "g4a_fraction": [
+          0.6763005780346821,
+          0.7302504816955684
+        ],
+        "medium_changed_fraction": [
+          0.2785622593068036,
+          0.28433889602053913
+        ],
+        "g4b_response": [
+          0.03343443438199692,
+          0.03606316982320704
+        ],
+        "g4b_relative_error": [
+          0.03359265983377945,
+          0.10403652924943349
+        ]
+      }
+    },
+    "review-source-operator-hammersley-physical-boundary-environment-quadrature-converged-surface": {
+      "metrics": {
+        "b1_fraction": 0.7880220646178093,
+        "shaft_ssim": 0.8980346557040707,
+        "g4a_fraction": 0.6968529222864484,
+        "medium_changed_fraction": 0.28562259306803595,
+        "g4b_response": 0.03479745769041952,
+        "g4b_relative_error": 0.06751074029259062,
+        "margins": {
+          "b1_fraction": -0.16197793538219063,
+          "shaft_ssim": -0.05196534429592925,
+          "g4a_fraction": -0.2531470777135516,
+          "medium_changed_fraction": 0.18562259306803594,
+          "g4b_relative_error": 0.13248925970740938
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": true,
+        "order": "converged"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.030567926640053145,
+          0.023059698531393533,
+          0.01573008159858361
+        ],
+        "shadow": [
+          0.00237011840942139,
+          -0.0029739406934346027,
+          -0.009406373527237747
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.7671394799054374,
+          0.793144208037825
+        ],
+        "shaft_ssim": [
+          0.8919626655785264,
+          0.9012136992868558
+        ],
+        "g4a_fraction": [
+          0.682723185613359,
+          0.689145793192036
+        ],
+        "medium_changed_fraction": [
+          0.28177150192554556,
+          0.28369704749679076
+        ],
+        "g4b_response": [
+          0.03342768571356997,
+          0.036095946797332634
+        ],
+        "g4b_relative_error": [
+          0.03271431473714223,
+          0.10421737754247379
+        ]
+      }
+    },
+    "review-source-operator-tented-hammersley-environment-quadrature-current": {
+      "metrics": {
+        "b1_fraction": 0.6252955082742316,
+        "shaft_ssim": 0.8954501038899773,
+        "g4a_fraction": 0.7186897880539499,
+        "medium_changed_fraction": 0.31258023106546856,
+        "g4b_response": 0.02778100131161192,
+        "g4b_relative_error": 0.25553511473546814,
+        "margins": {
+          "b1_fraction": -0.3247044917257683,
+          "shaft_ssim": -0.0545498961100227,
+          "g4a_fraction": -0.23131021194605006,
+          "medium_changed_fraction": 0.21258023106546856,
+          "g4b_relative_error": -0.05553511473546813
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": false,
+        "order": "current"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.0020450620501272585,
+          0.0021248790212911937,
+          0.001975243388030556
+        ],
+        "shadow": [
+          0.006286157951159745,
+          0.005907609553320804,
+          0.0052581365906845205
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.5756501182033097,
+          0.6111111111111112
+        ],
+        "shaft_ssim": [
+          0.8903439913806844,
+          0.8977989501672489
+        ],
+        "g4a_fraction": [
+          0.6480411046885035,
+          0.6936416184971098
+        ],
+        "medium_changed_fraction": [
+          0.3061617458279846,
+          0.31322207958921694
+        ],
+        "g4b_response": [
+          0.02646545181043524,
+          0.029223657924781037
+        ],
+        "g4b_relative_error": [
+          0.21687534225454785,
+          0.2907887183571614
+        ]
+      }
+    },
+    "review-source-operator-tented-hammersley-environment-quadrature-current-surface": {
+      "metrics": {
+        "b1_fraction": 0.6252955082742316,
+        "shaft_ssim": 0.8970228521755691,
+        "g4a_fraction": 0.7938342967244701,
+        "medium_changed_fraction": 0.29974326059050066,
+        "g4b_response": 0.027973558620514354,
+        "g4b_relative_error": 0.250375035972613,
+        "margins": {
+          "b1_fraction": -0.3247044917257683,
+          "shaft_ssim": -0.05297714782443086,
+          "g4a_fraction": -0.1561657032755298,
+          "medium_changed_fraction": 0.19974326059050065,
+          "g4b_relative_error": -0.050375035972613
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": true,
+        "order": "current"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.0020450620501272585,
+          0.0021248790212911937,
+          0.001975243388030556
+        ],
+        "shadow": [
+          0.003983369584753088,
+          0.0002145034066518813,
+          -0.004988937111531196
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.5756501182033097,
+          0.6111111111111112
+        ],
+        "shaft_ssim": [
+          0.8927550393887937,
+          0.898186804238752
+        ],
+        "g4a_fraction": [
+          0.7745664739884393,
+          0.7771355170199101
+        ],
+        "medium_changed_fraction": [
+          0.2958921694480103,
+          0.29781771501925547
+        ],
+        "g4b_response": [
+          0.026598771507002496,
+          0.029224771578579757
+        ],
+        "g4b_relative_error": [
+          0.21684549897646765,
+          0.2872160669795108
+        ]
+      }
+    },
+    "review-source-operator-tented-hammersley-environment-quadrature-converged": {
+      "metrics": {
+        "b1_fraction": 0.8502758077226162,
+        "shaft_ssim": 0.8883616566043865,
+        "g4a_fraction": 0.7880539499036608,
+        "medium_changed_fraction": 0.3433889602053915,
+        "g4b_response": 0.030622183057590426,
+        "g4b_relative_error": 0.1793981886826453,
+        "margins": {
+          "b1_fraction": -0.09972419227738372,
+          "shaft_ssim": -0.06163834339561347,
+          "g4a_fraction": -0.1619460500963391,
+          "medium_changed_fraction": 0.2433889602053915,
+          "g4b_relative_error": 0.020601811317354723
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": false,
+        "order": "converged"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.039922377596882795,
+          0.031241897593779717,
+          0.02278671307529391
+        ],
+        "shadow": [
+          0.01832932319148668,
+          0.015085244331654134,
+          0.011792718030006522
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.8321513002364066,
+          0.847123719464145
+        ],
+        "shaft_ssim": [
+          0.8835345589211402,
+          0.8907732494948074
+        ],
+        "g4a_fraction": [
+          0.7116249197174053,
+          0.7764932562620424
+        ],
+        "medium_changed_fraction": [
+          0.34146341463414637,
+          0.3427471116816431
+        ],
+        "g4b_response": [
+          0.029319760600151925,
+          0.03199108767723694
+        ],
+        "g4b_relative_error": [
+          0.1427147945467663,
+          0.21430001869471277
+        ]
+      }
+    },
+    "review-source-operator-tented-hammersley-environment-quadrature-converged-surface": {
+      "metrics": {
+        "b1_fraction": 0.8502758077226162,
+        "shaft_ssim": 0.8897927128172949,
+        "g4a_fraction": 0.8882466281310212,
+        "medium_changed_fraction": 0.3286264441591784,
+        "g4b_response": 0.030671302338458457,
+        "g4b_relative_error": 0.17808190856064657,
+        "margins": {
+          "b1_fraction": -0.09972419227738372,
+          "shaft_ssim": -0.06020728718270507,
+          "g4a_fraction": -0.06175337186897878,
+          "medium_changed_fraction": 0.2286264441591784,
+          "g4b_relative_error": 0.021918091439353443
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "archived scalar model",
+        "surface": true,
+        "order": "converged"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.039922377596882795,
+          0.031241897593779717,
+          0.02278671307529391
+        ],
+        "shadow": [
+          0.01602653482508001,
+          0.0093921381849852,
+          0.0015456443277908386
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.8321513002364066,
+          0.847123719464145
+        ],
+        "shaft_ssim": [
+          0.8858221514383472,
+          0.8912422703749732
+        ],
+        "g4a_fraction": [
+          0.8644829800899165,
+          0.8741168914579319
+        ],
+        "medium_changed_fraction": [
+          0.32541720154043646,
+          0.32734274711168165
+        ],
+        "g4b_response": [
+          0.02938656653342736,
+          0.032027664262578984
+        ],
+        "g4b_relative_error": [
+          0.1417346288895029,
+          0.21250977827490117
+        ]
+      }
+    },
+    "factorial-angular0-surface0-pixel0-tent0": {
+      "metrics": {
+        "b1_fraction": 0.7206461780929866,
+        "shaft_ssim": 0.991381805236749,
+        "g4a_fraction": 0.7052023121387283,
+        "medium_changed_fraction": 0.31643132220795894,
+        "g4b_response": 0.020691356389641473,
+        "g4b_relative_error": 0.4455207683913319,
+        "margins": {
+          "b1_fraction": -0.22935382190701337,
+          "shaft_ssim": 0.04138180523674906,
+          "g4a_fraction": -0.24479768786127165,
+          "medium_changed_fraction": 0.21643132220795894,
+          "g4b_relative_error": -0.2455207683913319
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "angular_environment": false,
+        "surface_environment": false,
+        "pixel_source": false,
+        "tent": false,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "unchanged captured/model residual; not a reference-domain higher-order solution"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.0019532225200347745,
+          0.0019269992141875754,
+          0.0017734935231675487
+        ],
+        "shadow": [
+          -0.00023765233936165472,
+          -0.00020356675369447448,
+          -0.00016767249420675148
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.685973207249803,
+          0.7167060677698975
+        ],
+        "shaft_ssim": [
+          0.9877776635744788,
+          0.9912588016694569
+        ],
+        "g4a_fraction": [
+          0.6172125883108542,
+          0.6576750160565189
+        ],
+        "medium_changed_fraction": [
+          0.31835686777920413,
+          0.3299101412066752
+        ],
+        "g4b_response": [
+          0.01900397135237058,
+          0.021669709337749803
+        ],
+        "g4b_relative_error": [
+          0.41930323191408303,
+          0.4907386816723733
+        ]
+      }
+    },
+    "factorial-angular0-surface0-pixel0-tent1": {
+      "metrics": {
+        "b1_fraction": 0.7139479905437353,
+        "shaft_ssim": 0.9916001251541653,
+        "g4a_fraction": 0.7122671804752729,
+        "medium_changed_fraction": 0.32220795892169446,
+        "g4b_response": 0.019629758417801648,
+        "g4b_relative_error": 0.4739690738875221,
+        "margins": {
+          "b1_fraction": -0.2360520094562647,
+          "shaft_ssim": 0.041600125154165335,
+          "g4a_fraction": -0.23773281952472702,
+          "medium_changed_fraction": 0.22220795892169445,
+          "g4b_relative_error": -0.27396907388752206
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "angular_environment": false,
+        "surface_environment": false,
+        "pixel_source": false,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "unchanged captured/model residual; not a reference-domain higher-order solution"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.000174993804572322,
+          0.0001680363535079953,
+          0.00015396286790450976
+        ],
+        "shadow": [
+          0.0001456554669739763,
+          0.00013445709095567964,
+          0.0001204125749666553
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6757289204097715,
+          0.7115839243498818
+        ],
+        "shaft_ssim": [
+          0.9873843841661315,
+          0.9913364409461435
+        ],
+        "g4a_fraction": [
+          0.6127167630057804,
+          0.6608863198458574
+        ],
+        "medium_changed_fraction": [
+          0.31514762516046213,
+          0.33504492939666236
+        ],
+        "g4b_response": [
+          0.018211361186266754,
+          0.020985977884035306
+        ],
+        "g4b_relative_error": [
+          0.43762561174956277,
+          0.5119787525304869
+        ]
+      }
+    },
+    "factorial-angular0-surface0-pixel1-tent0": {
+      "metrics": {
+        "b1_fraction": 0.7226162332545312,
+        "shaft_ssim": 0.9907983530092244,
+        "g4a_fraction": 0.7186897880539499,
+        "medium_changed_fraction": 0.3247753530166881,
+        "g4b_response": 0.020136310478500744,
+        "g4b_relative_error": 0.46039468117507365,
+        "margins": {
+          "b1_fraction": -0.22738376674546878,
+          "shaft_ssim": 0.04079835300922441,
+          "g4a_fraction": -0.23131021194605006,
+          "medium_changed_fraction": 0.22477535301668808,
+          "g4b_relative_error": -0.26039468117507364
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "angular_environment": false,
+        "surface_environment": false,
+        "pixel_source": true,
+        "tent": false,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "unchanged captured/model residual; not a reference-domain higher-order solution"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.002852656692393356,
+          0.002807829978604742,
+          0.0025794347297205906
+        ],
+        "shadow": [
+          0.002335373255253819,
+          0.0021969390253325054,
+          0.0019604928296733273
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6851851851851852,
+          0.7194641449960599
+        ],
+        "shaft_ssim": [
+          0.9871212815251292,
+          0.990898447276087
+        ],
+        "g4a_fraction": [
+          0.6294155427103404,
+          0.6917148362235067
+        ],
+        "medium_changed_fraction": [
+          0.3215661103979461,
+          0.3267008985879333
+        ],
+        "g4b_response": [
+          0.018644499674290188,
+          0.021395427889269673
+        ],
+        "g4b_relative_error": [
+          0.42665332361101554,
+          0.500371669287766
+        ]
+      }
+    },
+    "factorial-angular0-surface0-pixel1-tent1": {
+      "metrics": {
+        "b1_fraction": 0.7226162332545312,
+        "shaft_ssim": 0.9907983530092244,
+        "g4a_fraction": 0.7186897880539499,
+        "medium_changed_fraction": 0.3247753530166881,
+        "g4b_response": 0.020136310478500744,
+        "g4b_relative_error": 0.46039468117507365,
+        "margins": {
+          "b1_fraction": -0.22738376674546878,
+          "shaft_ssim": 0.04079835300922441,
+          "g4a_fraction": -0.23131021194605006,
+          "medium_changed_fraction": 0.22477535301668808,
+          "g4b_relative_error": -0.26039468117507364
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "angular_environment": false,
+        "surface_environment": false,
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "unchanged captured/model residual; not a reference-domain higher-order solution"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.002852656692393356,
+          0.002807829978604742,
+          0.0025794347297205906
+        ],
+        "shadow": [
+          0.002335373255253819,
+          0.0021969390253325054,
+          0.0019604928296733273
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6851851851851852,
+          0.7194641449960599
+        ],
+        "shaft_ssim": [
+          0.9871212815251292,
+          0.990898447276087
+        ],
+        "g4a_fraction": [
+          0.6294155427103404,
+          0.6917148362235067
+        ],
+        "medium_changed_fraction": [
+          0.3215661103979461,
+          0.3267008985879333
+        ],
+        "g4b_response": [
+          0.018644499674290188,
+          0.021395427889269673
+        ],
+        "g4b_relative_error": [
+          0.42665332361101554,
+          0.500371669287766
+        ]
+      }
+    },
+    "factorial-angular0-surface1-pixel0-tent0": {
+      "metrics": {
+        "b1_fraction": 0.7206461780929866,
+        "shaft_ssim": 0.9723719872737743,
+        "g4a_fraction": 0.057803468208092484,
+        "medium_changed_fraction": 0.5776636713735558,
+        "g4b_response": 0.02049846862199848,
+        "g4b_relative_error": 0.4506897026639512,
+        "margins": {
+          "b1_fraction": -0.22935382190701337,
+          "shaft_ssim": 0.02237198727377432,
+          "g4a_fraction": -0.8921965317919075,
+          "medium_changed_fraction": 0.4776636713735558,
+          "g4b_relative_error": -0.2506897026639512
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "angular_environment": false,
+        "surface_environment": true,
+        "pixel_source": false,
+        "tent": false,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "unchanged captured/model residual; not a reference-domain higher-order solution"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.0019532225200347745,
+          0.0019269992141875754,
+          0.0017734935231675487
+        ],
+        "shadow": [
+          -0.04173768590004213,
+          -0.04112677523706254,
+          -0.04067313504956504
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.685973207249803,
+          0.7167060677698975
+        ],
+        "shaft_ssim": [
+          0.9707840051113953,
+          0.9707852673139068
+        ],
+        "g4a_fraction": [
+          0.05523442517662171,
+          0.056518946692357096
+        ],
+        "medium_changed_fraction": [
+          0.5750962772785623,
+          0.5885750962772786
+        ],
+        "g4b_response": [
+          0.019035256125595732,
+          0.021636033386859543
+        ],
+        "g4b_relative_error": [
+          0.4202056674539141,
+          0.48990032401750155
+        ]
+      }
+    },
+    "factorial-angular0-surface1-pixel0-tent1": {
+      "metrics": {
+        "b1_fraction": 0.7139479905437353,
+        "shaft_ssim": 0.9723161657868641,
+        "g4a_fraction": 0.05908798972382787,
+        "medium_changed_fraction": 0.5725288831835686,
+        "g4b_response": 0.019632167779904806,
+        "g4b_relative_error": 0.4739045087027913,
+        "margins": {
+          "b1_fraction": -0.2360520094562647,
+          "shaft_ssim": 0.02231616578686413,
+          "g4a_fraction": -0.8909120102761721,
+          "medium_changed_fraction": 0.47252888318356867,
+          "g4b_relative_error": -0.2739045087027913
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "angular_environment": false,
+        "surface_environment": true,
+        "pixel_source": false,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "unchanged captured/model residual; not a reference-domain higher-order solution"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.000174993804572322,
+          0.0001680363535079953,
+          0.00015396286790450976
+        ],
+        "shadow": [
+          -0.041354378093706574,
+          -0.0407887513924123,
+          -0.04038504998039165
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6757289204097715,
+          0.7115839243498818
+        ],
+        "shaft_ssim": [
+          0.9697839332532391,
+          0.9705111566756864
+        ],
+        "g4a_fraction": [
+          0.05973025048169557,
+          0.05973025048169557
+        ],
+        "medium_changed_fraction": [
+          0.5718870346598203,
+          0.582798459563543
+        ],
+        "g4b_response": [
+          0.018235858506721964,
+          0.020909548099185174
+        ],
+        "g4b_relative_error": [
+          0.4396737485453184,
+          0.5113222824969769
+        ]
+      }
+    },
+    "factorial-angular0-surface1-pixel1-tent0": {
+      "metrics": {
+        "b1_fraction": 0.7226162332545312,
+        "shaft_ssim": 0.9714102016377314,
+        "g4a_fraction": 0.08477842003853564,
+        "medium_changed_fraction": 0.5590500641848524,
+        "g4b_response": 0.019999415333294107,
+        "g4b_relative_error": 0.4640631460884291,
+        "margins": {
+          "b1_fraction": -0.22738376674546878,
+          "shaft_ssim": 0.02141020163773144,
+          "g4a_fraction": -0.8652215799614643,
+          "medium_changed_fraction": 0.4590500641848524,
+          "g4b_relative_error": -0.26406314608842907
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "angular_environment": false,
+        "surface_environment": true,
+        "pixel_source": true,
+        "tent": false,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "unchanged captured/model residual; not a reference-domain higher-order solution"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.002852656692393356,
+          0.002807829978604742,
+          0.0025794347297205906
+        ],
+        "shadow": [
+          -0.03916466030542665,
+          -0.03872626945803552,
+          -0.03854496972568492
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6851851851851852,
+          0.7194641449960599
+        ],
+        "shaft_ssim": [
+          0.9699412505204407,
+          0.9703687034955162
+        ],
+        "g4a_fraction": [
+          0.07578676942838793,
+          0.08606294155427104
+        ],
+        "medium_changed_fraction": [
+          0.5590500641848524,
+          0.5693196405648266
+        ],
+        "g4b_response": [
+          0.01869232861139134,
+          0.021339658739239698
+        ],
+        "g4b_relative_error": [
+          0.42814780444029404,
+          0.49908996731554617
+        ]
+      }
+    },
+    "factorial-angular0-surface1-pixel1-tent1": {
+      "metrics": {
+        "b1_fraction": 0.7226162332545312,
+        "shaft_ssim": 0.9714102016377314,
+        "g4a_fraction": 0.08477842003853564,
+        "medium_changed_fraction": 0.5590500641848524,
+        "g4b_response": 0.019999415333294107,
+        "g4b_relative_error": 0.4640631460884291,
+        "margins": {
+          "b1_fraction": -0.22738376674546878,
+          "shaft_ssim": 0.02141020163773144,
+          "g4a_fraction": -0.8652215799614643,
+          "medium_changed_fraction": 0.4590500641848524,
+          "g4b_relative_error": -0.26406314608842907
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "angular_environment": false,
+        "surface_environment": true,
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "unchanged captured/model residual; not a reference-domain higher-order solution"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.002852656692393356,
+          0.002807829978604742,
+          0.0025794347297205906
+        ],
+        "shadow": [
+          -0.03916466030542665,
+          -0.03872626945803552,
+          -0.03854496972568492
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6851851851851852,
+          0.7194641449960599
+        ],
+        "shaft_ssim": [
+          0.9699412505204407,
+          0.9703687034955162
+        ],
+        "g4a_fraction": [
+          0.07578676942838793,
+          0.08606294155427104
+        ],
+        "medium_changed_fraction": [
+          0.5590500641848524,
+          0.5693196405648266
+        ],
+        "g4b_response": [
+          0.01869232861139134,
+          0.021339658739239698
+        ],
+        "g4b_relative_error": [
+          0.42814780444029404,
+          0.49908996731554617
+        ]
+      }
+    },
+    "factorial-angular1-surface0-pixel0-tent0": {
+      "metrics": {
+        "b1_fraction": 0.7375886524822695,
+        "shaft_ssim": 0.9907242876485111,
+        "g4a_fraction": 0.6525369299935774,
+        "medium_changed_fraction": 0.28498074454428757,
+        "g4b_response": 0.023902397584424695,
+        "g4b_relative_error": 0.3594724871274456,
+        "margins": {
+          "b1_fraction": -0.2124113475177305,
+          "shaft_ssim": 0.040724287648511104,
+          "g4a_fraction": -0.2974630700064226,
+          "medium_changed_fraction": 0.18498074454428756,
+          "g4b_relative_error": -0.1594724871274456
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "angular_environment": true,
+        "surface_environment": false,
+        "pixel_source": false,
+        "tent": false,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "unchanged captured/model residual; not a reference-domain higher-order solution"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.002346966066792774,
+          0.0023580643125762396,
+          0.0022091398977289387
+        ],
+        "shadow": [
+          -0.0038972496652513746,
+          -0.003680540341887424,
+          -0.0033921434267837054
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6910953506698188,
+          0.7316784869976359
+        ],
+        "shaft_ssim": [
+          0.9868488815204112,
+          0.9908817808371718
+        ],
+        "g4a_fraction": [
+          0.5684007707129094,
+          0.6114322414900449
+        ],
+        "medium_changed_fraction": [
+          0.2862644415917843,
+          0.29781771501925547
+        ],
+        "g4b_response": [
+          0.02241648995282846,
+          0.025153605611526637
+        ],
+        "g4b_relative_error": [
+          0.3259430822694152,
+          0.39929128422773624
+        ]
+      }
+    },
+    "factorial-angular1-surface0-pixel0-tent1": {
+      "metrics": {
+        "b1_fraction": 0.7167060677698975,
+        "shaft_ssim": 0.9904614863957754,
+        "g4a_fraction": 0.682723185613359,
+        "medium_changed_fraction": 0.3170731707317073,
+        "g4b_response": 0.02342273900318903,
+        "g4b_relative_error": 0.3723261984332545,
+        "margins": {
+          "b1_fraction": -0.23329393223010242,
+          "shaft_ssim": 0.0404614863957754,
+          "g4a_fraction": -0.26727681438664097,
+          "medium_changed_fraction": 0.21707317073170732,
+          "g4b_relative_error": -0.17232619843325447
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "angular_environment": true,
+        "surface_environment": false,
+        "pixel_source": false,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "unchanged captured/model residual; not a reference-domain higher-order solution"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          -0.00037377684604922003,
+          -0.0003262652704469153,
+          -0.0002880404585763364
+        ],
+        "shadow": [
+          -0.0014994713633453977,
+          -0.0014524204606158556,
+          -0.0013664429835797555
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.669424743892829,
+          0.7171000788022065
+        ],
+        "shaft_ssim": [
+          0.9862643653389581,
+          0.9908290989942801
+        ],
+        "g4a_fraction": [
+          0.6011560693641619,
+          0.6409762363519589
+        ],
+        "medium_changed_fraction": [
+          0.31450577663671375,
+          0.3209242618741977
+        ],
+        "g4b_response": [
+          0.022162906239997955,
+          0.02485257173163733
+        ],
+        "g4b_relative_error": [
+          0.3340100756199701,
+          0.40608672574403637
+        ]
+      }
+    },
+    "factorial-angular1-surface0-pixel1-tent0": {
+      "metrics": {
+        "b1_fraction": 0.7379826635145784,
+        "shaft_ssim": 0.9826791544631673,
+        "g4a_fraction": 0.6544637122671805,
+        "medium_changed_fraction": 0.279204107830552,
+        "g4b_response": 0.023109328980630492,
+        "g4b_relative_error": 0.3807248430273668,
+        "margins": {
+          "b1_fraction": -0.21201733648542154,
+          "shaft_ssim": 0.03267915446316738,
+          "g4a_fraction": -0.2955362877328195,
+          "medium_changed_fraction": 0.179204107830552,
+          "g4b_relative_error": -0.1807248430273668
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "angular_environment": true,
+        "surface_environment": false,
+        "pixel_source": true,
+        "tent": false,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "unchanged captured/model residual; not a reference-domain higher-order solution"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.0035837974943169607,
+          0.0035774223754405734,
+          0.0033404780851427622
+        ],
+        "shadow": [
+          -0.0029109734551495572,
+          -0.002757309204256458,
+          -0.0026146956079073857
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6879432624113475,
+          0.7407407407407407
+        ],
+        "shaft_ssim": [
+          0.9787548922289101,
+          0.9831437339802841
+        ],
+        "g4a_fraction": [
+          0.5838150289017341,
+          0.6107899807321773
+        ],
+        "medium_changed_fraction": [
+          0.27150192554557123,
+          0.28369704749679076
+        ],
+        "g4b_response": [
+          0.02184269453568065,
+          0.02449153793077278
+        ],
+        "g4b_relative_error": [
+          0.34368492441762316,
+          0.4146676392626324
+        ]
+      }
+    },
+    "factorial-angular1-surface0-pixel1-tent1": {
+      "metrics": {
+        "b1_fraction": 0.7379826635145784,
+        "shaft_ssim": 0.9826791544631673,
+        "g4a_fraction": 0.6544637122671805,
+        "medium_changed_fraction": 0.279204107830552,
+        "g4b_response": 0.023109328980630492,
+        "g4b_relative_error": 0.3807248430273668,
+        "margins": {
+          "b1_fraction": -0.21201733648542154,
+          "shaft_ssim": 0.03267915446316738,
+          "g4a_fraction": -0.2955362877328195,
+          "medium_changed_fraction": 0.179204107830552,
+          "g4b_relative_error": -0.1807248430273668
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "angular_environment": true,
+        "surface_environment": false,
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "unchanged captured/model residual; not a reference-domain higher-order solution"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.0035837974943169607,
+          0.0035774223754405734,
+          0.0033404780851427622
+        ],
+        "shadow": [
+          -0.0029109734551495572,
+          -0.002757309204256458,
+          -0.0026146956079073857
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6879432624113475,
+          0.7407407407407407
+        ],
+        "shaft_ssim": [
+          0.9787548922289101,
+          0.9831437339802841
+        ],
+        "g4a_fraction": [
+          0.5838150289017341,
+          0.6107899807321773
+        ],
+        "medium_changed_fraction": [
+          0.27150192554557123,
+          0.28369704749679076
+        ],
+        "g4b_response": [
+          0.02184269453568065,
+          0.02449153793077278
+        ],
+        "g4b_relative_error": [
+          0.34368492441762316,
+          0.4146676392626324
+        ]
+      }
+    },
+    "factorial-angular1-surface1-pixel0-tent0": {
+      "metrics": {
+        "b1_fraction": 0.7375886524822695,
+        "shaft_ssim": 0.9719113772302599,
+        "g4a_fraction": 0.046242774566473986,
+        "medium_changed_fraction": 0.6161745827984596,
+        "g4b_response": 0.023910285448412248,
+        "g4b_relative_error": 0.35926111109774067,
+        "margins": {
+          "b1_fraction": -0.2124113475177305,
+          "shaft_ssim": 0.021911377230259932,
+          "g4a_fraction": -0.903757225433526,
+          "medium_changed_fraction": 0.5161745827984596,
+          "g4b_relative_error": -0.15926111109774066
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "angular_environment": true,
+        "surface_environment": true,
+        "pixel_source": false,
+        "tent": false,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "unchanged captured/model residual; not a reference-domain higher-order solution"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.002346966066792774,
+          0.0023580643125762396,
+          0.0022091398977289387
+        ],
+        "shadow": [
+          -0.04539728322593199,
+          -0.04460374882525546,
+          -0.04389760598214202
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6910953506698188,
+          0.7316784869976359
+        ],
+        "shaft_ssim": [
+          0.9700220228726834,
+          0.9702002972951321
+        ],
+        "g4a_fraction": [
+          0.0449582530507386,
+          0.0449582530507386
+        ],
+        "medium_changed_fraction": [
+          0.6116816431322208,
+          0.6245186136071887
+        ],
+        "g4b_response": [
+          0.022499399503356443,
+          0.025174111838996864
+        ],
+        "g4b_relative_error": [
+          0.32539356405336556,
+          0.3970695050942624
+        ]
+      }
+    },
+    "factorial-angular1-surface1-pixel0-tent1": {
+      "metrics": {
+        "b1_fraction": 0.7167060677698975,
+        "shaft_ssim": 0.9727963527933895,
+        "g4a_fraction": 0.05330764290301863,
+        "medium_changed_fraction": 0.5911424903722722,
+        "g4b_response": 0.023775036861012344,
+        "g4b_relative_error": 0.3628854521706729,
+        "margins": {
+          "b1_fraction": -0.23329393223010242,
+          "shaft_ssim": 0.02279635279338954,
+          "g4a_fraction": -0.8966923570969814,
+          "medium_changed_fraction": 0.4911424903722722,
+          "g4b_relative_error": -0.1628854521706729
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "angular_environment": true,
+        "surface_environment": true,
+        "pixel_source": false,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "unchanged captured/model residual; not a reference-domain higher-order solution"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          -0.00037377684604922003,
+          -0.0003262652704469153,
+          -0.0002880404585763364
+        ],
+        "shadow": [
+          -0.042999504924025926,
+          -0.0423756289439839,
+          -0.041871905538938096
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.669424743892829,
+          0.7171000788022065
+        ],
+        "shaft_ssim": [
+          0.9709242692609777,
+          0.9710191694221688
+        ],
+        "g4a_fraction": [
+          0.05266538214515093,
+          0.054592164418754016
+        ],
+        "medium_changed_fraction": [
+          0.5866495507060334,
+          0.5982028241335045
+        ],
+        "g4b_response": [
+          0.022305650287743686,
+          0.02488639961677339
+        ],
+        "g4b_relative_error": [
+          0.3331035686030315,
+          0.4022615241274624
+        ]
+      }
+    },
+    "factorial-angular1-surface1-pixel1-tent0": {
+      "metrics": {
+        "b1_fraction": 0.7379826635145784,
+        "shaft_ssim": 0.9613084158460962,
+        "g4a_fraction": 0.057803468208092484,
+        "medium_changed_fraction": 0.610397946084724,
+        "g4b_response": 0.02313347341617293,
+        "g4b_relative_error": 0.3800778294717983,
+        "margins": {
+          "b1_fraction": -0.21201733648542154,
+          "shaft_ssim": 0.01130841584609621,
+          "g4a_fraction": -0.8921965317919075,
+          "medium_changed_fraction": 0.510397946084724,
+          "g4b_relative_error": -0.1800778294717983
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "angular_environment": true,
+        "surface_environment": true,
+        "pixel_source": true,
+        "tent": false,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "unchanged captured/model residual; not a reference-domain higher-order solution"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.0035837974943169607,
+          0.0035774223754405734,
+          0.0033404780851427622
+        ],
+        "shadow": [
+          -0.044411007015830055,
+          -0.04368051768762449,
+          -0.04312015816326571
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6879432624113475,
+          0.7407407407407407
+        ],
+        "shaft_ssim": [
+          0.9589027172482449,
+          0.9598829876104702
+        ],
+        "g4a_fraction": [
+          0.054592164418754016,
+          0.056518946692357096
+        ],
+        "medium_changed_fraction": [
+          0.6187419768934531,
+          0.6251604621309371
+        ],
+        "g4b_response": [
+          0.0217979268030761,
+          0.024468933940767913
+        ],
+        "g4b_relative_error": [
+          0.3442906576896798,
+          0.41586730822139906
+        ]
+      }
+    },
+    "factorial-angular1-surface1-pixel1-tent1": {
+      "metrics": {
+        "b1_fraction": 0.7379826635145784,
+        "shaft_ssim": 0.9613084158460962,
+        "g4a_fraction": 0.057803468208092484,
+        "medium_changed_fraction": 0.610397946084724,
+        "g4b_response": 0.02313347341617293,
+        "g4b_relative_error": 0.3800778294717983,
+        "margins": {
+          "b1_fraction": -0.21201733648542154,
+          "shaft_ssim": 0.01130841584609621,
+          "g4a_fraction": -0.8921965317919075,
+          "medium_changed_fraction": 0.510397946084724,
+          "g4b_relative_error": -0.1800778294717983
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "angular_environment": true,
+        "surface_environment": true,
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "unchanged captured/model residual; not a reference-domain higher-order solution"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.0035837974943169607,
+          0.0035774223754405734,
+          0.0033404780851427622
+        ],
+        "shadow": [
+          -0.044411007015830055,
+          -0.04368051768762449,
+          -0.04312015816326571
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6879432624113475,
+          0.7407407407407407
+        ],
+        "shaft_ssim": [
+          0.9589027172482449,
+          0.9598829876104702
+        ],
+        "g4a_fraction": [
+          0.054592164418754016,
+          0.056518946692357096
+        ],
+        "medium_changed_fraction": [
+          0.6187419768934531,
+          0.6251604621309371
+        ],
+        "g4b_response": [
+          0.0217979268030761,
+          0.024468933940767913
+        ],
+        "g4b_relative_error": [
+          0.3442906576896798,
+          0.41586730822139906
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-environment-quadrature-current-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.6256895193065406,
+        "shaft_ssim": 0.8942143055780587,
+        "g4a_fraction": 0.6788696210661529,
+        "medium_changed_fraction": 0.28241335044929394,
+        "g4b_response": 0.02878163830651633,
+        "g4b_relative_error": 0.22872041870463827,
+        "margins": {
+          "b1_fraction": -0.32431048069345936,
+          "shaft_ssim": -0.055785694421941256,
+          "g4a_fraction": -0.27113037893384706,
+          "medium_changed_fraction": 0.18241335044929394,
+          "g4b_relative_error": -0.028720418704638262
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": true,
+        "surface": false,
+        "order": "current",
+        "pixel_source": true,
+        "tent": false,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.0036579618353835192,
+          0.003781487046999971,
+          0.0035363070306987697
+        ],
+        "shadow": [
+          0.0018557893807856865,
+          0.0017406874895000471,
+          0.001445132179501493
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.586682427107959,
+          0.6304176516942475
+        ],
+        "shaft_ssim": [
+          0.8872668295647818,
+          0.8972264762927774
+        ],
+        "g4a_fraction": [
+          0.6082209377007065,
+          0.6499678869621066
+        ],
+        "medium_changed_fraction": [
+          0.2753530166880616,
+          0.2862644415917843
+        ],
+        "g4b_response": [
+          0.027399984415113543,
+          0.030162559374498545
+        ],
+        "g4b_relative_error": [
+          0.19171501227945484,
+          0.26574546305782865
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-environment-quadrature-current-surface-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.6256895193065406,
+        "shaft_ssim": 0.8961470614666593,
+        "g4a_fraction": 0.6718047527296083,
+        "medium_changed_fraction": 0.26765083440308085,
+        "g4b_response": 0.028795963412939607,
+        "g4b_relative_error": 0.22833653985915733,
+        "margins": {
+          "b1_fraction": -0.32431048069345936,
+          "shaft_ssim": -0.05385293853334061,
+          "g4a_fraction": -0.2781952472703917,
+          "medium_changed_fraction": 0.16765083440308085,
+          "g4b_relative_error": -0.028336539859157323
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": true,
+        "surface": true,
+        "order": "current",
+        "pixel_source": true,
+        "tent": false,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.0036579618353835192,
+          0.003781487046999971,
+          0.0035363070306987697
+        ],
+        "shadow": [
+          -0.00044699898562097757,
+          -0.003952418657168895,
+          -0.00880194152271423
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.586682427107959,
+          0.6304176516942475
+        ],
+        "shaft_ssim": [
+          0.8902878543359286,
+          0.897980670100054
+        ],
+        "g4a_fraction": [
+          0.6538214515093128,
+          0.6692357096981374
+        ],
+        "medium_changed_fraction": [
+          0.2663671373555841,
+          0.27471116816431324
+        ],
+        "g4b_response": [
+          0.02749442651120974,
+          0.03012104845992867
+        ],
+        "g4b_relative_error": [
+          0.19282740624631922,
+          0.2632146390804722
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-environment-quadrature-converged-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.8412135539795115,
+        "shaft_ssim": 0.887054047543043,
+        "g4a_fraction": 0.7925497752087347,
+        "medium_changed_fraction": 0.32220795892169446,
+        "g4b_response": 0.03158144486349508,
+        "g4b_relative_error": 0.1536922494956023,
+        "margins": {
+          "b1_fraction": -0.10878644602048848,
+          "shaft_ssim": -0.062945952456957,
+          "g4a_fraction": -0.15745022479126525,
+          "medium_changed_fraction": 0.22220795892169445,
+          "g4b_relative_error": 0.0463077505043977
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": true,
+        "surface": false,
+        "order": "converged",
+        "pixel_source": true,
+        "tent": false,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.041418081263306386,
+          0.03280511580520211,
+          0.024282693988093
+        ],
+        "shadow": [
+          0.013862006227792389,
+          0.010902312980694186,
+          0.007960001780663393
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.8230890464933018,
+          0.847123719464145
+        ],
+        "shaft_ssim": [
+          0.8800555468799139,
+          0.889886154342216
+        ],
+        "g4a_fraction": [
+          0.7045600513808606,
+          0.7867694283879255
+        ],
+        "medium_changed_fraction": [
+          0.3209242618741977,
+          0.32926829268292684
+        ],
+        "g4b_response": [
+          0.03035596196105327,
+          0.03292554827115568
+        ],
+        "g4b_relative_error": [
+          0.11767346896484202,
+          0.1865322820821403
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-environment-quadrature-converged-surface-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.8412135539795115,
+        "shaft_ssim": 0.8889861577127695,
+        "g4a_fraction": 0.7976878612716763,
+        "medium_changed_fraction": 0.32028241335044927,
+        "g4b_response": 0.03167677253184961,
+        "g4b_relative_error": 0.15113769428400065,
+        "margins": {
+          "b1_fraction": -0.10878644602048848,
+          "shaft_ssim": -0.0610138422872305,
+          "g4a_fraction": -0.1523121387283236,
+          "medium_changed_fraction": 0.22028241335044926,
+          "g4b_relative_error": 0.048862305715999366
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": true,
+        "surface": true,
+        "order": "converged",
+        "pixel_source": true,
+        "tent": false,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.041418081263306386,
+          0.03280511580520211,
+          0.024282693988093
+        ],
+        "shadow": [
+          0.011559217861385728,
+          0.005209206834025229,
+          -0.0022870719215523274
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.8230890464933018,
+          0.847123719464145
+        ],
+        "shaft_ssim": [
+          0.8833525972784507,
+          0.8907895609907714
+        ],
+        "g4a_fraction": [
+          0.7771355170199101,
+          0.781631342324984
+        ],
+        "medium_changed_fraction": [
+          0.3209242618741977,
+          0.32349165596919127
+        ],
+        "g4b_response": [
+          0.030330310349418736,
+          0.03296328865157331
+        ],
+        "g4b_relative_error": [
+          0.11666211636230978,
+          0.18721968437906075
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-physical-boundary-current-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.6193853427895981,
+        "shaft_ssim": 0.9904173122189661,
+        "g4a_fraction": 0.6249197174052665,
+        "medium_changed_fraction": 0.25994865211810014,
+        "g4b_response": 0.021544371624237158,
+        "g4b_relative_error": 0.42266198509446273,
+        "margins": {
+          "b1_fraction": -0.33061465721040184,
+          "shaft_ssim": 0.04041731221896616,
+          "g4a_fraction": -0.3250802825947334,
+          "medium_changed_fraction": 0.15994865211810014,
+          "g4b_relative_error": -0.22266198509446272
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": false,
+        "surface": false,
+        "order": "current",
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          -0.004999804102050149,
+          -0.004302195088538515,
+          -0.003738812660500858
+        ],
+        "shadow": [
+          -0.0043032547455225684,
+          -0.0037228157481817847,
+          -0.0032541581615904407
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.5764381402679275,
+          0.6209613869188337
+        ],
+        "shaft_ssim": [
+          0.9860042486502989,
+          0.9910808150004597
+        ],
+        "g4a_fraction": [
+          0.5619781631342325,
+          0.5915221579961464
+        ],
+        "medium_changed_fraction": [
+          0.25417201540436457,
+          0.27278562259306804
+        ],
+        "g4b_response": [
+          0.02007326322392146,
+          0.022806684280270516
+        ],
+        "g4b_relative_error": [
+          0.38883500254257597,
+          0.4620841979286326
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-physical-boundary-current-surface-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.6193853427895981,
+        "shaft_ssim": 0.9905100204089453,
+        "g4a_fraction": 0.6345536287732819,
+        "medium_changed_fraction": 0.25994865211810014,
+        "g4b_response": 0.021382122049450066,
+        "g4b_relative_error": 0.427009888531176,
+        "margins": {
+          "b1_fraction": -0.33061465721040184,
+          "shaft_ssim": 0.04051002040894536,
+          "g4a_fraction": -0.31544637122671804,
+          "medium_changed_fraction": 0.15994865211810014,
+          "g4b_relative_error": -0.22700988853117599
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": false,
+        "surface": true,
+        "order": "current",
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          -0.004999804102050149,
+          -0.004302195088538515,
+          -0.003738812660500858
+        ],
+        "shadow": [
+          -0.0066060431119292625,
+          -0.009415921894850715,
+          -0.013501231863806147
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.5764381402679275,
+          0.6209613869188337
+        ],
+        "shaft_ssim": [
+          0.9870097868166492,
+          0.9902818618314367
+        ],
+        "g4a_fraction": [
+          0.5992292870905588,
+          0.6229929351316634
+        ],
+        "medium_changed_fraction": [
+          0.25994865211810014,
+          0.2625160462130937
+        ],
+        "g4b_response": [
+          0.020092401965976666,
+          0.02279704068062547
+        ],
+        "g4b_relative_error": [
+          0.389093428119925,
+          0.4615713250754039
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-physical-boundary-converged-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.9554767533490938,
+        "shaft_ssim": 0.9905970285643234,
+        "g4a_fraction": 0.8182402055234426,
+        "medium_changed_fraction": 0.3209242618741977,
+        "g4b_response": 0.02284363783064801,
+        "g4b_relative_error": 0.3878447351172475,
+        "margins": {
+          "b1_fraction": 0.00547675334909381,
+          "shaft_ssim": 0.040597028564323456,
+          "g4a_fraction": -0.1317597944765574,
+          "medium_changed_fraction": 0.2209242618741977,
+          "g4b_relative_error": -0.18784473511724747
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": false,
+        "surface": false,
+        "order": "converged",
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.03264515167329109,
+          0.024639130719141145,
+          0.016936791428044193
+        ],
+        "shadow": [
+          0.007973007953567455,
+          0.00564475068550449,
+          0.0034034451836184323
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.9401103230890465,
+          0.9582348305752562
+        ],
+        "shaft_ssim": [
+          0.9873993531925844,
+          0.9905216244530411
+        ],
+        "g4a_fraction": [
+          0.7296082209377007,
+          0.7951188182402055
+        ],
+        "medium_changed_fraction": [
+          0.32028241335044927,
+          0.3286264441591784
+        ],
+        "g4b_response": [
+          0.021575532525047715,
+          0.024154571287319022
+        ],
+        "g4b_relative_error": [
+          0.35271483053018365,
+          0.421826946926239
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-physical-boundary-converged-surface-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.9554767533490938,
+        "shaft_ssim": 0.9908241123141747,
+        "g4a_fraction": 0.8387925497752088,
+        "medium_changed_fraction": 0.3215661103979461,
+        "g4b_response": 0.022865944329912614,
+        "g4b_relative_error": 0.3872469738908105,
+        "margins": {
+          "b1_fraction": 0.00547675334909381,
+          "shaft_ssim": 0.04082411231417471,
+          "g4a_fraction": -0.11120745022479117,
+          "medium_changed_fraction": 0.22156611039794608,
+          "g4b_relative_error": -0.18724697389081046
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": false,
+        "surface": true,
+        "order": "converged",
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.03264515167329109,
+          0.024639130719141145,
+          0.016936791428044193
+        ],
+        "shadow": [
+          0.005670219587160768,
+          -4.83554611644675e-05,
+          -0.006843628518597288
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.9401103230890465,
+          0.9582348305752562
+        ],
+        "shaft_ssim": [
+          0.9881284593965282,
+          0.9896463127674702
+        ],
+        "g4a_fraction": [
+          0.8118175979447656,
+          0.8175979447655748
+        ],
+        "medium_changed_fraction": [
+          0.31835686777920413,
+          0.3215661103979461
+        ],
+        "g4b_response": [
+          0.021551212793129305,
+          0.024159554609178572
+        ],
+        "g4b_relative_error": [
+          0.3525812893343573,
+          0.42247865800854384
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-current-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.7206461780929866,
+        "shaft_ssim": 0.9908217406901785,
+        "g4a_fraction": 0.7154784842646115,
+        "medium_changed_fraction": 0.32220795892169446,
+        "g4b_response": 0.020170636814174657,
+        "g4b_relative_error": 0.4594748168670024,
+        "margins": {
+          "b1_fraction": -0.22935382190701337,
+          "shaft_ssim": 0.04082174069017852,
+          "g4a_fraction": -0.23452151573538849,
+          "medium_changed_fraction": 0.22220795892169445,
+          "g4b_relative_error": -0.2594748168670024
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": false,
+        "surface": false,
+        "order": "current",
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.002677662887821042,
+          0.002639793625096739,
+          0.002425471861816078
+        ],
+        "shadow": [
+          0.002189717788279845,
+          0.0020624819343768265,
+          0.0018400802547066707
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6836091410559496,
+          0.7163120567375887
+        ],
+        "shaft_ssim": [
+          0.9871364337893377,
+          0.9909032719553533
+        ],
+        "g4a_fraction": [
+          0.6255619781631342,
+          0.6878612716763006
+        ],
+        "medium_changed_fraction": [
+          0.3209242618741977,
+          0.32605905006418484
+        ],
+        "g4b_response": [
+          0.018662964063733946,
+          0.02144240706094138
+        ],
+        "g4b_relative_error": [
+          0.4253943933350293,
+          0.49987686748366467
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-current-surface-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.7206461780929866,
+        "shaft_ssim": 0.9912978802649793,
+        "g4a_fraction": 0.8111753371868978,
+        "medium_changed_fraction": 0.2939666238767651,
+        "g4b_response": 0.019993717831960967,
+        "g4b_relative_error": 0.4642158255987424,
+        "margins": {
+          "b1_fraction": -0.22935382190701337,
+          "shaft_ssim": 0.04129788026497938,
+          "g4a_fraction": -0.13882466281310213,
+          "medium_changed_fraction": 0.19396662387676508,
+          "g4b_relative_error": -0.2642158255987424
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": false,
+        "surface": true,
+        "order": "current",
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.002677662887821042,
+          0.002639793625096739,
+          0.002425471861816078
+        ],
+        "shadow": [
+          -0.00011307057812683246,
+          -0.0036306242122921004,
+          -0.008406993447509042
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6836091410559496,
+          0.7163120567375887
+        ],
+        "shaft_ssim": [
+          0.98842955672509,
+          0.9907068606673675
+        ],
+        "g4a_fraction": [
+          0.7790622992935131,
+          0.7861271676300579
+        ],
+        "medium_changed_fraction": [
+          0.29845956354300385,
+          0.29974326059050066
+        ],
+        "g4b_response": [
+          0.01871931699290337,
+          0.021396685566685766
+        ],
+        "g4b_relative_error": [
+          0.42661962084189037,
+          0.4983667427592941
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-converged-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.9984239558707644,
+        "shaft_ssim": 0.9910503396367313,
+        "g4a_fraction": 0.7957610789980732,
+        "medium_changed_fraction": 0.365211810012837,
+        "g4b_response": 0.021326293671029183,
+        "g4b_relative_error": 0.4285059565407273,
+        "margins": {
+          "b1_fraction": 0.048423955870764424,
+          "shaft_ssim": 0.041050339636731326,
+          "g4a_fraction": -0.1542389210019267,
+          "medium_changed_fraction": 0.265211810012837,
+          "g4b_relative_error": -0.2285059565407273
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": false,
+        "surface": false,
+        "order": "converged",
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.0415321229913711,
+          0.03250525574305811,
+          0.023768948235771106
+        ],
+        "shadow": [
+          0.014930771226380243,
+          0.011772465341933479,
+          0.008752329952740603
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.9933018124507487,
+          0.9976359338061466
+        ],
+        "shaft_ssim": [
+          0.9879629565037265,
+          0.9902578345088462
+        ],
+        "g4a_fraction": [
+          0.7283236994219653,
+          0.7777777777777778
+        ],
+        "medium_changed_fraction": [
+          0.3684210526315789,
+          0.3741976893453145
+        ],
+        "g4b_response": [
+          0.02008617268867244,
+          0.022609973301025835
+        ],
+        "g4b_relative_error": [
+          0.39410638981012036,
+          0.4617382549193484
+        ]
+      }
+    },
+    "archived-source-operator-hammersley-converged-surface-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.9984239558707644,
+        "shaft_ssim": 0.9908722045453295,
+        "g4a_fraction": 0.9332048811817598,
+        "medium_changed_fraction": 0.3523748395378691,
+        "g4b_response": 0.021353582940349475,
+        "g4b_relative_error": 0.4277746689054976,
+        "margins": {
+          "b1_fraction": 0.048423955870764424,
+          "shaft_ssim": 0.04087220454532958,
+          "g4a_fraction": -0.01679511881824014,
+          "medium_changed_fraction": 0.2523748395378691,
+          "g4b_relative_error": -0.22777466890549758
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": false,
+        "surface": true,
+        "order": "converged",
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.0415321229913711,
+          0.03250525574305811,
+          0.023768948235771106
+        ],
+        "shadow": [
+          0.01262798285997353,
+          0.006079359195264519,
+          -0.0014947437494751102
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.9933018124507487,
+          0.9976359338061466
+        ],
+        "shaft_ssim": [
+          0.9888559552968692,
+          0.9894459560256218
+        ],
+        "g4a_fraction": [
+          0.9068721901091843,
+          0.9165061014771998
+        ],
+        "medium_changed_fraction": [
+          0.3472400513478819,
+          0.3491655969191271
+        ],
+        "g4b_response": [
+          0.02003702678977061,
+          0.02261682493890781
+        ],
+        "g4b_relative_error": [
+          0.3939227821801266,
+          0.4630552483414639
+        ]
+      }
+    },
+    "archived-source-operator-shifted-current-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.7844759653270291,
+        "shaft_ssim": 0.9898911071934299,
+        "g4a_fraction": 0.7527296082209377,
+        "medium_changed_fraction": 0.3209242618741977,
+        "g4b_response": 0.022187780352905008,
+        "g4b_relative_error": 0.40542015856729224,
+        "margins": {
+          "b1_fraction": -0.16552403467297083,
+          "shaft_ssim": 0.03989110719342992,
+          "g4a_fraction": -0.19727039177906225,
+          "medium_changed_fraction": 0.2209242618741977,
+          "g4b_relative_error": -0.20542015856729223
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": false,
+        "surface": false,
+        "order": "current",
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.012785837721597868,
+          0.01132299026888709,
+          0.009345383580811535
+        ],
+        "shadow": [
+          0.00644257659609632,
+          0.005756056832585374,
+          0.004833049177723291
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.7565011820330969,
+          0.7848699763593381
+        ],
+        "shaft_ssim": [
+          0.9846352919348251,
+          0.9911962313034207
+        ],
+        "g4a_fraction": [
+          0.6685934489402697,
+          0.7540141297366731
+        ],
+        "medium_changed_fraction": [
+          0.31065468549422337,
+          0.3247753530166881
+        ],
+        "g4b_response": [
+          0.020910926297967355,
+          0.023518043434037364
+        ],
+        "g4b_relative_error": [
+          0.3697722659316549,
+          0.43963681608969013
+        ]
+      }
+    },
+    "archived-source-operator-shifted-current-surface-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.7844759653270291,
+        "shaft_ssim": 0.9903049128195462,
+        "g4a_fraction": 0.8554913294797688,
+        "medium_changed_fraction": 0.29974326059050066,
+        "g4b_response": 0.022137481451902682,
+        "g4b_relative_error": 0.4067680497085657,
+        "margins": {
+          "b1_fraction": -0.16552403467297083,
+          "shaft_ssim": 0.04030491281954629,
+          "g4a_fraction": -0.09450867052023115,
+          "medium_changed_fraction": 0.19974326059050065,
+          "g4b_relative_error": -0.20676804970856572
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": false,
+        "surface": true,
+        "order": "current",
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.012785837721597868,
+          0.01132299026888709,
+          0.009345383580811535
+        ],
+        "shadow": [
+          0.00413978822968964,
+          6.295068591645588e-05,
+          -0.0054140245244924294
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.7565011820330969,
+          0.7848699763593381
+        ],
+        "shaft_ssim": [
+          0.9858672968954826,
+          0.9908225744653286
+        ],
+        "g4a_fraction": [
+          0.8330122029543995,
+          0.8542068079640334
+        ],
+        "medium_changed_fraction": [
+          0.29974326059050066,
+          0.30231065468549423
+        ],
+        "g4b_response": [
+          0.02072783313007528,
+          0.02351818025831036
+        ],
+        "g4b_relative_error": [
+          0.3697685993659486,
+          0.44454327834058527
+        ]
+      }
+    },
+    "archived-source-operator-shifted-converged-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.9507486209613869,
+        "shaft_ssim": 0.9895023578442007,
+        "g4a_fraction": 0.7296082209377007,
+        "medium_changed_fraction": 0.3774069319640565,
+        "g4b_response": 0.023743636501887114,
+        "g4b_relative_error": 0.36372690725327494,
+        "margins": {
+          "b1_fraction": 0.0007486209613869477,
+          "shaft_ssim": 0.03950235784420075,
+          "g4a_fraction": -0.22039177906229923,
+          "medium_changed_fraction": 0.2774069319640565,
+          "g4b_relative_error": -0.16372690725327493
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": false,
+        "surface": false,
+        "order": "converged",
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.055818279492890095,
+          0.04444599545430488,
+          0.03303764810998806
+        ],
+        "shadow": [
+          0.02122516331129359,
+          0.017096432363179485,
+          0.012930357007223163
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.9452324665090622,
+          0.9499605988967691
+        ],
+        "shaft_ssim": [
+          0.9852074556538514,
+          0.9906840978947988
+        ],
+        "g4a_fraction": [
+          0.674373795761079,
+          0.7321772639691715
+        ],
+        "medium_changed_fraction": [
+          0.3774069319640565,
+          0.38125802310654683
+        ],
+        "g4b_response": [
+          0.02249955232674427,
+          0.02495129740260956
+        ],
+        "g4b_relative_error": [
+          0.3313644620048019,
+          0.3970654097902592
+        ]
+      }
+    },
+    "archived-source-operator-shifted-converged-surface-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.9507486209613869,
+        "shaft_ssim": 0.9898095355790716,
+        "g4a_fraction": 0.8721901091843288,
+        "medium_changed_fraction": 0.3594351732991014,
+        "g4b_response": 0.023714774355752075,
+        "g4b_relative_error": 0.36450034425325556,
+        "margins": {
+          "b1_fraction": 0.0007486209613869477,
+          "shaft_ssim": 0.03980953557907163,
+          "g4a_fraction": -0.07780989081567113,
+          "medium_changed_fraction": 0.2594351732991014,
+          "g4b_relative_error": -0.16450034425325555
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": false,
+        "surface": true,
+        "order": "converged",
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.055818279492890095,
+          0.04444599545430488,
+          0.03303764810998806
+        ],
+        "shadow": [
+          0.018922374944886907,
+          0.011403326216510587,
+          0.0026832833050074363
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.9452324665090622,
+          0.9499605988967691
+        ],
+        "shaft_ssim": [
+          0.9859348042177382,
+          0.9902018898917975
+        ],
+        "g4a_fraction": [
+          0.8509955041746949,
+          0.8657675016056519
+        ],
+        "medium_changed_fraction": [
+          0.362002567394095,
+          0.3645699614890886
+        ],
+        "g4b_response": [
+          0.022515893726627843,
+          0.02496905496461943
+        ],
+        "g4b_relative_error": [
+          0.3308886014979767,
+          0.3966274990665625
+        ]
+      }
+    },
+    "review-source-operator-hammersley-physical-boundary-environment-quadrature-current-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.5106382978723404,
+        "shaft_ssim": 0.8968999794057372,
+        "g4a_fraction": 0.5741811175337187,
+        "medium_changed_fraction": 0.21758664955070603,
+        "g4b_response": 0.031171203813190572,
+        "g4b_relative_error": 0.16468573576415133,
+        "margins": {
+          "b1_fraction": -0.43936170212765957,
+          "shaft_ssim": -0.053100020594262776,
+          "g4a_fraction": -0.37581888246628126,
+          "medium_changed_fraction": 0.11758664955070602,
+          "g4b_relative_error": 0.035314264235848686
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": true,
+        "surface": false,
+        "order": "current",
+        "pixel_source": true,
+        "tent": false,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          -0.004718578336151721,
+          -0.00379863482081148,
+          -0.0032020243530080064
+        ],
+        "shadow": [
+          -0.005871234810922311,
+          -0.005156079859514297,
+          -0.004638485346723239
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.4716312056737589,
+          0.5228526398739165
+        ],
+        "shaft_ssim": [
+          0.888726503522992,
+          0.9007397543989587
+        ],
+        "g4a_fraction": [
+          0.5369299935773925,
+          0.5594091201027617
+        ],
+        "medium_changed_fraction": [
+          0.220795892169448,
+          0.2227214377406932
+        ],
+        "g4b_response": [
+          0.02973056518936991,
+          0.032513717363910184
+        ],
+        "g4b_relative_error": [
+          0.12870955962521557,
+          0.20329143092107918
+        ]
+      }
+    },
+    "review-source-operator-hammersley-physical-boundary-environment-quadrature-current-surface-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.5106382978723404,
+        "shaft_ssim": 0.8992752715458242,
+        "g4a_fraction": 0.5491329479768786,
+        "medium_changed_fraction": 0.22593068035943517,
+        "g4b_response": 0.031166396239819025,
+        "g4b_relative_error": 0.16481456731771213,
+        "margins": {
+          "b1_fraction": -0.43936170212765957,
+          "shaft_ssim": -0.05072472845417575,
+          "g4a_fraction": -0.40086705202312134,
+          "medium_changed_fraction": 0.12593068035943517,
+          "g4b_relative_error": 0.03518543268228788
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": true,
+        "surface": true,
+        "order": "current",
+        "pixel_source": true,
+        "tent": false,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          -0.004718578336151721,
+          -0.00379863482081148,
+          -0.0032020243530080064
+        ],
+        "shadow": [
+          -0.008174023177328982,
+          -0.010849186006183233,
+          -0.014885559048938983
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.4716312056737589,
+          0.5228526398739165
+        ],
+        "shaft_ssim": [
+          0.8923318946433233,
+          0.9018062117078763
+        ],
+        "g4a_fraction": [
+          0.5202312138728323,
+          0.5433526011560693
+        ],
+        "medium_changed_fraction": [
+          0.22978177150192555,
+          0.23491655969191272
+        ],
+        "g4b_response": [
+          0.02984309431815266,
+          0.03247557287587706
+        ],
+        "g4b_relative_error": [
+          0.12973174135252377,
+          0.20027591740489958
+        ]
+      }
+    },
+    "review-source-operator-hammersley-physical-boundary-environment-quadrature-converged-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.7758077226162332,
+        "shaft_ssim": 0.8897848252835748,
+        "g4a_fraction": 0.7071290944123314,
+        "medium_changed_fraction": 0.2804878048780488,
+        "g4b_response": 0.03402788898534427,
+        "g4b_relative_error": 0.08813335469373351,
+        "margins": {
+          "b1_fraction": -0.17419227738376675,
+          "shaft_ssim": -0.060215174716425124,
+          "g4a_fraction": -0.24287090558766855,
+          "medium_changed_fraction": 0.1804878048780488,
+          "g4b_relative_error": 0.1118666453062665
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": true,
+        "surface": false,
+        "order": "converged",
+        "pixel_source": true,
+        "tent": false,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.03180475806757739,
+          0.0242790565942578,
+          0.016861419785997422
+        ],
+        "shadow": [
+          0.005659182985929881,
+          0.003642396590865278,
+          0.0016181479938542714
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.7572892040977147,
+          0.7848699763593381
+        ],
+        "shaft_ssim": [
+          0.8817098549745751,
+          0.8938979051094558
+        ],
+        "g4a_fraction": [
+          0.649325626204239,
+          0.7161207450224791
+        ],
+        "medium_changed_fraction": [
+          0.27599486521181,
+          0.2830551989730424
+        ],
+        "g4b_response": [
+          0.03276501716159456,
+          0.035369212006691846
+        ],
+        "g4b_relative_error": [
+          0.052189081915746366,
+          0.12197532161299895
+        ]
+      }
+    },
+    "review-source-operator-hammersley-physical-boundary-environment-quadrature-converged-surface-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.7758077226162332,
+        "shaft_ssim": 0.8922071636473906,
+        "g4a_fraction": 0.666024405908799,
+        "medium_changed_fraction": 0.28369704749679076,
+        "g4b_response": 0.03411783835908245,
+        "g4b_relative_error": 0.0857229250102066,
+        "margins": {
+          "b1_fraction": -0.17419227738376675,
+          "shaft_ssim": -0.057792836352609345,
+          "g4a_fraction": -0.283975594091201,
+          "medium_changed_fraction": 0.18369704749679075,
+          "g4b_relative_error": 0.1142770749897934
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": true,
+        "surface": true,
+        "order": "converged",
+        "pixel_source": true,
+        "tent": false,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.03180475806757739,
+          0.0242790565942578,
+          0.016861419785997422
+        ],
+        "shadow": [
+          0.0033563946195232027,
+          -0.002050709555803647,
+          -0.008628925708361443
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.7572892040977147,
+          0.7848699763593381
+        ],
+        "shaft_ssim": [
+          0.8855217219661228,
+          0.8950794190875092
+        ],
+        "g4a_fraction": [
+          0.6486833654463712,
+          0.659601798330122
+        ],
+        "medium_changed_fraction": [
+          0.28498074454428757,
+          0.2881899871630295
+        ],
+        "g4b_response": [
+          0.03275460580390106,
+          0.035412661516483916
+        ],
+        "g4b_relative_error": [
+          0.05102473819899798,
+          0.12225432128344985
+        ]
+      }
+    },
+    "review-source-operator-tented-hammersley-environment-quadrature-current-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.6430260047281324,
+        "shaft_ssim": 0.8909338643927,
+        "g4a_fraction": 0.6846499678869621,
+        "medium_changed_fraction": 0.2920410783055199,
+        "g4b_response": 0.02742762408951959,
+        "g4b_relative_error": 0.2650047853981344,
+        "margins": {
+          "b1_fraction": -0.30697399527186753,
+          "shaft_ssim": -0.05906613560730001,
+          "g4a_fraction": -0.26535003211303787,
+          "medium_changed_fraction": 0.1920410783055199,
+          "g4b_relative_error": -0.06500478539813437
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": true,
+        "surface": false,
+        "order": "current",
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.006002636390493427,
+          0.006028566667178685,
+          0.005603761931749681
+        ],
+        "shadow": [
+          0.004874655859355586,
+          0.004602720809680217,
+          0.0040098839663568996
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6044129235618597,
+          0.6481481481481481
+        ],
+        "shaft_ssim": [
+          0.8855329646497152,
+          0.8930096827365146
+        ],
+        "g4a_fraction": [
+          0.6120745022479126,
+          0.6563904945407836
+        ],
+        "medium_changed_fraction": [
+          0.2862644415917843,
+          0.2952503209242619
+        ],
+        "g4b_response": [
+          0.026071898570199883,
+          0.028848234053650584
+        ],
+        "g4b_relative_error": [
+          0.2269358107744452,
+          0.3013350109313905
+        ]
+      }
+    },
+    "review-source-operator-tented-hammersley-environment-quadrature-current-surface-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.6430260047281324,
+        "shaft_ssim": 0.8911930115094284,
+        "g4a_fraction": 0.6942838792549775,
+        "medium_changed_fraction": 0.28754813863928114,
+        "g4b_response": 0.027487968481164422,
+        "g4b_relative_error": 0.26338769895483727,
+        "margins": {
+          "b1_fraction": -0.30697399527186753,
+          "shaft_ssim": -0.05880698849057153,
+          "g4a_fraction": -0.2557161207450225,
+          "medium_changed_fraction": 0.18754813863928113,
+          "g4b_relative_error": -0.06338769895483726
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": true,
+        "surface": true,
+        "order": "current",
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.006002636390493427,
+          0.006028566667178685,
+          0.005603761931749681
+        ],
+        "shadow": [
+          0.002571867492948904,
+          -0.0010903853369887135,
+          -0.006237189735858822
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.6044129235618597,
+          0.6481481481481481
+        ],
+        "shaft_ssim": [
+          0.8869163497410067,
+          0.892559014036939
+        ],
+        "g4a_fraction": [
+          0.6750160565189467,
+          0.680796403339756
+        ],
+        "medium_changed_fraction": [
+          0.279204107830552,
+          0.2804878048780488
+        ],
+        "g4b_response": [
+          0.02612471567953068,
+          0.028795390870700318
+        ],
+        "g4b_relative_error": [
+          0.22835188263200057,
+          0.29991963778494013
+        ]
+      }
+    },
+    "review-source-operator-tented-hammersley-environment-quadrature-converged-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.8486997635933806,
+        "shaft_ssim": 0.8840878576943147,
+        "g4a_fraction": 0.7764932562620424,
+        "medium_changed_fraction": 0.3247753530166881,
+        "g4b_response": 0.030290592842715857,
+        "g4b_relative_error": 0.18828401927249722,
+        "margins": {
+          "b1_fraction": -0.10130023640661934,
+          "shaft_ssim": -0.0659121423056852,
+          "g4a_fraction": -0.1735067437379576,
+          "medium_changed_fraction": 0.22477535301668808,
+          "g4b_relative_error": 0.011715980727502795
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": true,
+        "surface": false,
+        "order": "converged",
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.04387995193724902,
+          0.035145585239667,
+          0.0264152316190131
+        ],
+        "shadow": [
+          0.01691782109968255,
+          0.013780355588013491,
+          0.010544465405678966
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.8337273443656422,
+          0.8561859732072498
+        ],
+        "shaft_ssim": [
+          0.8785882372530344,
+          0.8860586076697259
+        ],
+        "g4a_fraction": [
+          0.6955684007707129,
+          0.7758509955041747
+        ],
+        "medium_changed_fraction": [
+          0.32413350449293965,
+          0.3286264441591784
+        ],
+        "g4b_response": [
+          0.028958487804843634,
+          0.03158229035528981
+        ],
+        "g4b_relative_error": [
+          0.15366959232263383,
+          0.22398127197610423
+        ]
+      }
+    },
+    "review-source-operator-tented-hammersley-environment-quadrature-converged-surface-actual-pixel-source": {
+      "metrics": {
+        "b1_fraction": 0.8486997635933806,
+        "shaft_ssim": 0.8847328881574278,
+        "g4a_fraction": 0.8008991650610148,
+        "medium_changed_fraction": 0.32028241335044927,
+        "g4b_response": 0.030342834871736814,
+        "g4b_relative_error": 0.18688405691315574,
+        "margins": {
+          "b1_fraction": -0.10130023640661934,
+          "shaft_ssim": -0.06526711184257217,
+          "g4a_fraction": -0.14910083493898518,
+          "medium_changed_fraction": 0.22028241335044926,
+          "g4b_relative_error": 0.013115943086844273
+        },
+        "all_five_pass": false
+      },
+      "settings": {
+        "family": "calibrated scalar continuation plus actual first-order pixel term",
+        "angular_environment": true,
+        "surface": true,
+        "order": "converged",
+        "pixel_source": true,
+        "tent": true,
+        "camera_t": "captured unchanged",
+        "source_domain": "reference-open",
+        "higher_orders": "historical closure; not reference-domain transport"
+      },
+      "mean_added_linear_rgb": {
+        "sky": [
+          0.04387995193724902,
+          0.035145585239667,
+          0.0264152316190131
+        ],
+        "shadow": [
+          0.014615032733275864,
+          0.008087249441344604,
+          0.00029739170346322846
+        ]
+      },
+      "held_out_error_sensitivity": {
+        "b1_fraction": [
+          0.8337273443656422,
+          0.8561859732072498
+        ],
+        "shaft_ssim": [
+          0.8800651046131464,
+          0.8857639174134736
+        ],
+        "g4a_fraction": [
+          0.7784200385356455,
+          0.7880539499036608
+        ],
+        "medium_changed_fraction": [
+          0.3209242618741977,
+          0.3228498074454429
+        ],
+        "g4b_response": [
+          0.028985869618208603,
+          0.03162117850643847
+        ],
+        "g4b_relative_error": [
+          0.15262748218922645,
+          0.22324750438016933
+        ]
+      }
+    }
+  },
+  "calibration": {
+    "change": "ac739096 -> 68cc04e9 phase pairing",
+    "predicted_metrics": {
+      "b1_fraction": 0.7084318360914106,
+      "shaft_ssim": 0.9913475342729315,
+      "g4a_fraction": 0.6557482337829159,
+      "medium_changed_fraction": 0.31514762516046213,
+      "g4b_response": 0.01823597324742364,
+      "g4b_relative_error": 0.5113192077185573,
+      "margins": {
+        "b1_fraction": -0.24156816390858937,
+        "shaft_ssim": 0.041347534272931585,
+        "g4a_fraction": -0.29425176621708404,
+        "medium_changed_fraction": 0.21514762516046212,
+        "g4b_relative_error": -0.3113192077185573
+      },
+      "all_five_pass": false
+    },
+    "observed_metrics": {
+      "b1_fraction": 0.7127659574468085,
+      "shaft_ssim": 0.9916001251541653,
+      "g4a_fraction": 0.7109826589595376,
+      "medium_changed_fraction": 0.3215661103979461,
+      "g4b_response": 0.019629758417801648,
+      "g4b_relative_error": 0.4739690738875221,
+      "margins": {
+        "b1_fraction": -0.23723404255319147,
+        "shaft_ssim": 0.041600125154165335,
+        "g4a_fraction": -0.23901734104046235,
+        "medium_changed_fraction": 0.22156611039794608,
+        "g4b_relative_error": -0.27396907388752206
+      },
+      "all_five_pass": false
+    },
+    "mean_absolute_linear_rgb_error": {
+      "sky": [
+        0.002908376863082201,
+        0.0025821379795646863,
+        0.0021729468159981404
+      ],
+      "shadow": [
+        0.0023316816761044844,
+        0.0021361064248890138,
+        0.0018494455208129252
+      ]
+    },
+    "max_absolute_linear_rgb_error": {
+      "sky": [
+        0.015180210469584315,
+        0.01312154929871892,
+        0.010041339645458724
+      ],
+      "shadow": [
+        0.02492110506214462,
+        0.020723054149570985,
+        0.017102017896152177
+      ]
+    },
+    "metric_error": {
+      "b1_fraction": -0.004334121355397902,
+      "shaft_ssim": -0.0002525908812337496,
+      "g4a_fraction": -0.05523442517662169,
+      "medium_changed_fraction": -0.006418485237483951,
+      "g4b_response": -0.0013937851703780084,
+      "g4b_relative_error": 0.03735013383103525
+    },
+    "scope": "Empirical held-out error for this sampler change only; not a confidence bound for different physics or reconstruction."
+  },
+  "decomposition": {
+    "scope": "All five requested terms with explicit first-order/source-partition assumptions. Exact bookkeeping includes a named unresolved higher-order/reference/primary-cloudlight remainder, not an independent measurement of each physical path family.",
+    "terms": {
+      "camera_path_in_scatter_excluding_lateral": {
+        "mean_shadow_linear_rgb": [
+          0.04598071785880774,
+          0.04110031824385943,
+          0.03532329548281135
+        ],
+        "g4a_after_removing_term": 0.24149004495825305,
+        "g4a_fraction_change_after_removing_term": -0.46949261400128456
+      },
+      "camera_transmittance": {
+        "mean_shadow_linear_rgb": [
+          -0.0008096620442115816,
+          -0.0007984434759016796,
+          -0.0007806540728860145
+        ],
+        "g4a_after_removing_term": 0.6904303147077714,
+        "g4a_fraction_change_after_removing_term": -0.02055234425176622
+      },
+      "surface_sun_estimate_after_separating_archived_cloudlight": {
+        "mean_shadow_linear_rgb": [
+          2.301509489862389e-05,
+          -0.00010395573554366951,
+          -1.4866500688655466e-05
+        ],
+        "g4a_after_removing_term": 0.7071290944123314,
+        "g4a_fraction_change_after_removing_term": -0.003853564547206201
+      },
+      "surface_environment": {
+        "mean_shadow_linear_rgb": [
+          0.04150003356068045,
+          0.04092320848336799,
+          0.0405054625553583
+        ],
+        "g4a_after_removing_term": 0.056518946692357096,
+        "g4a_fraction_change_after_removing_term": -0.6544637122671805
+      },
+      "lateral_first_order_source_reconstruction": {
+        "mean_shadow_linear_rgb": [
+          0.0014115020918041524,
+          0.0013048887436405998,
+          0.001248252624327634
+        ],
+        "g4a_after_removing_term": 0.6865767501605652,
+        "g4a_fraction_change_after_removing_term": -0.02440590879897242
+      },
+      "unresolved_higher_order_geometry_quantization_and_reference_sampling": {
+        "mean_shadow_linear_rgb": [
+          -0.10353944963258388,
+          -0.09091432157471191,
+          -0.07666437982041727
+        ],
+        "g4a_after_removing_term": 0.04431599229287091,
+        "g4a_fraction_change_after_removing_term": -0.6666666666666667
+      }
+    },
+    "total_residual_mean_shadow_rgb": [
+      -0.015433843070604306,
+      -0.008488305315289206,
+      -0.00038288973149475867
+    ],
+    "max_closure_error": 2.7755575615628914e-17,
+    "lateral_source_only": {
+      "mean_shadow_linear_rgb": [
+        -0.001411502091804152,
+        -0.0013048887436406006,
+        -0.001248252624327634
+      ],
+      "camera_t_changed": false,
+      "sun_estimator_identical_in_ablations": true
+    }
+  },
+  "environment": {
+    "python": "3.13.14 (tags/v3.13.14:fd17997, Jun 10 2026, 13:03:48) [MSC v.1944 64 bit (AMD64)]",
+    "numpy": "2.3.5",
+    "numba": "0.63.1",
+    "native_forge3d_imported": false
+  },
+  "capture_sha": "68cc04e9ab87de3d90e92e76a8690e016e5d759b",
+  "uncaptured_head_sha": "ca4f5bd3dbea63dfc2e9bab7e888c3202a3b1e17",
+  "contracts": {
+    "environment_directions": "192, nephele_realtime_terrain_trace.wgsl main_nephele_surface_cloudlight",
+    "phase_directions": "one per froxel, nephele_froxel.wgsl cs_nephele_inject_multiple",
+    "phase_steps": "media.grid.z = 64, nephele_froxel.wgsl continuation_transmittance/inject_multiple",
+    "new_optical_depth": "two-node Gauss per trilinear interpolation interval; exact for its cubic ray polynomial",
+    "new_terrain_intersection": "quadratic bilinear-cell roots, bounded only by the terrain AABB and cell boundaries"
+  },
+  "equivalent_profile_inputs": {
+    ".release-evidence/2026-10-22/review-models/source-operator-hammersley-environment-quadrature.npz": ".release-evidence/2026-10-22/continuation-study/source-operator-hammersley-environment-quadrature.npz",
+    ".release-evidence/2026-10-22/review-models/source-operator-hammersley-physical-boundary.npz": ".release-evidence/2026-10-22/continuation-study/source-operator-hammersley-physical-boundary.npz",
+    ".release-evidence/2026-10-22/review-models/source-operator-hammersley.npz": ".release-evidence/2026-10-22/continuation-study/source-operator-hammersley.npz"
+  },
+  "geometry_checks": {
+    "primary_hit_mask_mismatches": 0,
+    "primary_hit_count": 1558
+  },
+  "visibility_valid_air_factorial": {
+    "estimator": "192 directions, exact trilinear optical depth and bilinear terrain roots in every cell",
+    "tent": "same production tent with density support in every cell",
+    "orders": {
+      "visibility_then_air": {
+        "contributions": [
+          {
+            "start": [
+              false,
+              false
+            ],
+            "end": [
+              false,
+              true
+            ],
+            "mean_shadow_linear_rgb": [
+              -0.018406740705572286,
+              -0.017273375210105718,
+              -0.01588229569874693
+            ],
+            "g4a_fraction_change": -0.29222864482980093,
+            "signed_roi_linear_luminance_change": -0.007885444340270222
+          },
+          {
+            "start": [
+              false,
+              true
+            ],
+            "end": [
+              true,
+              true
+            ],
+            "mean_shadow_linear_rgb": [
+              -0.004373242397586629,
+              -0.004095433555690753,
+              -0.003760259257383581
+            ],
+            "g4a_fraction_change": -0.06679511881824018,
+            "signed_roi_linear_luminance_change": -0.013808642122056566
+          }
+        ],
+        "max_closure_error": 6.938893903907228e-18
+      },
+      "air_then_visibility": {
+        "contributions": [
+          {
+            "start": [
+              false,
+              false
+            ],
+            "end": [
+              true,
+              false
+            ],
+            "mean_shadow_linear_rgb": [
+              -0.006299125147172243,
+              -0.0059322674503665155,
+              -0.0054677500972142145
+            ],
+            "g4a_fraction_change": -0.0950545921644188,
+            "signed_roi_linear_luminance_change": -0.017668855011376057
+          },
+          {
+            "start": [
+              true,
+              false
+            ],
+            "end": [
+              true,
+              true
+            ],
+            "mean_shadow_linear_rgb": [
+              -0.016480857955986715,
+              -0.015436541315429955,
+              -0.014174804858916295
+            ],
+            "g4a_fraction_change": -0.2639691714836223,
+            "signed_roi_linear_luminance_change": -0.004025231450950732
+          }
+        ],
+        "max_closure_error": 6.938893903907228e-18
+      }
+    },
+    "interaction_mean_shadow_rgb": [
+      0.0019258827495856222,
+      0.0018368338946757581,
+      0.0017074908398306513
+    ],
+    "g4b_direct_environment": {
+      "False": {
+        "roi_mean_linear_rgb": [
+          0.008385845243377458,
+          0.0078112672235870996,
+          0.007146749629067645
+        ],
+        "response": 0.007885444340270222
+      },
+      "True": {
+        "roi_mean_linear_rgb": [
+          0.004315602383916573,
+          0.0039801348325098716,
+          0.0036169245418145334
+        ],
+        "response": 0.004025231450950732
+      }
+    },
+    "g4b_change_due_to_air_at_fixed_visibility_estimator": -0.0038602128893194896
+  },
+  "best_g4a": {
+    "name": "archived-source-operator-hammersley-converged-surface",
+    "metrics": {
+      "b1_fraction": 0.9988179669030733,
+      "shaft_ssim": 0.9904988191619233,
+      "g4a_fraction": 0.945407835581246,
+      "medium_changed_fraction": 0.3453145057766367,
+      "g4b_response": 0.020840807261182478,
+      "g4b_relative_error": 0.44151583981851067,
+      "margins": {
+        "b1_fraction": 0.048817966903073384,
+        "shaft_ssim": 0.04049881916192333,
+        "g4a_fraction": -0.004592164418753986,
+        "medium_changed_fraction": 0.2453145057766367,
+        "g4b_relative_error": -0.24151583981851066
+      },
+      "all_five_pass": false
+    },
+    "settings": {
+      "family": "archived scalar model",
+      "surface": true,
+      "order": "converged"
+    },
+    "mean_added_linear_rgb": {
+      "sky": [
+        0.03885446010354997,
+        0.0298654621179614,
+        0.021343476373954926
+      ],
+      "shadow": [
+        0.01043826507169367,
+        0.004016877260887679,
+        -0.0033348240041817905
+      ]
+    },
+    "held_out_error_sensitivity": {
+      "b1_fraction": [
+        0.9948778565799843,
+        0.9984239558707644
+      ],
+      "shaft_ssim": [
+        0.9883663902460545,
+        0.9890952717038329
+      ],
+      "g4a_fraction": [
+        0.9177906229929351,
+        0.9254977520873474
+      ],
+      "medium_changed_fraction": [
+        0.3465982028241335,
+        0.3478818998716303
+      ],
+      "g4b_response": [
+        0.019562474273386067,
+        0.022171601798446607
+      ],
+      "g4b_relative_error": [
+        0.4058537054201764,
+        0.4757721292306544
+      ]
+    }
+  },
+  "all_five_passing_nominal_models": [],
+  "first_order_contract_study": {
+    "status": "FIRST_ORDER_ONLY_HIGHER_ORDERS_UNRESOLVED",
+    "contract": {
+      "world_field": "64^3 from renderer/media.rs upload_world_medium",
+      "coarse_spacing": 0.625,
+      "fine_spacing": 0.3125,
+      "angular_directions": 192,
+      "optical_depth": "piecewise cubic exact two-node Gauss",
+      "geometry": "bilinear terrain leaf roots, reference query tmin 1e-3"
+    },
+    "levels": {
+      "coarse": {
+        "spacing": 0.625,
+        "source_points": 269368,
+        "maximum_segments": 105,
+        "below_surface_points_retained_in_both_ablations": 18305,
+        "sun_response": 0.015384598853083617,
+        "environment_response": 0.007416112530269107,
+        "sun_response_roi_rgb": [
+          0.016644679406564545,
+          0.015219392984886808,
+          0.013310666876135035
+        ],
+        "environment_response_roi_rgb": [
+          0.007895923693636184,
+          0.00734444602526162,
+          0.006713176672229085
+        ],
+        "first_order_frame_metrics_diagnostic_only": {
+          "b1_fraction": 0.1946414499605989,
+          "shaft_ssim": 0.937182836706857,
+          "g4a_fraction": 0.0,
+          "medium_changed_fraction": 0.9332477535301669,
+          "g4b_response": 0.022784724367971815,
+          "g4b_relative_error": 0.3894234760610966,
+          "margins": {
+            "b1_fraction": -0.7553585500394011,
+            "shaft_ssim": -0.012817163293142975,
+            "g4a_fraction": -0.95,
+            "medium_changed_fraction": 0.8332477535301669,
+            "g4b_relative_error": -0.1894234760610966
+          },
+          "all_five_pass": false
+        },
+        "reference_minus_first_order_mean_shadow_rgb": [
+          0.12247503665007448,
+          0.10869065982430226,
+          0.09249067232850285
+        ],
+        "below_surface_enabled_environment_response": 0.014456389716390322,
+        "below_surface_enabled_sun_response": 8.187503965126385e-05,
+        "legacy_solid_interior_response_estimate": 0.03733897613939431
+      },
+      "fine": {
+        "spacing": 0.3125,
+        "source_points": 536681,
+        "maximum_segments": 210,
+        "below_surface_points_retained_in_both_ablations": 36367,
+        "sun_response": 0.015385323347920695,
+        "environment_response": 0.007414305703662374,
+        "sun_response_roi_rgb": [
+          0.01664537152964376,
+          0.015220129151894154,
+          0.013311371070411793
+        ],
+        "environment_response_roi_rgb": [
+          0.007893947654986574,
+          0.0073426675539176615,
+          0.006711587225073671
+        ],
+        "first_order_frame_metrics_diagnostic_only": {
+          "b1_fraction": 0.1946414499605989,
+          "shaft_ssim": 0.9371224653211337,
+          "g4a_fraction": 0.0,
+          "medium_changed_fraction": 0.9332477535301669,
+          "g4b_response": 0.02280658061316461,
+          "g4b_relative_error": 0.3888377805749168,
+          "margins": {
+            "b1_fraction": -0.7553585500394011,
+            "shaft_ssim": -0.01287753467886621,
+            "g4a_fraction": -0.95,
+            "medium_changed_fraction": 0.8332477535301669,
+            "g4b_relative_error": -0.1888377805749168
+          },
+          "all_five_pass": false
+        },
+        "reference_minus_first_order_mean_shadow_rgb": [
+          0.12248029803523146,
+          0.10869603284041006,
+          0.09249565879185175
+        ],
+        "below_surface_enabled_environment_response": 0.014459062844739913,
+        "below_surface_enabled_sun_response": 8.466474126988959e-05,
+        "legacy_solid_interior_response_estimate": 0.037343356637592875
+      }
+    },
+    "input_sha256": {
+      "tests/nephele/fixture/atmosphere.json": "86c32891d5390696f21d9cd5b37c505e65ff2f81922b34f62862a9d2d91c1e47",
+      "tests/nephele/fixture/camera.json": "3d39f374e831eba962a0c57acabb962d2c500efbee11f8dca28f74a5883aa6d1",
+      "tests/nephele/fixture/cloud-shadow-mask.npy": "4cdbf4a232a521157e1428a5d72423f2e82352b206e0b6865c574972af69cd4e",
+      "tests/nephele/fixture/crop.json": "065419f7e21660a582b2326cde605ef8fc9fe030d3db1e07b32bb0026d878c04",
+      "tests/nephele/fixture/exposure.json": "8d27a721074814a7a2494d69be7842a32dff39eb4e7ed8d287588bbc3546fd31",
+      "tests/nephele/fixture/godray-roi-mask.npy": "bfa5e46e8cf884a271cac6ffd1d1b8a58a173d48e7c26a6752c1ac5a30fe2d20",
+      "tests/nephele/fixture/mask-rules.json": "48a16b48747151e06b01669e91d7ed9e21c612aa87baddf1071f56f484681008",
+      "tests/nephele/fixture/material.json": "9104fa8bd20fa69d3c08f3fe57c32cab48d74d690c22872777fbe834b06b8789",
+      "tests/nephele/fixture/medium.json": "40cb93a104db8217de4dae011d1d19dba4fe54c8942d0171e6767fb7746e9cf9",
+      "tests/nephele/fixture/reference-cloud-shadow-aov.npy": "2ed192c66493e0151142623f2d88eed35ccfaacd427eb947f6ff7917a5d58667",
+      "tests/nephele/fixture/reference-in-scatter.npy": "34b4d583b6dd726366c4c8ebad0ce15f4a43363bafab6f1ca0a0e813a2910e5e",
+      "tests/nephele/fixture/reference-media-lighting-visibility.npy": "1d9ab6bb4e88dbeb5f2f31196cdfc885181cba7744097e1b4aa33f64d8273159",
+      "tests/nephele/fixture/reference-optical-depth.npy": "f5bf53a7bf3b0932edad06de18ab4623f241bb4c83b20b3402add7c3132c02b6",
+      "tests/nephele/fixture/reference-provenance.json": "d083b146ff4e7fe1bac1874717bf8d527e9c2357d4be8f661203c63123144a67",
+      "tests/nephele/fixture/reference-rgb.npy": "d0a5ff2c46e746f76fe726873821b569324eb59c9cba87bd9be07a5e7dfcf5dd",
+      "tests/nephele/fixture/reference-terrain-hit.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+      "tests/nephele/fixture/reference-terrain-slice.npy": "3d743b53af51a536ee462a89fa59cf4a1c41d9a1b1607e8901e87619eafcc1e5",
+      "tests/nephele/fixture/reference-transmittance.npy": "25fe0d4176f8a8bc9df05faccc3a353a8583aa57d69d18182f80bc2f67e57d20",
+      "tests/nephele/fixture/shaft-mask.npy": "dae7955e935586a3f85022cfc7bed9f0b3491ece6f44544cdc80c8f9bbe29177",
+      "tests/nephele/fixture/sky-cloud-mask.npy": "288e3868f1a06922441af4da195b5db590a5386e647cfc394c7be52f52b5a7b2",
+      "tests/nephele/fixture/sun.json": "fc074b48eb2cbdf2569ebd742a5ef4220514a6ae265a8ad1d298efd4a0722b02",
+      "tests/nephele/fixture/terrain-dem.npy": "4ae0b3517e1e7a7e09ab4a572f5b1c06cfff60074e640ed593638810ec9d36cf",
+      "tests/nephele/fixture/terrain-mask.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+      "tests/nephele/fixture/terrain.json": "f8fa80ecb8c4312707ae198bc40ea2e93c7e158ca15f21739d5c3956b1bce315",
+      "tests/nephele/fixture/tonemap.json": "15cbb4e5e289d6d4fcbfdcebad8ad67c8cf8e2f74c032e5d2eeb0271d83d7034",
+      "docs/audits/nephele-first-order-study-2026-10-22.py": "11c7bbe2c5838795c52e5a42dbeb5a6473b3498f8f80d94f1586812889d62503",
+      "docs/audits/nephele_transport_cpu.py": "090ecd6cf11dd9c2ed15baefc1a7200c19de1bee536364f61cd83d50af46aba1",
+      "docs/audits/nephele-release-analysis-2026-10-22.py": "3fd1cad0cb5b3a48066d3eba8777c95e881836ef2a9d8059d86ad82329328096"
+    },
+    "nested_difference": {
+      "mean_absolute_sky_rgb": [
+        2.058720177438329e-05,
+        1.8920481851314222e-05,
+        1.6944438213851706e-05
+      ],
+      "mean_absolute_shadow_rgb": [
+        5.549974841859682e-05,
+        5.28025490861376e-05,
+        4.7680615522712116e-05
+      ],
+      "max_absolute_rgb": [
+        0.0007612635053061978,
+        0.0006860928207064187,
+        0.0005945482939601066
+      ],
+      "g4a_fraction_change": 0.0,
+      "scope": "Observed coarse/fine numerical difference, not an infinite-resolution error bound or full transport proof"
+    },
+    "duration_seconds": 69.86011989999679,
+    "input_integrity_after_run": true
+  },
+  "source_domain_policy": {
+    "controlled_source_comparison": "reference-open",
+    "reference_first_order": "untruncated medium on either side of the open bilinear surface; same domain for both lighting ablations",
+    "higher_orders": "archived closures retain historical domain rules; hybrids do not certify full reference-domain physics",
+    "production_decision": "NOT_MADE: terrain_occlusion_in_media=False must control any new visibility term; domain changes require explicit transport justification before implementation"
+  },
+  "limitations": [
+    "No full-angular higher-order solution or quantified error for changing that closure",
+    "Archived candidates retain their historical, unqualified numerical parameters; fresh first-order terms use named contracts and the recorded nested comparison",
+    "Geometry uses the reference bilinear surface, not runtime CSM; no CSM buffer was captured",
+    "Held-out sensitivity cannot certify unrelated changes",
+    "HEAD is uncaptured; source inspection cannot prove GPU equivalence",
+    "Step 2 independent physical attribution and step 3 exact full candidate remain open; no release blocker or impossibility is established"
+  ],
+  "input_integrity_after_run": "all hashes unchanged",
+  "duration_seconds": 45.77071579999756
+}
