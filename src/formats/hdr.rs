@@ -53,10 +53,15 @@ pub fn load_hdr<P: AsRef<Path>>(path: P) -> RenderResult<HdrImage> {
     let mut reader = BufReader::new(file);
 
     // Parse header
-    let (width, height) = parse_header(&mut reader)?;
+    let (width, height, bottom_up) = parse_header(&mut reader)?;
 
     // Read scanlines
-    let rgbe_data = read_scanlines(&mut reader, width, height)?;
+    let mut rgbe_data = read_scanlines(&mut reader, width, height)?;
+
+    // A "+Y" file stores its rows bottom to top, so flip them back.
+    if bottom_up {
+        rgbe_data.reverse();
+    }
 
     // Convert RGBe to linear RGB
     let rgb_data = convert_rgbe_to_rgb(&rgbe_data);
@@ -69,7 +74,7 @@ pub fn load_hdr<P: AsRef<Path>>(path: P) -> RenderResult<HdrImage> {
 }
 
 /// Parse HDR file header
-fn parse_header<R: BufRead>(reader: &mut R) -> RenderResult<(u32, u32)> {
+fn parse_header<R: BufRead>(reader: &mut R) -> RenderResult<(u32, u32, bool)> {
     let mut line = String::new();
 
     // Read magic line
@@ -148,7 +153,21 @@ fn parse_header<R: BufRead>(reader: &mut R) -> RenderResult<(u32, u32)> {
         ));
     }
 
-    Ok((width, height))
+    // The Y sign says which way the scanlines run. "-Y" (the usual case)
+    // stores the rows top to bottom; "+Y" stores them bottom to top, so a
+    // file written that way read as "-Y" comes out upside down.
+    let bottom_up = match parts[0] {
+        "-Y" => false,
+        "+Y" => true,
+        other => {
+            return Err(RenderError::upload(format!(
+                "Invalid HDR Y orientation: {}; expected -Y or +Y",
+                other
+            )))
+        }
+    };
+
+    Ok((width, height, bottom_up))
 }
 
 /// Read HDR scanlines with RLE decompression
@@ -376,5 +395,71 @@ mod tests {
             assert!((img.data[i * 3 + 1] - 64.0 * exp).abs() < 1e-6);
             assert!((img.data[i * 3 + 2] - 32.0 * exp).abs() < 1e-6);
         }
+    }
+
+    /// A "+Y" file stores its rows bottom to top. Read as "-Y" it comes out
+    /// upside down, which for an equirect environment is an inverted sky.
+    #[test]
+    fn a_plus_y_file_is_read_bottom_to_top() {
+        use std::io::Write;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let mut path = std::env::temp_dir();
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock before unix epoch")
+            .as_nanos();
+        path.push(format!(
+            "forge3d_hdr_plus_y_{}_{}.hdr",
+            std::process::id(),
+            nonce
+        ));
+        // Two rows of four pixels: the first stored row is RED, the second
+        // BLUE. In a "+Y" file the first stored row is the BOTTOM one, so
+        // the decoded image must have red at the bottom.
+        let write = |name: &str, orientation: &str| {
+            let mut p = std::env::temp_dir();
+            p.push(format!(
+                "forge3d_hdr_{}_{}_{}.hdr",
+                name,
+                std::process::id(),
+                nonce
+            ));
+            let mut f = File::create(&p).expect("create radiance fixture");
+            f.write_all(
+                format!(
+                    "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n{} 2 +X 4\n",
+                    orientation
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+            let red = [255u8, 0, 0, 129];
+            let blue = [0u8, 0, 255, 129];
+            for _ in 0..4 {
+                f.write_all(&red).unwrap();
+            }
+            for _ in 0..4 {
+                f.write_all(&blue).unwrap();
+            }
+            p
+        };
+        let minus = write("minus_y", "-Y");
+        let plus = write("plus_y", "+Y");
+
+        let top = load_hdr(&minus).expect("decode -Y fixture");
+        let bottom = load_hdr(&plus).expect("decode +Y fixture");
+        std::fs::remove_file(&minus).ok();
+        std::fs::remove_file(&plus).ok();
+
+        let red = |img: &HdrImage, row: usize| img.data[(row * img.width as usize) * 3];
+        // The -Y file stores red first, so red is the top row.
+        assert!(red(&top, 0) > red(&top, 1), "-Y: the first stored row is the top");
+        // The +Y file stores red first too, but red is the BOTTOM row, so
+        // the decoder must have flipped it.
+        assert!(
+            red(&bottom, 1) > red(&bottom, 0),
+            "+Y: the first stored row is the bottom"
+        );
     }
 }
