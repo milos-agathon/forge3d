@@ -2633,7 +2633,8 @@ impl TerrainMediaResources {
             terrain_trace_queries: self
                 .directional_known_query_count()
                 .map_or_else(||self.terrain_trace.as_ref().map_or(0,|trace|trace.query_count),|(count,_)|count),
-            terrain_trace_queries_complete:self.directional_known_query_count().is_none_or(|(_,complete)|complete),
+            terrain_trace_queries_complete:self.terrain_trace.is_none()
+                || self.directional_known_query_count().is_some_and(|(_,complete)|complete),
             directional_transport:self.terrain_trace.as_ref().and_then(|t|t.directional.as_ref()).and_then(|d|d.solve_diagnostics.get().map(|mut status| {
                 status.cache_reused=d.executed_orders.get()==0;
                 status

@@ -206,6 +206,9 @@ release preparation, merge or publication dry run. D3D12, Metal and WASM are
 **ABSENT**. Real-DEM frame timing and physical capture are release blockers.
 Larger scenes, runtime cost, spatial/angular discretization and other adapters
 remain unqualified. CPU/GPU arithmetic and traversal differences remain risks.
+The new directional solver applies to canonical Grid3D media; homogeneous
+and procedural media retain the earlier transport path. Their legacy query
+counts are conservatively marked incomplete without aggregate evidence.
 
 The frozen reference's RNG-dimension overlap is unchanged: delta tracking
 uses dimensions `2*step` and `2*step+1`, while reference environment and phase
