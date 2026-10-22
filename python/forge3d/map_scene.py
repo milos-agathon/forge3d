@@ -968,6 +968,8 @@ def _mapscene_cloud_settings(recipe: "SceneRecipe") -> Any | None:
         density=float(data.get("density", 0.5)),
         shadow_strength=float(data.get("shadow_strength", data.get("shadow_intensity", 0.35))),
         quality=str(data.get("quality", "medium")),
+        shadow_offset_x=float(data.get("shadow_offset_x", data.get("wind_offset_x", 0.0))),
+        shadow_offset_y=float(data.get("shadow_offset_y", data.get("wind_offset_y", 0.0))),
     )
 
 
@@ -985,6 +987,7 @@ def _mapscene_cloud_config(recipe: "SceneRecipe") -> Mapping[str, Any] | None:
 
 
 def _apply_mapscene_cloud_shadow(rgba: Any, recipe: "SceneRecipe") -> tuple[Any, dict[str, Any]]:
+    """Legacy non-rendering reference utility; native frames must never call it."""
     settings = _mapscene_cloud_settings(recipe)
     if settings is None or not bool(settings.enabled) or not bool(settings.shadows_enabled):
         return rgba, {}
@@ -1035,11 +1038,19 @@ def _mapscene_screen_space_settings(recipe: "SceneRecipe") -> Any | None:
         return value if isinstance(value, Mapping) else {}
 
     ssao = child("ssao")
+    gtao = child("gtao")
+    if gtao and (gtao.get("enabled", False) or not ssao.get("enabled", False)):
+        ssao = gtao
+    if child("gtao").get("enabled") and child("ssao").get("enabled"):
+        for parameter in ("radius", "intensity"):
+            left, right = child("gtao").get(parameter), child("ssao").get(parameter)
+            if left is not None and right is not None and float(left) != float(right):
+                raise ValueError(f"ssao and gtao name the same native AO pass; conflicting {parameter}")
     ssgi = child("ssgi")
     ssr = child("ssr")
     taa = child("taa")
     enabled = bool(data.get("enabled", False))
-    ssao_enabled = bool(ssao.get("enabled", data.get("ssao_enabled", False)))
+    ssao_enabled = bool(ssao.get("enabled", data.get("gtao_enabled", data.get("ssao_enabled", False))))
     ssgi_enabled = bool(ssgi.get("enabled", data.get("ssgi_enabled", False)))
     ssr_enabled = bool(ssr.get("enabled", data.get("ssr_enabled", False)))
     taa_enabled = bool(taa.get("enabled", data.get("taa_enabled", False)))
@@ -1058,6 +1069,7 @@ def _mapscene_screen_space_settings(recipe: "SceneRecipe") -> Any | None:
 
 
 def _apply_mapscene_screen_space(rgba: Any, recipe: "SceneRecipe", heightmap: Any) -> tuple[Any, dict[str, Any]]:
+    """Legacy non-rendering reference utility; native frames must never call it."""
     settings = _mapscene_screen_space_settings(recipe)
     if settings is None or not bool(settings.enabled):
         return rgba, {}
@@ -1610,6 +1622,7 @@ _MAPSCENE_LIGHTING_EXTRAS = {
     "sun_visibility": "SunVisibilitySettings",
     "height_ao": "HeightAoSettings",
     "fog": "FogSettings",
+    "volumetrics": "VolumetricsSettings",
     "tonemap": "TonemapSettings",
     "bloom": "BloomSettings",
 }
@@ -1760,9 +1773,48 @@ def _shared_terrain_render_context() -> Any:
         _ACTIVE_TERRAIN_RESOURCES.holder = previous
 
 
+def _mapscene_native_effects(recipe: "SceneRecipe") -> tuple[str, ...]:
+    """Return requested GPU work; this is a request, never a support claim."""
+    screen = _mapscene_screen_space_settings(recipe)
+    effects: list[str] = []
+    if screen is not None:
+        for name in ("ssao", "ssgi", "ssr", "taa"):
+            if bool(getattr(screen, f"{name}_enabled")):
+                effects.append(name)
+    clouds = _mapscene_cloud_settings(recipe)
+    if clouds is not None and clouds.enabled and clouds.shadows_enabled:
+        effects.append("cloud_shadows")
+    extras = _mapscene_lighting_extras(_metadata_dict(recipe.lighting.settings))
+    if extras.get("volumetrics") is not None and extras["volumetrics"].enabled:
+        effects.append("volumetrics")
+    if effects:
+        if extras.get("height_ao") is not None and extras["height_ao"].enabled:
+            effects.append("height_ao")
+        sky, fog = extras.get("sky"), extras.get("fog")
+        if (fog is not None and fog.density > 0.0) or (sky is not None and sky.enabled and sky.aerial_perspective):
+            effects.append("atmosphere")
+    return tuple(effects)
+
+
+def _mapscene_pipeline_block(effects: tuple[str, ...], reason: str) -> None:
+    from ._map_scene_validation import diagnostic_block
+
+    raise MapSceneNativeUnavailable([
+        diagnostic_block(
+            layer="lighting",
+            reason=reason,
+            required_native=f"TerrainRenderer.render_interactive ({', '.join(effects)})",
+        )
+    ])
+
+
 def _render_terrain_renderer_result(
     recipe: "SceneRecipe", heightmap: Any, *, emit_provenance: bool = False,
     nodata_height_below: float | None = None, chronos_frame_json: str | None = None,
+    native_label_batches: Sequence[Mapping[str, Any]] | None = None,
+    native_vector_batches: Sequence[Mapping[str, Any]] | None = None,
+    native_furniture_batches: Sequence[Mapping[str, Any]] | None = None,
+    native_point_batches: Sequence[Mapping[str, Any]] | None = None,
 ) -> _MapSceneNativeRenderResult | None:
     from ._map_scene_rasters import terrain_raster_drape
 
@@ -1771,6 +1823,9 @@ def _render_terrain_renderer_result(
             recipe, heightmap, emit_provenance=emit_provenance,
             nodata_height_below=nodata_height_below,
             chronos_frame_json=chronos_frame_json, albedo_path=albedo_path,
+            native_label_batches=native_label_batches,
+            native_vector_batches=native_vector_batches, native_furniture_batches=native_furniture_batches,
+            native_point_batches=native_point_batches,
         )
         if result is not None:
             if layer_count:
@@ -1792,6 +1847,10 @@ def _render_terrain_renderer_result_impl(
     nodata_height_below: float | None = None,
     chronos_frame_json: str | None = None,
     albedo_path: str | None = None,
+    native_label_batches: Sequence[Mapping[str, Any]] | None = None,
+    native_vector_batches: Sequence[Mapping[str, Any]] | None = None,
+    native_furniture_batches: Sequence[Mapping[str, Any]] | None = None,
+    native_point_batches: Sequence[Mapping[str, Any]] | None = None,
 ) -> _MapSceneNativeRenderResult | None:
     try:
         import forge3d as f3d
@@ -1812,7 +1871,15 @@ def _render_terrain_renderer_result_impl(
 
     output = recipe.output
     assert output is not None
-    render_size = (max(64, int(output.width)), max(64, int(output.height)))
+    requested_effects = _mapscene_native_effects(recipe)
+    if requested_effects and (int(output.width) < 64 or int(output.height) < 64):
+        _mapscene_pipeline_block(
+            requested_effects,
+            "shared interactive effects require an output viewport of at least "
+            f"64x64 pixels; requested {output.width}x{output.height}",
+        )
+    render_size = ((int(output.width), int(output.height)) if requested_effects
+                   else (max(64, int(output.width)), max(64, int(output.height))))
     params = _build_mapscene_terrain_params(
         recipe,
         heightmap,
@@ -1835,6 +1902,13 @@ def _render_terrain_renderer_result_impl(
             if holder is not None:
                 holder.append(resources)
         renderer = resources.renderer
+        if requested_effects and not callable(getattr(renderer, "render_interactive", None)):
+            _mapscene_pipeline_block(
+                requested_effects,
+                "requested effects require the shared native depth/HDR pipeline",
+            )
+        if native_point_batches and not json.loads(renderer.interactive_pipeline_info()).get("compiled_features",{}).get("weighted_oit"):
+            _mapscene_pipeline_block(requested_effects,"transparent point commands require the compiled weighted-oit feature")
         material_set = resources.material_set
         if delete_hdr:
             # The generated minimal HDR gets a fresh temp path per call; key
@@ -1854,7 +1928,7 @@ def _render_terrain_renderer_result_impl(
         needs_offline = sample_count > 1 or _mapscene_denoise_enabled(output) or needs_hdr
         water_mask = _mapscene_water_mask(recipe, heightmap)
         building_scatter = (
-            _terrain_scatter_building_batches_for_recipe(recipe, heightmap)
+            _terrain_scatter_building_batches_for_recipe(recipe, heightmap, shared_frame=bool(requested_effects))
             if not needs_offline and hasattr(renderer, "set_scatter_batches")
             else None
         )
@@ -1863,6 +1937,11 @@ def _render_terrain_renderer_result_impl(
         # because labels request terrain occlusion; render must be a pure
         # consumer of that compiled plan.
         needs_aov = bool(output.aovs) or emit_provenance
+        if requested_effects and int(output.bit_depth)!=8:
+            _mapscene_pipeline_block(requested_effects,"interactive output uses RGBA8; the requested bit depth has no matching GPU output transform")
+        if requested_effects and (needs_offline or needs_aov):
+            _mapscene_pipeline_block(requested_effects,
+                "shared interactive HDR effects require one-shot output; the offline/AOV export graph has no matching post-effect attachments")
         if emit_provenance and needs_offline:
             raise RuntimeError(
                 "MapScene provenance emission requires the one-shot render path: "
@@ -1909,6 +1988,51 @@ def _render_terrain_renderer_result_impl(
             hdr_frame = offline_result.hdr_frame
             aov_frame = offline_result.aov_frame
             metadata.update(dict(offline_result.metadata or {}))
+        elif requested_effects:
+            t0 = time.perf_counter()
+            try:
+                frame = renderer.render_interactive(
+                    material_set=material_set, env_maps=env_maps, params=params,
+                    heightmap=heightmap, water_mask=water_mask,
+                    clouds=_mapscene_cloud_settings(recipe), label_batches=native_label_batches,
+                    vector_batches=native_vector_batches, furniture_batches=native_furniture_batches,
+                    point_batches=native_point_batches,
+                )
+            except RuntimeError as error:
+                _mapscene_pipeline_block(requested_effects, str(error))
+            metadata["terrain_main_pass_ms"] = (time.perf_counter() - t0) * 1000.0
+            metadata["timing_source"] = "python_perf_counter"
+            pipeline = json.loads(renderer.interactive_pipeline_info())
+            if pipeline.get("image_readbacks_before_output") != 0:
+                _mapscene_pipeline_block(requested_effects,"requested GPU resources performed an intermediate image transfer")
+            if pipeline.get("output_size") != [int(output.width),int(output.height)]:
+                _mapscene_pipeline_block(requested_effects,"native output resolution differs from the cartographic viewport")
+            from . import _forge3d as native
+            execution = json.loads(native.render_execution_report())
+            labels = {item["label"] for item in execution.get("passes", ())}
+            required_pass = {"ssao": "concordia.ao", "ssgi": "concordia.ssgi",
+                             "ssr": "concordia.ssr", "taa": "concordia.temporal",
+                             "cloud_shadows": "concordia.cloud_shadows", "height_ao": "concordia.ao",
+                             "atmosphere": "concordia.atmosphere", "volumetrics": "concordia.froxels"}
+            missing = [effect for effect in requested_effects if required_pass[effect] not in labels]
+            if missing:
+                _mapscene_pipeline_block(tuple(missing), "native execution did not record the requested GPU passes")
+            pipeline["execution_report"] = execution
+            metadata["native_pipeline"] = pipeline
+            if pipeline.get("transparent_point_layers", 0) and "concordia.transparent_points" in labels:
+                metadata["point_cloud_backend"] = "native_oit_points"
+                if pipeline.get("point_edl_layers", 0):
+                    metadata["point_cloud_edl_backend"] = "weighted_oit_depth_edl"
+            screen_effects = [effect for effect in requested_effects if effect in ("ssao", "ssgi", "ssr", "taa")]
+            if screen_effects:
+                metadata["screen_space_backend"] = "native_concordia"
+                metadata["screen_space_effects"] = screen_effects
+            if "cloud_shadows" in requested_effects:
+                metadata["cloud_shadow_backend"] = "native_concordia"
+                cloud_parameters=pipeline["cloud_parameters"]
+                metadata["cloud_shadow_strength"]=cloud_parameters["shadow_strength"]
+                metadata["cloud_shadow_coverage"]=cloud_parameters["coverage"]
+                metadata["cloud_shadow_offset"]=cloud_parameters["offset"]
         elif needs_aov and hasattr(renderer, "render_with_aov"):
             t0 = time.perf_counter()
             frame, aov_frame = renderer.render_with_aov(
@@ -1932,7 +2056,14 @@ def _render_terrain_renderer_result_impl(
             )
             metadata["terrain_main_pass_ms"] = (time.perf_counter() - t0) * 1000.0
             metadata["timing_source"] = "python_perf_counter"
+        if requested_effects and tuple(frame.size) != (int(output.width),int(output.height)):
+            _mapscene_pipeline_block(requested_effects,"native frame dimensions would require a CPU resize")
         rgba = _frame_to_rgba(frame, output)
+        if requested_effects:
+            readback_info = json.loads(renderer.interactive_pipeline_info())
+            metadata["native_pipeline"].update(readback_info)
+            if readback_info.get("beauty_readbacks") != 1:
+                _mapscene_pipeline_block(requested_effects, "native final beauty readback count was not exactly one")
         source_map = None
         contributing_tiles = None
         if emit_provenance:
@@ -2224,8 +2355,11 @@ def _composite_python_precise_vector_layers(
     base: Any,
     recipe: "SceneRecipe",
     vector_layers: list["VectorOverlay"],
+    *,
+    clip_to_geometry: bool = False,
+    fallback_rgb: tuple[int, int, int] | None = None,
 ) -> tuple[Any, bool]:
-    """Composite precise vector styles with the deterministic Python rasterizer."""
+    """Composite precise styles; native coverage authoring clips each primitive's support."""
 
     import numpy as np
 
@@ -2235,12 +2369,12 @@ def _composite_python_precise_vector_layers(
         line_paint = _render_paint(layer, "line")
         line_layout = _render_layout(layer, "line")
         fill_paint = _render_paint(layer, "fill")
-        fallback_rgb = _render_rgb(layer.to_dict(), salt="vector")
+        layer_rgb = fallback_rgb if fallback_rgb is not None else _render_rgb(layer.to_dict(), salt="vector")
         line_color_value = line_paint.get("line-color")
         line_color = (
-            (*fallback_rgb, 255)
+            (*layer_rgb, 255)
             if _render_is_style_expression(line_color_value)
-            else _render_color(line_color_value, (*fallback_rgb, 255))
+            else _render_color(line_color_value, (*layer_rgb, 255))
         )
         line_opacity_value = line_paint.get("line-opacity")
         line_opacity = (
@@ -2265,9 +2399,9 @@ def _composite_python_precise_vector_layers(
         dash_array = getattr(layer, "dash_array", None) or line_paint.get("line-dasharray")
         fill_color_value = fill_paint.get("fill-color")
         fill_color = (
-            (*fallback_rgb, 160)
+            (*layer_rgb, 160)
             if _render_is_style_expression(fill_color_value)
-            else _render_color(fill_color_value, (*fallback_rgb, 160))
+            else _render_color(fill_color_value, (*layer_rgb, 160))
         )
         fill_opacity_value = fill_paint.get("fill-opacity")
         fill_opacity = (
@@ -2330,7 +2464,9 @@ def _composite_python_precise_vector_layers(
                     ]
                     if not pixel_rings:
                         continue
-                    _render_draw_polygon_fill(out, pixel_rings, feature_fill_color)
+                    if not feature.get("_terrain_stroke_only"):
+                        _render_draw_polygon_fill(out, pixel_rings, feature_fill_color,
+                                                  clip_to_geometry=clip_to_geometry)
                     for ring_points in (() if feature.get("_terrain_fill_only") else pixel_rings):
                         if ring_points and ring_points[0] != ring_points[-1]:
                             ring_points = [*ring_points, ring_points[0]]
@@ -2344,6 +2480,7 @@ def _composite_python_precise_vector_layers(
                                 join=line_join,
                                 dash_array=dash_array,
                                 miter_limit=miter_limit,
+                                clip_to_geometry=clip_to_geometry,
                             )
                 continue
             points = [
@@ -2368,6 +2505,7 @@ def _composite_python_precise_vector_layers(
                     join=line_join,
                     dash_array=dash_array,
                     miter_limit=miter_limit,
+                    clip_to_geometry=clip_to_geometry,
                 )
     return out, True
 
@@ -3059,38 +3197,23 @@ def _fade_label_run(base: Any, opaque: Any, alpha: float) -> Any:
     return np.ascontiguousarray(np.clip(faded, 0.0, 255.0).astype(np.uint8))
 
 
-def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapping[str, Any]) -> tuple[Any, bool]:
-    label_layers = [layer for layer in recipe.layers if isinstance(layer, LabelLayer)]
-    if not label_layers:
-        return base, False
-    if not any(plans.get(_layer_id(layer, "layer")) and plans[_layer_id(layer, "layer")].accepted for layer in label_layers):
-        return base, False
+def _mapscene_native_label_batches(
+    recipe: "SceneRecipe", plans: Mapping[str, Any], width: int, height: int,
+) -> list[dict[str, Any]]:
+    """Compile immutable accepted glyphs into upload-only native commands.
 
-    scene_cls = _native_scene_class()
-    if scene_cls is None:
-        return base, False
-
-    import numpy as np
-
+    This authoring step never renders, reads back a texture, or changes a plan.
+    The ordinary compositor and the unified frame share this exact glyph stream.
+    """
     from ._png import load_png_rgba
     from .text_atlas import default_latin_atlas_paths, load_atlas_metrics
 
-    height, width = base.shape[:2]
-    required = (
-        "set_raster_overlay",
-        "set_native_text_atlas",
-        "enable_native_text",
-        "add_native_text_rect_uv_halo",
-        "render_rgba",
-    )
-    rendered_any = False
-    composited = np.ascontiguousarray(base, dtype=np.uint8)
-    for layer in label_layers:
+    batches: list[dict[str, Any]] = []
+    for layer in (item for item in recipe.layers if isinstance(item, LabelLayer)):
         layer_id = _layer_id(layer, "layer")
         plan = plans.get(layer_id)
         if plan is None or not plan.accepted:
             continue
-
         atlas_png, atlas_json = default_latin_atlas_paths()
         atlas_payload = _metadata_dict(layer.glyph_atlas)
         image_path = atlas_payload.get("image_path")
@@ -3133,10 +3256,6 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
                 "object_id": None,
                 "required_metadata": "font_sha256",
             })
-
-        native_scene = scene_cls(int(width), int(height))
-        if not all(hasattr(native_scene, name) for name in required):
-            return composited, rendered_any
 
         # (chronos_alpha, rect) in plan order; rects carry full-opacity colors.
         pending_text_rects: list[tuple[float, tuple[float, ...]]] = []
@@ -3300,30 +3419,45 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
                 "layer": layer_id,
                 "object_id": None,
             })
-        # Glyph quads overlap (atlas padding exceeds the advance), so blending
-        # each quad at a fade alpha rounds overlapping pixels once per quad and
-        # compounds their halos. Instead, each run of equal-alpha labels is drawn
-        # at full opacity and faded as one layer with a single rounding.
-        for chronos_alpha, run in itertools.groupby(pending_text_rects, key=lambda item: item[0]):
-            if chronos_alpha <= 0.0:
-                continue
-            if native_scene is None:
-                native_scene = scene_cls(int(width), int(height))
-            if hasattr(native_scene, "disable_terrain"):
-                native_scene.disable_terrain()
-            native_scene.set_raster_overlay(composited, 1.0, None, None)
-            native_scene.set_native_text_atlas(atlas, int(metrics.get("channels", 1)), 1.0)
-            native_scene.enable_native_text()
-            for _, rect in run:
-                native_scene.add_native_text_rect_uv_halo(*rect)
-            rgba = np.asarray(native_scene.render_rgba())
-            native_scene = None
-            if rgba.ndim != 3 or rgba.shape[2] != 4:
-                raise RuntimeError("MapScene native text compositor returned an invalid RGBA image")
-            opaque = np.ascontiguousarray(rgba.astype(np.uint8, copy=False))
-            composited = opaque if chronos_alpha >= 1.0 else _fade_label_run(composited, opaque, chronos_alpha)
-            rendered_any = True
+        for alpha, run in itertools.groupby(pending_text_rects, key=lambda item: item[0]):
+            rects = [rect for _, rect in run]
+            if alpha > 0.0:
+                batches.append({
+                    "layer": layer_id, "atlas": atlas,
+                    "channels": int(metrics.get("channels", 1)),
+                    "alpha": alpha, "rects": rects,
+                })
+    return batches
 
+
+def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapping[str, Any]) -> tuple[Any, bool]:
+    scene_cls = _native_scene_class()
+    if scene_cls is None:
+        return base, False
+    import numpy as np
+
+    height, width = base.shape[:2]
+    composited = np.ascontiguousarray(base, dtype=np.uint8)
+    rendered_any = False
+    required = ("set_raster_overlay", "set_native_text_atlas", "enable_native_text",
+                "add_native_text_rect_uv_halo", "render_rgba")
+    for batch in _mapscene_native_label_batches(recipe, plans, int(width), int(height)):
+        native_scene = scene_cls(int(width), int(height))
+        if not all(hasattr(native_scene, name) for name in required):
+            return composited, rendered_any
+        if hasattr(native_scene, "disable_terrain"):
+            native_scene.disable_terrain()
+        native_scene.set_raster_overlay(composited, 1.0, None, None)
+        native_scene.set_native_text_atlas(batch["atlas"], batch["channels"], 1.0)
+        native_scene.enable_native_text()
+        for rect in batch["rects"]:
+            native_scene.add_native_text_rect_uv_halo(*rect)
+        rgba = np.asarray(native_scene.render_rgba())
+        if rgba.ndim != 3 or rgba.shape[2] != 4:
+            raise RuntimeError("MapScene native text compositor returned an invalid RGBA image")
+        opaque = np.ascontiguousarray(rgba.astype(np.uint8, copy=False))
+        composited = opaque if batch["alpha"] >= 1.0 else _fade_label_run(composited, opaque, batch["alpha"])
+        rendered_any = True
     return composited, rendered_any
 
 
@@ -3529,7 +3663,7 @@ def _native_building_mesh_batches_for_layers(
 
 def _terrain_scatter_building_batches_for_recipe(
     recipe: "SceneRecipe",
-    heightmap: Any,
+    heightmap: Any, *, shared_frame: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]] | None:
     building_layers = [layer for layer in recipe.layers if isinstance(layer, BuildingLayer)]
     if not building_layers:
@@ -3580,6 +3714,13 @@ def _terrain_scatter_building_batches_for_recipe(
         local = contract.copy()
         local[:, 0] -= center_x
         local[:, 2] -= center_z
+        if shared_frame:
+            # pack_instance_transforms maps translation into terrain Z-up,
+            # while its local basis is already render-space. Author the mesh
+            # in that same basis for the shared opaque/depth/shadow frame.
+            local = local[:, [0, 2, 1]]
+            normals = normals[:, [0, 2, 1]]
+            indices = indices[:, [0, 2, 1]]
         row, col = source.contract_to_pixel(center_x, center_z)
         base_y = source.sample_scaled_height(row, col)
         mesh = MeshBuffers(
@@ -4058,6 +4199,28 @@ def _render_native_offscreen_result(
     # terrain diagnostic when the DEM is unavailable before inspecting overlays.
     raster_content_hashes(recipe)
     vector_recipe = project_vector_recipe(recipe)
+    requested_effects = _mapscene_native_effects(recipe)
+    landmark_metadata = {}
+    if requested_effects:
+        from ._map_scene_native_inputs import is_cartographic_landmark
+        from ._map_scene_validation import diagnostic_block
+        incompatible = []
+        volumetrics = _mapscene_lighting_extras(_metadata_dict(recipe.lighting.settings)).get("volumetrics")
+        if volumetrics is not None and volumetrics.enabled and volumetrics.density_volumes:
+            incompatible.append(diagnostic_block(layer="lighting.volumetrics.density_volumes",
+                reason="localized media has no bound density-volume atlas in the shared froxel layout",
+                required_native="CONCORDIA localized media bindings"))
+        for layer in recipe.layers:
+            reason = None
+            if isinstance(layer, Tiles3DLayer):
+                reason = "tile geometry has no shared material/velocity stream or representative depth in the terrain camera convention"
+            elif isinstance(layer, BuildingLayer) and _building_gltf_path(layer) and not is_cartographic_landmark(layer):
+                reason = "world-space textured geometry has no shared UV/material/velocity outputs"
+            if reason:
+                incompatible.append(diagnostic_block(layer=_layer_id(layer, "layer"),
+                    reason=reason, required_native="CONCORDIA layer participation"))
+        if incompatible:
+            raise MapSceneNativeUnavailable(incompatible)
     heightmap, nodata_height_below = _mapscene_nodata_heightmap(heightmap)
 
     import numpy as np
@@ -4072,6 +4235,14 @@ def _render_native_offscreen_result(
             render_kwargs["nodata_height_below"] = nodata_height_below
         if chronos_frame_json is not None:
             render_kwargs["chronos_frame_json"] = chronos_frame_json
+        if requested_effects:
+            render_kwargs["native_label_batches"] = _mapscene_native_label_batches(
+                recipe, plans, int(recipe.output.width), int(recipe.output.height))
+            from ._map_scene_native_inputs import vector_batches, furniture_batches, point_batches, landmark_batches
+            landmarks, landmark_metadata = landmark_batches(recipe)
+            render_kwargs["native_vector_batches"] = landmarks + vector_batches(recipe, vector_recipe)
+            render_kwargs["native_furniture_batches"] = furniture_batches(recipe)
+            render_kwargs["native_point_batches"] = point_batches(recipe)
         result = _render_terrain_renderer_result(recipe, heightmap, **render_kwargs)
     except BaseException as exc:
         if _is_native_adapter_unavailable(exc):
@@ -4093,19 +4264,24 @@ def _render_native_offscreen_result(
         ) for layer in raster_layers)
     if unsupported:
         raise MapSceneNativeUnavailable(unsupported)
+    if requested_effects:
+        if result.metadata.get("native_pipeline", {}).get("backend") != "native_concordia":
+            _mapscene_pipeline_block(requested_effects, "the renderer did not return a native CONCORDIA frame")
+        if any(isinstance(layer, BuildingLayer) and not is_cartographic_landmark(layer) for layer in recipe.layers) and result.metadata.get("building_backend") != "terrain_scatter_instanced_mesh":
+            _mapscene_pipeline_block(requested_effects, "building geometry did not join the shared native GBuffer")
+        result.metadata.update(landmark_metadata)
+        return result
     rgba = result.rgba
     if rgba.ndim != 3 or rgba.shape[2] != 4:
         raise RuntimeError("MapScene terrain renderer returned an invalid RGBA image")
     if rgba.dtype != np.uint8:
         rgba = rgba.astype(np.uint8)
     base = np.ascontiguousarray(rgba.copy())
-    base, cloud_shadow_metadata = _apply_mapscene_cloud_shadow(base, recipe)
     native_buildings = result.metadata.get("building_backend") == "terrain_scatter_instanced_mesh"
     building_metadata: dict[str, Any] = {}
     if not native_buildings:
         base, native_buildings, building_metadata = _composite_native_building_layers(base, recipe)
     base, textured_landmarks, textured_metadata = _composite_textured_landmark_layers(base, recipe)
-    base, screen_space_metadata = _apply_mapscene_screen_space(base, recipe, heightmap)
     base, native_labels = _composite_native_label_layers(base, recipe, plans)
     if vector_recipe is recipe:
         base, native_vectors = _composite_native_vector_layers(base, vector_recipe)
@@ -4129,8 +4305,6 @@ def _render_native_offscreen_result(
     # everything, matching the old compositor's final step.
     _compose_furniture(composited, recipe)
     metadata = dict(result.metadata)
-    metadata.update(cloud_shadow_metadata)
-    metadata.update(screen_space_metadata)
     if native_buildings:
         metadata.update(building_metadata)
     if textured_landmarks:
@@ -5914,6 +6088,9 @@ class MapScene:
             and int(output.bit_depth) == 8
             and not output.aovs
             and not output.hdr
+            # A temporal frame depends on live renderer history, which is not
+            # part of the path-free scene cache key. Always execute it.
+            and not bool(getattr(_mapscene_screen_space_settings(self.recipe), "taa_enabled", False))
         )
         if cache_eligible:
             from .anamnesis import render_sequence
@@ -5957,7 +6134,10 @@ class MapScene:
                 frames=[0],
                 cache=scene_root,
                 render_frame=render_frame,
-                render_frame_fingerprint=b"forge3d.python.mapscene.render/v1",
+                # Invalidate prior label-visibility images, including the
+                # effects-off cache that used shared building occlusion.
+                render_frame_fingerprint=(b"forge3d.python.mapscene.render/concordia-2" if _mapscene_native_effects(self.recipe)
+                    else b"forge3d.python.mapscene.render/v3"),
                 render_frame_context=render_frame_context,
             )
             report = rendered.get("report")
@@ -5981,9 +6161,13 @@ class MapScene:
 
         from . import certificate as _certificate
 
-        with _certificate._render_capture(
-            "python.map_scene.render", "mapscene.finalize", draw_calls=1
-        ):
+        # Interactive frames own their complete native capture. Nesting it
+        # under a Python capture would leave render_execution_report pointing
+        # at a previous frame while the seam checks executed pass support.
+        capture = (contextlib.nullcontext() if _mapscene_native_effects(self.recipe)
+                   else _certificate._render_capture(
+                       "python.map_scene.render", "mapscene.finalize", draw_calls=1))
+        with capture:
             report = self._render_impl(
                 path,
                 emit_provenance=emit_provenance,
@@ -6188,6 +6372,7 @@ class MapScene:
             if key in native_metadata:
                 metadata[key] = native_metadata[key]
         for key in (
+            "native_pipeline",
             "building_backend",
             "building_batch_count",
             "building_batch_ids",
@@ -6199,6 +6384,8 @@ class MapScene:
             "gltf_material_count",
             "gltf_primitive_count",
             "gltf_asset_ids",
+            "gltf_layer_stages",
+            "gltf_material_model",
             "terrain_geometry_backend",
             "terrain_geometry_mode",
             "clipmap_ring_count",
@@ -6265,7 +6452,10 @@ class MapScene:
             report = self._report_with_feature(report, "mapscene.building_gpu_mesh_composite", "supported")
         if metadata.get("gltf_textured_backend") == "mapscene_textured_landmark":
             report = self._report_with_feature(report, "gltf.textured_mapscene_render", "supported")
-            report = self._report_with_feature(report, "buildings.textured_pbr", "supported")
+            report = self._report_with_feature(report, "buildings.textured_pbr", "underdeveloped")
+        if metadata.get("gltf_textured_backend") == "native_cartographic_landmark":
+            report = self._report_with_feature(report, "gltf.textured_mapscene_render", "supported")
+            report = self._report_with_feature(report, "buildings.textured_pbr", "underdeveloped")
         if metadata.get("terrain_geometry_backend") == "clipmap_indexed_pbr":
             report = self._report_with_feature(report, "terrain.clipmap_indexed", "supported")
             report = self._report_with_feature(report, "terrain.clipmap_planner", "supported")
@@ -6276,9 +6466,10 @@ class MapScene:
             report = self._report_with_feature(report, "point_cloud.edl", "supported")
         if metadata.get("tiles3d_backend") == "native_oit_geometry":
             report = self._report_with_feature(report, "tiles3d.mapscene_render", "supported")
-        if metadata.get("cloud_shadow_backend") == "mapscene_numpy_cloud_shadow":
+        if metadata.get("native_pipeline", {}).get("execution_report") and metadata.get("cloud_shadow_backend") == "native_concordia":
             report = self._report_with_feature(report, "mapscene.cloud_shadows", "supported")
-        screen_space_effects = set(metadata.get("screen_space_effects") or ())
+        screen_space_effects = (set(metadata.get("screen_space_effects") or ())
+            if metadata.get("native_pipeline", {}).get("execution_report") else set())
         if screen_space_effects:
             report = self._report_with_feature(report, "mapscene.screen_space", "supported")
         if "ssao" in screen_space_effects:
@@ -6288,7 +6479,8 @@ class MapScene:
         if "ssr" in screen_space_effects:
             report = self._report_with_feature(report, "mapscene.ssr", "supported")
         if "taa" in screen_space_effects:
-            report = self._report_with_feature(report, "mapscene.taa", "supported")
+            report = self._report_with_feature(report, "mapscene.taa",
+                "supported" if metadata.get("native_pipeline", {}).get("temporal_history_used",False) else "underdeveloped")
         if self.recipe.map_furniture is not None:
             report = self._report_with_feature(report, "mapscene.furniture_composite", "supported")
         render_feature = "mapscene.render_exr" if output_format == "exr" else "mapscene.render_png"

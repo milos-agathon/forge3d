@@ -165,3 +165,12 @@ impl SsgiRenderer {
         Ok(())
     }
 }
+
+impl SsgiRenderer {
+    pub(crate) fn set_scene_color_view(&mut self, view: TextureView) {
+        self.scene_color_override = Some(view);
+    }
+    pub(crate) fn clear_scene_color_override(&mut self) {
+        self.scene_color_override = None;
+    }
+}

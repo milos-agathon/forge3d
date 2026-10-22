@@ -385,6 +385,9 @@ impl TerrainScene {
     pub(crate) fn build_camera_matrices(
         params: &render_params::TerrainRenderParams,
     ) -> (glam::Vec3, glam::Mat4, glam::Mat4) {
+        if params.camera_mode == super::interactive::SCREEN_GEOMETRY_MODE {
+            return super::interactive::camera_matrices(params);
+        }
         let phi_rad = params.cam_phi_deg.to_radians();
         let theta_rad = params.cam_theta_deg.to_radians();
 

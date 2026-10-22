@@ -2,13 +2,25 @@ use super::*;
 
 impl ScreenSpaceEffectsManager {
     pub fn new(device: &Device, width: u32, height: u32) -> RenderResult<Self> {
+        Self::new_internal(device, width, height, false)
+    }
+
+    pub(crate) fn new_linear_depth(device: &Device, width: u32, height: u32) -> RenderResult<Self> {
+        Self::new_internal(device, width, height, true)
+    }
+
+    fn new_internal(device: &Device, width: u32, height: u32, linear: bool) -> RenderResult<Self> {
         let gbuffer_config = GBufferConfig {
             width,
             height,
             ..Default::default()
         };
-        let gbuffer = GBuffer::new(device, gbuffer_config)?;
-        let hzb = HzbPyramid::new(device, width, height).ok();
+        let gbuffer = GBuffer::new_with_readback(device, gbuffer_config, linear)?;
+        let hzb = if linear {
+            Some(HzbPyramid::new_linear(device, width, height)?)
+        } else {
+            HzbPyramid::new(device, width, height).ok()
+        };
 
         Ok(Self {
             gbuffer,

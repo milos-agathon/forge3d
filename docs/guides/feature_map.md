@@ -78,3 +78,7 @@ for one of those jobs.
   only for advanced compatibility commands that do not yet have a truthful
   high-level wrapper.
 - Reach for Pro modules only after you already have a stable viewer or renderer workflow.
+
+The [native interactive MapScene pipeline](mapscene_native_pipeline.md) documents
+shared terrain/building depth, GPU effects, full-resolution cartography,
+certificate evidence and explicit unsupported combinations.

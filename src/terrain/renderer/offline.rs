@@ -1435,7 +1435,7 @@ impl TerrainScene {
         Ok(())
     }
 
-    fn dispatch_offline_tonemap_pass(
+    pub(super) fn dispatch_offline_tonemap_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         hdr_view: &wgpu::TextureView,
@@ -1493,7 +1493,7 @@ impl TerrainScene {
         Ok(())
     }
 
-    fn resolved_offline_tonemap_operator(
+    pub(super) fn resolved_offline_tonemap_operator(
         decoded: &crate::terrain::render_params::DecodedTerrainSettings,
     ) -> u32 {
         let tonemap = &decoded.tonemap;

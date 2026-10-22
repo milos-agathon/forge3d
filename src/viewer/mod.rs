@@ -9,7 +9,7 @@ mod cmd;
 mod event_loop;
 pub mod hud;
 pub mod image_analysis;
-mod init;
+pub(crate) mod init;
 mod input;
 pub mod ipc;
 mod p5;

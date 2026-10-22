@@ -64,6 +64,7 @@ impl SsrRenderer {
         let textures = resources::create_textures(device, width, height)?;
 
         Ok(Self {
+            concordia_projection: false,
             settings,
             settings_buffer: buffers.settings_buffer,
             camera_buffer: buffers.camera_buffer,

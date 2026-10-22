@@ -68,6 +68,30 @@ def test_output_destination_change_hits_and_writes_requested_target(
     assert first_path.read_bytes() == second_path.read_bytes()
 
 
+def test_prior_effects_off_label_visibility_cache_is_invalidated(
+    monkeypatch, fake_renderer, tmp_path
+):
+    import forge3d.anamnesis as anamnesis
+
+    model = _scene(tmp_path / "frame.png")
+    cache = tmp_path / "cache"
+    render_sequence = anamnesis.render_sequence
+
+    def previous_visibility_namespace(recipe, **kwargs):
+        kwargs["render_frame_fingerprint"] = b"forge3d.python.mapscene.render/v2"
+        return render_sequence(recipe, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(anamnesis, "render_sequence", previous_visibility_namespace)
+        model.render(cache=cache)
+    model.render(cache=cache)
+    assert model.last_render_metadata["cache_hit"] is False
+    assert fake_renderer == [35.0, 35.0]
+    model.render(cache=cache)
+    assert model.last_render_metadata["cache_hit"] is True
+    assert fake_renderer == [35.0, 35.0]
+
+
 def test_secondary_file_byte_change_misses_styled_raster_cache(fake_renderer, tmp_path):
     from test_raster_styles import bivariate
     scene = _scene(tmp_path / "frame.png")

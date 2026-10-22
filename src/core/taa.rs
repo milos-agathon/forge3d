@@ -63,6 +63,7 @@ pub struct TaaRenderer {
     read_index: usize,
     /// Compute pipeline
     pipeline: ComputePipeline,
+    shader_label: &'static str,
     bind_group_layout: BindGroupLayout,
     /// Sampler for history/color sampling
     sampler: Sampler,
@@ -85,6 +86,47 @@ pub(crate) struct PreparedTaaTargets {
 impl TaaRenderer {
     /// Create new TAA renderer
     pub fn new(device: &Device, width: u32, height: u32) -> RenderResult<Self> {
+        Self::new_with_source(device, width, height, TAA_SHADER_SRC, "taa.shader")
+    }
+
+    pub(crate) fn shared_geometry_source() -> RenderResult<String> {
+        let before = "let history_uv = uv - velocity * 2.0;";
+        if TAA_SHADER_SRC.matches(before).count() != 1 {
+            return Err(super::error::RenderError::Render(
+                "TAA reprojection convention changed".into(),
+            ));
+        }
+        Ok(TAA_SHADER_SRC
+            .replacen(before, "let history_uv = uv - velocity;", 1)
+            .replace(
+                "// Velocity is in screen space [-1, 1] scaled by 0.5, so multiply by 2",
+                "// Shared geometry stores current minus previous UV directly",
+            ))
+    }
+
+    /// Shared geometry stores current minus previous UV. Reuse the existing
+    /// temporal kernel with that convention; legacy producers keep theirs.
+    pub(crate) fn new_shared_geometry(
+        device: &Device,
+        width: u32,
+        height: u32,
+    ) -> RenderResult<Self> {
+        Self::new_with_source(
+            device,
+            width,
+            height,
+            &Self::shared_geometry_source()?,
+            "concordia.taa.shader",
+        )
+    }
+
+    fn new_with_source(
+        device: &Device,
+        width: u32,
+        height: u32,
+        source: &str,
+        shader_label: &'static str,
+    ) -> RenderResult<Self> {
         let settings = TaaSettings {
             resolution: [width as f32, height as f32],
             ..Default::default()
@@ -124,8 +166,8 @@ impl TaaRenderer {
         // Create shader module
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             device,
-            "taa.shader",
-            TAA_SHADER_SRC,
+            shader_label,
+            source,
         );
 
         // Bind group layout:
@@ -247,6 +289,7 @@ impl TaaRenderer {
             width,
             height,
             first_frame: true,
+            shader_label,
         })
     }
 
@@ -326,6 +369,10 @@ impl TaaRenderer {
             self.history_textures[0].ledger_id(),
             self.history_textures[1].ledger_id(),
         ]
+    }
+
+    pub(crate) fn history_texture(&self) -> &Texture {
+        &self.history_textures[self.read_index]
     }
 
     /// Get current history view (read)
@@ -487,6 +534,7 @@ impl TaaRenderer {
                 label: Some("taa.resolve"),
                 timestamp_writes: None,
             });
+            crate::core::shader_registry::record_shader_use(self.shader_label);
             cpass.set_pipeline(&self.pipeline);
             cpass.set_bind_group(0, &bind_group, &[]);
             cpass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
@@ -503,6 +551,21 @@ impl TaaRenderer {
 #[cfg(test)]
 mod history_tests {
     use super::*;
+
+    #[test]
+    fn concordia_taa_consumes_shared_uv_motion_once() {
+        let source = TaaRenderer::shared_geometry_source().unwrap();
+        assert!(source.contains("let history_uv = uv - velocity;"));
+        assert!(!source.contains("let history_uv = uv - velocity * 2.0;"));
+        assert!(TAA_SHADER_SRC.contains("let history_uv = uv - velocity * 2.0;"));
+        let module = naga::front::wgsl::parse_str(&source).unwrap();
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .unwrap();
+    }
 
     #[test]
     fn invalid_history_forces_current_only_then_valid_history_reuses_weight() {

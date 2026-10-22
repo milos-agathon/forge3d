@@ -71,6 +71,7 @@ RENDER_ENTRYPOINTS = {
     "render_brdf_tile_overrides": _native.render_brdf_tile_overrides,
     "TerrainRenderer.render_terrain_pbr_pom": f3d.TerrainRenderer.render_terrain_pbr_pom,
     "TerrainRenderer.render_with_aov": f3d.TerrainRenderer.render_with_aov,
+    "TerrainRenderer.render_interactive": f3d.TerrainRenderer.render_interactive,
     "render_adjudication_pair": f3d.render_adjudication_pair,
     "hybrid_render_terrain_reference": f3d.hybrid_render_terrain_reference,
     "render_terrain_poster": f3d.render_terrain_poster,

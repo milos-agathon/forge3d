@@ -180,11 +180,31 @@ def _draw_pixel_block(image: Any, x: int, y: int, color: tuple[int, int, int, in
     _blend_rect(image, x0, y0, x1, y1, color)
 
 
-def _draw_disc(image: Any, x: float, y: float, color: tuple[int, int, int, int], radius: float) -> None:
-    import numpy as np
+def _geometry_region(image: Any, bounds: tuple[float, float, float, float], clip: bool) -> tuple[Any, int, int, int, int]:
+    """Keep raster coordinates global while limiting native input authoring to its support."""
+    import math
 
     height, width = image.shape[:2]
-    yy, xx = np.mgrid[0:height, 0:width]
+    if not clip:
+        return image, 0, 0, width, height
+    x0, y0, x1, y1 = bounds
+    left = max(0, min(width, math.floor(x0)))
+    top = max(0, min(height, math.floor(y0)))
+    right = max(left, min(width, math.ceil(x1) + 1))
+    bottom = max(top, min(height, math.ceil(y1) + 1))
+    return image[top:bottom, left:right], left, top, right, bottom
+
+
+def _draw_disc(
+    image: Any, x: float, y: float, color: tuple[int, int, int, int], radius: float,
+    *, clip_to_geometry: bool = False,
+) -> None:
+    import numpy as np
+
+    extent = float(radius) + 0.5
+    image, left, top, right, bottom = _geometry_region(
+        image, (x - extent, y - extent, x + extent, y + extent), clip_to_geometry)
+    yy, xx = np.mgrid[top:bottom, left:right]
     distance = np.sqrt((xx.astype(np.float32) - float(x)) ** 2 + (yy.astype(np.float32) - float(y)) ** 2)
     coverage = np.clip(float(radius) + 0.5 - distance, 0.0, 1.0)
     _blend_region(image, coverage, color)
@@ -198,24 +218,30 @@ def _draw_line(
     *,
     width_px: float = 1.0,
     cap: str = "round",
+    clip_to_geometry: bool = False,
 ) -> None:
     import numpy as np
 
     x0, y0 = start
     x1, y1 = end
-    height, width = image.shape[:2]
-    yy, xx = np.mgrid[0:height, 0:width]
+    half_width = max(0.5, float(width_px) * 0.5)
+    cap_key = str(cap or "round").lower()
+    # A square cap extends the centerline by half_width; the distance field
+    # extends another half_width plus its half-pixel antialiasing support.
+    extent = half_width * (2.0 if cap_key == "square" else 1.0) + 0.5
+    image, left, top, right, bottom = _geometry_region(image,
+        (min(x0, x1) - extent, min(y0, y1) - extent,
+         max(x0, x1) + extent, max(y0, y1) + extent), clip_to_geometry)
+    yy, xx = np.mgrid[top:bottom, left:right]
     px = xx.astype(np.float32)
     py = yy.astype(np.float32)
     vx = float(x1 - x0)
     vy = float(y1 - y0)
     length_sq = max(vx * vx + vy * vy, 1.0)
     segment_len = float(np.sqrt(length_sq))
-    half_width = max(0.5, float(width_px) * 0.5)
     t_raw = ((px - x0) * vx + (py - y0) * vy) / length_sq
     t_min = 0.0
     t_max = 1.0
-    cap_key = str(cap or "round").lower()
     if cap_key == "square":
         extension = half_width / max(segment_len, 1.0)
         t_min -= extension
@@ -338,6 +364,7 @@ def _draw_polyline_join(
     radius: float,
     join: str,
     miter_limit: float,
+    clip_to_geometry: bool = False,
 ) -> None:
     import math
 
@@ -350,7 +377,7 @@ def _draw_polyline_join(
         return
     join_key = str(join or "miter").lower()
     if join_key == "round" or dot < -0.999:
-        _draw_disc(image, float(point[0]), float(point[1]), color, radius)
+        _draw_disc(image, float(point[0]), float(point[1]), color, radius, clip_to_geometry=clip_to_geometry)
         return
 
     normal_in = (-incoming[1], incoming[0])
@@ -372,7 +399,7 @@ def _draw_polyline_join(
         else:
             polygon = [(px, py), start_offset, miter, end_offset]
         if abs(_polygon_area(polygon)) > 1.0e-3:
-            _draw_polygon_fill(image, [polygon], color)
+            _draw_polygon_fill(image, [polygon], color, clip_to_geometry=clip_to_geometry)
 
 
 def _resolve_line_width_px(layer: Any, line_paint: Mapping[str, Any], recipe: Any, width: int, height: int) -> float:
@@ -412,6 +439,7 @@ def _draw_polyline(
     join: str = "miter",
     dash_array: Sequence[float] | None = None,
     miter_limit: float = 4.0,
+    clip_to_geometry: bool = False,
 ) -> None:
     if len(points) < 2:
         return
@@ -427,10 +455,11 @@ def _draw_polyline(
             color,
             width_px=width_px,
             cap=cap_key,
+            clip_to_geometry=clip_to_geometry,
         )
         if cap_key == "round":
-            _draw_disc(image, start[0], start[1], color, radius)
-            _draw_disc(image, end[0], end[1], color, radius)
+            _draw_disc(image, start[0], start[1], color, radius, clip_to_geometry=clip_to_geometry)
+            _draw_disc(image, end[0], end[1], color, radius, clip_to_geometry=clip_to_geometry)
     if dash_array:
         return
     for previous, point, next_point in zip(points, points[1:], points[2:]):
@@ -443,6 +472,7 @@ def _draw_polyline(
             radius=radius,
             join=join_key,
             miter_limit=miter_limit,
+            clip_to_geometry=clip_to_geometry,
         )
 
 
@@ -488,14 +518,21 @@ def _ring_contains(ring: Sequence[tuple[float, float]], sample_x: Any, sample_y:
     return inside
 
 
-def _draw_polygon_fill(image: Any, points: Sequence[Any], color: tuple[int, int, int, int]) -> None:
+def _draw_polygon_fill(
+    image: Any, points: Sequence[Any], color: tuple[int, int, int, int],
+    *, clip_to_geometry: bool = False,
+) -> None:
     import numpy as np
 
     rings = _polygon_rings(points)
     if not rings:
         return
+    vertices = [point for ring in rings for point in ring]
+    image, left, top, right, bottom = _geometry_region(image,
+        (min(p[0] for p in vertices) - 0.5, min(p[1] for p in vertices) - 0.5,
+         max(p[0] for p in vertices) + 0.5, max(p[1] for p in vertices) + 0.5), clip_to_geometry)
     height, width = image.shape[:2]
-    yy, xx = np.mgrid[0:height, 0:width]
+    yy, xx = np.mgrid[top:bottom, left:right]
     samples = 4
     offsets = (np.arange(samples, dtype=np.float32) + 0.5) / float(samples) - 0.5
     coverage = np.zeros((height, width), dtype=np.float32)

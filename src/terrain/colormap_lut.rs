@@ -9,6 +9,8 @@ pub struct ColormapLUT {
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
     pub format: wgpu::TextureFormat,
+    /// Authored bytes identify radiance changes without reading the GPU image.
+    pub(crate) content_hash: [u8; 32],
 }
 
 impl ColormapLUT {
@@ -76,6 +78,7 @@ impl ColormapLUT {
             view,
             sampler,
             format,
+            content_hash: <sha2::Sha256 as sha2::Digest>::digest(data).into(),
         })
     }
 
@@ -171,6 +174,7 @@ impl ColormapLUT {
             view,
             sampler,
             format,
+            content_hash: <sha2::Sha256 as sha2::Digest>::digest(data).into(),
         })
     }
 
@@ -265,6 +269,7 @@ impl ColormapLUT {
                 view,
                 sampler,
                 format,
+                content_hash: <sha2::Sha256 as sha2::Digest>::digest(&palette).into(),
             },
             format_name,
         ))
@@ -391,6 +396,7 @@ impl ColormapLUT {
                 view,
                 sampler,
                 format,
+                content_hash: <sha2::Sha256 as sha2::Digest>::digest(&combined_data).into(),
             },
             format_name,
         ))

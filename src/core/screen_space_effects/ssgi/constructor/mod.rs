@@ -68,6 +68,7 @@ impl SsgiRenderer {
         let textures = resources::create_textures(device, width, height, material_format, false)?;
 
         Ok(Self {
+            concordia_projection: false,
             settings,
             settings_buffer: buffers.settings_buffer,
             camera_buffer: buffers.camera_buffer,
@@ -100,6 +101,7 @@ impl SsgiRenderer {
             scene_history_views: textures.viewport.scene_history_views,
             scene_history_index: 0,
             scene_history_ready: false,
+            scene_color_override: None,
             linear_sampler: textures.linear_sampler,
             _env_texture: textures.env_texture,
             env_view: textures.env_view,

@@ -1,6 +1,6 @@
 use super::*;
 
-const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 5] = [
+pub(super) const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 5] = [
     wgpu::VertexAttribute {
         offset: 0,
         shader_location: 0,
@@ -194,7 +194,7 @@ pub(super) fn create_pick_pipeline(
     )
 }
 
-fn point_primitive_state() -> wgpu::PrimitiveState {
+pub(super) fn point_primitive_state() -> wgpu::PrimitiveState {
     wgpu::PrimitiveState {
         topology: wgpu::PrimitiveTopology::TriangleStrip,
         strip_index_format: None,

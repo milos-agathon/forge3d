@@ -366,7 +366,7 @@ impl TerrainScatterBatch {
 
         let gpu_levels = levels
             .into_iter()
-            .map(|spec| build_gpu_level(device, queue, spec))
+            .map(|spec| build_gpu_level(device, queue, spec, wind.enabled))
             .collect::<Result<Vec<_>>>()?;
         let level_count = gpu_levels.len();
 
@@ -1038,6 +1038,7 @@ fn build_gpu_level(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     spec: TerrainScatterLevelSpec,
+    wind_enabled: bool,
 ) -> Result<GpuScatterLevel> {
     let mesh = spec.mesh;
     if mesh.is_empty() {
@@ -1066,7 +1067,7 @@ fn build_gpu_level(
         });
     let mesh_height_max = y_max;
     let y_extent = y_max - y_min;
-    if y_extent > 1e-6 && y_min.abs() > 0.05 * y_extent {
+    if wind_enabled && y_extent > 1e-6 && y_min.abs() > 0.05 * y_extent {
         eprintln!(
             "[terrain.scatter] warning: mesh y_min={y_min:.3} deviates from zero \
              by >{:.0}% of y_extent={y_extent:.3}; wind bend weighting may be incorrect",

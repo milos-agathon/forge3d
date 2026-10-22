@@ -15,6 +15,7 @@ mod viewer_new;
 pub use device_init::create_device_and_surface;
 pub use fallback_init::create_fallback_pipeline;
 pub use fog_init::create_fog_resources;
+pub(crate) use fog_init::{create_shared_fog_resources, FogResources};
 pub use gbuffer_init::create_gbuffer_resources;
 pub use gi_baseline_init::create_gi_baseline_resources;
 pub use lit_init::create_lit_resources;

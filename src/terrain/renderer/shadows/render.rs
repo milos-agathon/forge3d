@@ -19,6 +19,7 @@ impl TerrainScene {
         near_plane: f32,
         far_plane: f32,
         height_curve: [f32; 4],
+        shared_frame: bool,
     ) -> Result<wgpu::BindGroup> {
         let light_dir = sun_direction.normalize();
         let light_up = if light_dir.z.abs() > 0.99 {
@@ -28,8 +29,17 @@ impl TerrainScene {
         };
 
         let half_spacing = terrain_spacing * 0.5;
-        let shadow_z_min = 0.0;
-        let shadow_z_max = height_exag;
+        let height_extent = (height_max - height_min).max(1e-6) * height_exag;
+        let shadow_z_min = if shared_frame {
+            -0.5 * height_extent
+        } else {
+            0.0
+        };
+        let shadow_z_max = if shared_frame {
+            0.5 * height_extent
+        } else {
+            height_exag
+        };
 
         let terrain_min = glam::Vec3::new(-half_spacing, -half_spacing, shadow_z_min);
         let terrain_max = glam::Vec3::new(half_spacing, half_spacing, shadow_z_max);
@@ -180,8 +190,27 @@ impl TerrainScene {
             let cascade = &self.csm_renderer.uniforms.cascades[cascade_idx as usize];
             let stored_light_view_proj = cascade.light_view_proj;
             let shadow_uniforms = ShadowPassUniforms {
-                light_view_proj: stored_light_view_proj,
-                terrain_params: [terrain_spacing, height_exag, height_min, height_max],
+                light_view_proj: if shared_frame {
+                    (glam::Mat4::from_cols_array_2d(&stored_light_view_proj)
+                        * glam::Mat4::from_translation(glam::Vec3::new(
+                            0.0,
+                            0.0,
+                            -0.5 * height_extent,
+                        )))
+                    .to_cols_array_2d()
+                } else {
+                    stored_light_view_proj
+                },
+                terrain_params: [
+                    terrain_spacing,
+                    if shared_frame {
+                        height_extent
+                    } else {
+                        height_exag
+                    },
+                    height_min,
+                    height_max,
+                ],
                 grid_params: [SHADOW_GRID_RES as f32, 0.0, 0.0, 0.0],
                 height_curve,
             };

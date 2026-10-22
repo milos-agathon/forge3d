@@ -49,7 +49,7 @@ fn noise(st: vec2<f32>) -> f32 {
     let c = random(i + vec2<f32>(0.0, 1.0));
     let d = random(i + vec2<f32>(1.0, 1.0));
 
-    let u = f * f * (3.0 - 2.0 * f);
+    let u = f * f * (vec2<f32>(3.0) - 2.0 * f);
 
     return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
 }
@@ -95,9 +95,9 @@ fn worley_noise(st: vec2<f32>, scale: f32) -> f32 {
     for (var y = -1; y <= 1; y = y + 1) {
         for (var x = -1; x <= 1; x = x + 1) {
             let neighbor = vec2<f32>(f32(x), f32(y));
-            let point = random(i_st + neighbor) * 0.5 + 0.25;
+            var point = random(i_st + neighbor) * 0.5 + 0.25;
             point = 0.5 + 0.5 * sin(cloud_params.time * 0.5 + 6.2831 * point);
-            let diff = neighbor + point - f_st;
+            let diff = neighbor + vec2<f32>(point) - f_st;
             let dist = length(diff);
             min_dist = min(min_dist, dist);
         }
@@ -115,7 +115,7 @@ fn generate_cloud_density(uv: vec2<f32>) -> f32 {
     ) * cloud_params.time * 0.1;
 
     // Add cloud speed movement
-    let moved_uv = uv + cloud_params.cloud_speed * cloud_params.time + wind_offset;
+    let moved_uv = uv + cloud_params.cloud_speed * cloud_params.time + wind_offset + cloud_params._padding;
 
     // Scale UV coordinates
     let scaled_uv = moved_uv * cloud_params.cloud_scale;

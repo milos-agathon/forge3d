@@ -132,6 +132,10 @@ impl WeightedOIT {
         &self.depth_view
     }
 
+    pub(crate) fn depth_texture(&self) -> &wgpu::Texture {
+        &self._depth_buffer
+    }
+
     /// Create an Eye-Dome Lighting post-process pipeline for a composed OIT color target.
     pub fn create_edl_pipeline(
         &self,

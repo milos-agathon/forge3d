@@ -40,6 +40,7 @@ impl TerrainScene {
         &mut self,
         batches: Vec<TerrainScatterUploadBatch>,
     ) -> Result<()> {
+        let signature = scatter_history_signature(&batches);
         let mut gpu_batches = Vec::with_capacity(batches.len());
         for batch in batches {
             gpu_batches.push(TerrainScatterBatch::new(
@@ -58,12 +59,14 @@ impl TerrainScene {
         }
 
         self.scatter_batches = gpu_batches;
+        self.concordia_geometry_signature = Some(signature);
         self.scatter_last_frame_stats = TerrainScatterFrameStats::default();
         Ok(())
     }
 
     pub(super) fn clear_scatter_batches_native(&mut self) {
         self.scatter_batches.clear();
+        self.concordia_geometry_signature = None;
         self.scatter_last_frame_stats = TerrainScatterFrameStats::default();
     }
 
@@ -144,7 +147,10 @@ impl TerrainScene {
             return Ok(());
         }
 
-        self.ensure_scatter_renderer_sample_count(render_targets.sample_count)?;
+        self.ensure_scatter_renderer_sample_count(
+            render_targets.sample_count,
+            render_targets.concordia.as_ref(),
+        )?;
 
         let color_view = render_targets
             .msaa_view
@@ -185,16 +191,29 @@ impl TerrainScene {
         )?;
         queue.write_buffer(&hlod_instbuf, 0, bytemuck::cast_slice(&identity_packed));
 
+        let ordinary_attachments = [Some(wgpu::RenderPassColorAttachment {
+            view: color_view,
+            resolve_target,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            },
+        })];
+        let concordia_attachments;
+        let attachments = if let Some(frame) = render_targets.concordia.as_ref() {
+            concordia_attachments = frame.gbuffer().geometry_attachments(
+                color_view,
+                wgpu::LoadOp::Load,
+                true,
+                &frame.surface_kind_view,
+            );
+            &concordia_attachments[..]
+        } else {
+            &ordinary_attachments[..]
+        };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("terrain.scatter.render_pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: color_view,
-                resolve_target,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
+            color_attachments: attachments,
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &render_targets.depth_view,
                 depth_ops: Some(wgpu::Operations {
@@ -207,6 +226,10 @@ impl TerrainScene {
             occlusion_query_set: None,
         });
 
+        if let Some(frame) = render_targets.concordia.as_ref() {
+            crate::core::shader_registry::record_shader_use("concordia.scatter.shader");
+            pass.set_bind_group(3, &frame.frame_bind_group, &[]);
+        }
         for batch in &mut self.scatter_batches {
             let (batch_stats, draws) = batch.prepare_draws(
                 device,
@@ -295,13 +318,25 @@ impl TerrainScene {
         Ok(())
     }
 
-    fn ensure_scatter_renderer_sample_count(&mut self, sample_count: u32) -> Result<()> {
+    fn ensure_scatter_renderer_sample_count(
+        &mut self,
+        sample_count: u32,
+        concordia: Option<&super::interactive::ConcordiaFrame>,
+    ) -> Result<()> {
         let sample_count = sample_count.max(1);
-        if self.scatter_renderer_sample_count == sample_count {
+        if self.scatter_renderer_sample_count == sample_count
+            && self.scatter_concordia == concordia.is_some()
+        {
             return Ok(());
         }
 
-        self.scatter_renderer =
+        self.scatter_renderer = if let Some(frame) = concordia {
+            crate::render::mesh_instanced::MeshInstancedRenderer::new_concordia(
+                &self.device,
+                &self.shadow_bind_group_layout,
+                &frame.frame_layout,
+            )?
+        } else {
             crate::render::mesh_instanced::MeshInstancedRenderer::new_with_depth_state_and_shadow_layout(
                 self.device.as_ref(),
                 self.color_format,
@@ -310,8 +345,41 @@ impl TerrainScene {
                 wgpu::CompareFunction::LessEqual,
                 false,
                 Some(&self.shadow_bind_group_layout),
-            )?;
+            )?
+        };
+        self.scatter_concordia = concordia.is_some();
         self.scatter_renderer_sample_count = sample_count;
         Ok(())
     }
+}
+
+// Internal temporal invalidation identity, never a serialized determinism pin.
+fn scatter_history_signature(batches: &[TerrainScatterUploadBatch]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    for batch in batches {
+        hash.update(
+            format!(
+                "{:?}{:?}{:?}{:?}{:?}{:?}{:?}",
+                batch.name,
+                batch.color,
+                batch.max_draw_distance,
+                batch.terrain_blend,
+                batch.terrain_contact,
+                batch.wind,
+                batch.hlod_config
+            )
+            .as_bytes(),
+        );
+        hash.update(bytemuck::cast_slice(&batch.transforms_rowmajor));
+        for level in &batch.levels {
+            hash.update(format!("{:?}", level.max_distance).as_bytes());
+            hash.update(bytemuck::cast_slice(&level.mesh.positions));
+            hash.update(bytemuck::cast_slice(&level.mesh.normals));
+            hash.update(bytemuck::cast_slice(&level.mesh.uvs));
+            hash.update(bytemuck::cast_slice(&level.mesh.tangents));
+            hash.update(bytemuck::cast_slice(&level.mesh.indices));
+        }
+    }
+    hash.finalize().into()
 }

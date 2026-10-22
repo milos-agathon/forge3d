@@ -36,12 +36,13 @@ mod core;
 mod draw;
 mod geometry;
 mod height_ao;
+pub(crate) mod interactive;
 mod msaa;
 mod offline;
-#[cfg(feature = "enable-globe")]
-mod orbis_globe_background;
 #[cfg(all(feature = "enable-globe", feature = "extension-module"))]
 pub(crate) mod orbis_capture;
+#[cfg(feature = "enable-globe")]
+mod orbis_globe_background;
 mod pipeline_cache;
 mod probes;
 mod py_api;
@@ -59,8 +60,8 @@ pub(crate) mod virtual_texture;
 pub(crate) mod visibility_buffer;
 mod water_reflection;
 
-pub use self::core::{TerrainRenderer, TerrainScene, ViewerTerrainData};
 pub(crate) use self::core::is_north_up_camera_mode;
+pub use self::core::{TerrainRenderer, TerrainScene, ViewerTerrainData};
 #[cfg(feature = "enable-globe")]
 pub(crate) use self::orbis_globe_background::ORBIS_EARTH_TEXTURE_MAX_WIDTH;
 
