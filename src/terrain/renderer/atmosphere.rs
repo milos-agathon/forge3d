@@ -284,7 +284,7 @@ pub(super) fn create_atmosphere_init_resources(
 }
 
 impl TerrainScene {
-    pub(super) fn render_sky_texture(
+    pub(in crate::terrain) fn render_sky_texture(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         decoded: &crate::terrain::render_params::DecodedTerrainSettings,

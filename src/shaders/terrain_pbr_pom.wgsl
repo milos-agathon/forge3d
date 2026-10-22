@@ -5856,7 +5856,8 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         if (!is_water && fog_uniforms.media_params.x > 0.5) {
             let dimensions = vec2<i32>(textureDimensions(nephele_surface_cloudlight_tex));
             let pixel = clamp(vec2<i32>(input.clip_position.xy), vec2<i32>(0), dimensions - 1);
-            let irradiance = max(textureLoad(nephele_surface_cloudlight_tex, pixel, 0).rgb, vec3<f32>(0.0));
+            let boundary = textureLoad(nephele_surface_cloudlight_tex, pixel, 0);
+            let irradiance = select(max(boundary.rgb, vec3<f32>(0.0)), boundary.rgb, boundary.a > 1.0);
             shaded = shaded + det_barrier3(det_div3(albedo, vec3<f32>(PI)) * irradiance);
         }
         let exposure = max(u_shading.light_params.w, 0.0);

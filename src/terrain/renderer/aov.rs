@@ -1031,7 +1031,10 @@ impl TerrainScene {
 
         if media_enabled {
             graph.execute_with_barriers("nephele.media.cloudlight", |_barriers| {
-                self.encode_attached_surface_cloudlight(&mut encoder, params, &decoded)
+                let scope=ts_begin(&mut timing,&mut encoder,"nephele.media.cloudlight");
+                self.encode_attached_surface_cloudlight(&mut encoder, params, &decoded, env_maps)?;
+                ts_end(&mut timing,&mut encoder,scope,0);
+                Ok::<(), crate::core::error::RenderError>(())
             })?;
         }
         let shadow_setup = graph.execute_with_barriers("terrain.shadow", |_barriers| {
@@ -1220,6 +1223,7 @@ impl TerrainScene {
                     "terrain.forward_aov lost its compiled shadow transition"
                 ));
             }
+            if !self.realtime_media_directional_enabled()? {
             self.prepare_realtime_media_radiance_provider(
                 &mut encoder,
                 sky_texture.as_ref(),
@@ -1228,6 +1232,7 @@ impl TerrainScene {
                 env_maps.intensity.max(0.0),
                 media::ibl_mean_radiance(env_maps),
             )?;
+            }
             let main_scope = ts_begin(&mut timing, &mut encoder, "terrain.main");
             self.run_main_pass_with_aov(
                 &mut encoder,

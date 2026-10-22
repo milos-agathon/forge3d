@@ -2876,6 +2876,24 @@ jobs:
         run: |
           python -m scripts.nephele_acceptance produce --artifact-dir "$env:FORGE3D_NEPHELE_ARTIFACT_DIR" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/producer.log"
           exit $LASTEXITCODE
+      - name: Run installed-wheel fast validation without skips
+        shell: pwsh
+        run: |
+          $junit = Join-Path $env:FORGE3D_NEPHELE_ARTIFACT_DIR "fast-junit.xml"
+          python scripts/ci_pytest_lane.py --profile fast --deselect=tests/test_budget_enforce.py::test_600mib_host_visible_raises_named_budget_error --basetemp="$env:FORGE3D_NEPHELE_ARTIFACT_DIR/pytest-fast" --junitxml="$junit" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/fast.log"
+          $pytestCode = $LASTEXITCODE
+          python scripts/assert_junit_zero_skips.py "$junit" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/fast-zero-skip.log"
+          if ($pytestCode -ne 0) { exit $pytestCode }
+          exit $LASTEXITCODE
+      - name: Run shader contracts and both NEPHELE environment cases on the physical GPU
+        shell: pwsh
+        run: |
+          $junit = Join-Path $env:FORGE3D_NEPHELE_ARTIFACT_DIR "contracts-environment-junit.xml"
+          python -m pytest tests/test_shader_proofs.py tests/test_nephele_environment_defects.py --basetemp="$env:FORGE3D_NEPHELE_ARTIFACT_DIR/pytest-contracts" --junitxml="$junit" -v --tb=short *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/contracts-environment.log"
+          $pytestCode = $LASTEXITCODE
+          python scripts/assert_junit_zero_skips.py "$junit" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/contracts-environment-zero-skip.log"
+          if ($pytestCode -ne 0) { exit $pytestCode }
+          exit $LASTEXITCODE
       - name: Capture two independent clean physical runs and ablations
         shell: pwsh
         run: |
@@ -2897,6 +2915,11 @@ jobs:
         shell: pwsh
         run: |
           python -m scripts.nephele_acceptance report --artifact-dir "$env:FORGE3D_NEPHELE_ARTIFACT_DIR" --head-sha "$env:FORGE3D_NEPHELE_CANDIDATE_SHA" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/evidence-verifier.log"
+          exit $LASTEXITCODE
+      - name: Measure NEPHELE frame latency on the original 1500-square Gore Range DEM
+        shell: pwsh
+        run: |
+          python docs/audits/nephele-dem-frame-time-2026-10-22.py --output "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/realistic-dem-frame-time.json" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/realistic-dem-frame-time.log"
           exit $LASTEXITCODE
       - name: Record physical lane RAN and verifier PASS
         id: nephele-pass

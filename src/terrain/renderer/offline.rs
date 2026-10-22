@@ -760,6 +760,9 @@ impl TerrainScene {
                 1.0,
                 state.media_environment_radiance,
             )?;
+            self.encode_attached_surface_cloudlight_with_matrices(
+                &mut encoder, &state.params, &state.decoded, eye, view, jittered_proj,
+            )?;
 
             let main_height_view = self.main_pass_height_view(&state.height_inputs.heightmap_view);
             let pass_bind_groups = self.create_terrain_pass_bind_groups(

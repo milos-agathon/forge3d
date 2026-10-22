@@ -528,7 +528,11 @@ impl TerrainScene {
                     }
                     ("nephele.media.cloudlight", GraphPassAction::Execute { .. }) => {
                         execution.run_pass("nephele.media.cloudlight", |context| {
-                            self.encode_attached_surface_cloudlight(context.encoder(), params, decoded)
+                            let encoder=context.encoder();
+                            let scope=ts_begin(&mut timing,encoder,"nephele.media.cloudlight");
+                            self.encode_attached_surface_cloudlight(encoder, params, decoded, env_maps)?;
+                            ts_end(&mut timing,encoder,scope,0);
+                            Ok::<(), crate::core::error::RenderError>(())
                         })?;
                         Ok(GraphPassOutcome::Executed(Vec::new()))
                     }

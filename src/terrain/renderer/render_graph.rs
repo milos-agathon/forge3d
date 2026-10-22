@@ -23,6 +23,8 @@ pub(in crate::terrain) struct TerrainMediaGraphHandles {
     pub(in crate::terrain) world_medium: ResourceHandle,
     pub(in crate::terrain) world_sun: ResourceHandle,
     pub(in crate::terrain) surface_cloudlight: ResourceHandle,
+    pub(in crate::terrain) directional_buffers: Option<[ResourceHandle; 6]>,
+    pub(in crate::terrain) directional_textures: Option<[ResourceHandle; 4]>,
     pub(in crate::terrain) in_scatter: ResourceHandle,
     pub(in crate::terrain) integrated: ResourceHandle,
     pub(in crate::terrain) transmittance: ResourceHandle,
@@ -51,6 +53,7 @@ pub(super) struct TerrainPassDeclarations {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::terrain) struct TerrainMediaGraphConfig {
     pub(in crate::terrain) enabled: bool,
+    pub(in crate::terrain) directional: bool,
     pub(in crate::terrain) froxel_grid: super::media::FroxelGrid,
     pub(in crate::terrain) resource_version: u64,
 }
@@ -59,6 +62,7 @@ impl TerrainMediaGraphConfig {
     pub(in crate::terrain) fn disabled(output_width: u32, output_height: u32) -> Self {
         Self {
             enabled: false,
+            directional: false,
             froxel_grid: super::media::FroxelGrid::for_viewport(output_width, output_height),
             resource_version: 0,
         }
@@ -311,6 +315,20 @@ pub(super) fn build_terrain_render_graph(
         let history_previous = output("nephele.media.history.previous.in_scatter");
         let history_current = output("nephele.media.history.current.in_scatter");
         let composite = output("nephele.media.composite.linear_hdr");
+        let directional_buffers = media.directional.then(|| std::array::from_fn(|index| {
+            builder.add_resource(ResourceDesc {
+                name: format!("nephele.media.directional.buffer.{index}"),
+                resource_type: ResourceType::StorageBuffer, format: None, extent: None,
+                size: None, usage: None, can_alias: false, is_transient: false,
+            })
+        }));
+        let directional_textures=media.directional.then(||std::array::from_fn(|index| {
+            builder.add_resource(ResourceDesc {
+                name:format!("nephele.media.directional.texture.{index}"),resource_type:ResourceType::SampledTexture,
+                format:Some(match index { 2=>wgpu::TextureFormat::Rgba32Uint,3=>wgpu::TextureFormat::R32Uint,_=>wgpu::TextureFormat::Rgba16Float }),
+                extent:None,size:None,usage:Some(wgpu::TextureUsages::TEXTURE_BINDING|if index==3 {wgpu::TextureUsages::COPY_DST}else{wgpu::TextureUsages::STORAGE_BINDING}),can_alias:false,is_transient:false,
+            })
+        }));
         TerrainMediaGraphHandles {
             scene_depth,
             radiance_provider,
@@ -319,6 +337,8 @@ pub(super) fn build_terrain_render_graph(
             world_medium,
             world_sun,
             surface_cloudlight,
+            directional_buffers,
+            directional_textures,
             in_scatter,
             integrated,
             transmittance,
@@ -386,6 +406,15 @@ pub(super) fn build_terrain_render_graph(
                 .write(m.world_sun).write(m.surface_cloudlight)
                 .pipeline_descriptor(pipeline_material("nephele.media.cloudlight", color_format, aov))
                 .uniform_bytes(declarations.forward.clone());
+            if let Some(buffers) = m.directional_buffers {
+                pass.read(m.extinction).read(m.radiance_provider).read(m.light_transmittance)
+                    .write(m.radiance_provider).write(m.in_scatter);
+                for (index,buffer) in buffers.into_iter().enumerate() {
+                    pass.read(buffer);
+                    if index!=2 { pass.write(buffer); }
+                }
+                for (index,texture) in m.directional_textures.unwrap().into_iter().enumerate() { pass.read(texture); if index!=3 {pass.write(texture);} }
+            }
             Ok(())
         })?;
     }
@@ -413,8 +442,9 @@ pub(super) fn build_terrain_render_graph(
             // populates the directional linear-HDR radiance consumed by injection.
             pass.read(m.light_transmittance)
                 .read(m.surface_cloudlight)
-                .write(m.scene_depth)
-                .write(m.radiance_provider);
+                .write(m.scene_depth);
+            if m.directional_buffers.is_some() { pass.read(m.radiance_provider); }
+            else { pass.write(m.radiance_provider); }
         }
         Ok(())
     })?;
@@ -430,9 +460,13 @@ pub(super) fn build_terrain_render_graph(
                 .read(m.light_transmittance)
                 .read(m.world_medium)
                 .read(m.world_sun)
-                .write(m.in_scatter)
                 .pipeline_descriptor(pipeline_material("nephele.media.inject", color_format, aov))
                 .uniform_bytes(media.resource_version.to_le_bytes().to_vec());
+            if let Some(buffers) = m.directional_buffers {
+                for buffer in buffers { pass.read(buffer); }
+                for texture in m.directional_textures.unwrap() {pass.read(texture);}
+                pass.read(m.in_scatter);
+            } else {pass.write(m.in_scatter);}
             Ok(())
         })?;
         builder.add_pass("nephele.media.integrate", PassType::Compute, |pass| {
@@ -525,6 +559,28 @@ mod tests {
         }
     }
     #[test]
+    fn directional_media_declares_each_transport_buffer_and_source_read() {
+        let graph = build_terrain_render_graph(
+            64, 64, 64, 64, 16, 16, 256, 4, wgpu::TextureFormat::Rgba16Float, false,
+            TerrainMediaGraphConfig { enabled: true, directional: true,
+                froxel_grid: super::super::media::FroxelGrid::for_viewport(64,64), resource_version: 7 },
+            declarations(), false,
+        ).unwrap();
+        let media = graph.handles.media.unwrap();
+        let pass = graph.plan.pass("nephele.media.cloudlight").unwrap();
+        assert!(pass.reads.contains(&media.extinction));
+        assert!(pass.reads.contains(&media.radiance_provider));
+        for (index,buffer) in media.directional_buffers.unwrap().into_iter().enumerate() {
+            assert!(pass.reads.contains(&buffer));
+            assert_eq!(pass.writes.contains(&buffer),index!=2);
+            assert_eq!(graph.plan.resource(buffer).unwrap().desc.resource_type, ResourceType::StorageBuffer);
+        }
+        for (index,texture) in media.directional_textures.unwrap().into_iter().enumerate() {
+            assert!(pass.reads.contains(&texture));
+            assert_eq!(pass.writes.contains(&texture),index!=3);
+        }
+    }
+    #[test]
     fn media_disabled_preserves_graph() {
         let g = build_terrain_render_graph(
             640,
@@ -568,6 +624,7 @@ mod tests {
             false,
             TerrainMediaGraphConfig {
                 enabled: true,
+                directional: false,
                 froxel_grid: super::super::media::FroxelGrid::for_viewport(640, 480),
                 resource_version: 7,
             },
@@ -606,6 +663,7 @@ mod tests {
             true,
             TerrainMediaGraphConfig {
                 enabled: true,
+                directional: false,
                 froxel_grid: super::super::media::FroxelGrid::for_viewport(64, 64),
                 resource_version: 7,
             },

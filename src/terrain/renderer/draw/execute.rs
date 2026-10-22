@@ -318,6 +318,7 @@ impl TerrainScene {
             .as_ref()
             .and_then(|sky| sky.scattering_view.as_ref())
             .unwrap_or(&self.atmosphere_scattering_fallback_view);
+        if !self.realtime_media_directional_enabled()? {
         self.prepare_realtime_media_radiance_provider(
             encoder,
             sky_texture.as_ref(),
@@ -326,6 +327,7 @@ impl TerrainScene {
             media_environment_intensity,
             media_environment_radiance,
         )?;
+        }
         let main_height_view = self.main_pass_height_view(&height_inputs.heightmap_view);
         let pass_bind_groups = self.create_terrain_pass_bind_groups(
             uniform_buffer,

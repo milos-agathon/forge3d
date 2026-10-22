@@ -182,6 +182,10 @@ pub(crate) struct MediaExecutionDiagnostics {
     pub single_scatter_dispatches: u64,
     pub multiple_scatter_dispatches: u64,
     pub terrain_trace_queries: u64,
+    /// False when the viewer reports the CPU-known lower bound without a GPU
+    /// readback. Explicit capture diagnostics include primary surface hits.
+    pub terrain_trace_queries_complete: bool,
+    pub directional_transport: Option<DirectionalSolveDiagnostics>,
     /// Executed surface-to-sun transport method.
     pub sun_transmittance_method: String,
     /// Named numerical bias, or `none_exact` for analytic transport.
@@ -327,6 +331,7 @@ struct RealtimeTerrainTrace {
     phase_hits: TrackedBuffer,
     world_sun: CloudlightDispatch,
     surface_cloudlight: CloudlightDispatch,
+    directional: Option<DirectionalTransport>,
     _terrain_uniform: TrackedBuffer,
     _curvature_uniform: TrackedBuffer,
     _pyramid: crate::path_tracing::hybrid_compute::terrain_heightfield::TerrainMinMaxPyramid,
@@ -338,6 +343,43 @@ struct RealtimeTerrainTrace {
 struct CloudlightDispatch {
     pipeline: wgpu::ComputePipeline,
     groups: [wgpu::BindGroup; 4],
+    label: String,
+}
+
+const DIRECTIONAL_DIRECTIONS: u64 = 192;
+
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub(crate) struct DirectionalSolveDiagnostics {
+    pub orders: u32,
+    pub converged: bool,
+    pub maximum_source_change: f64,
+    pub maximum_surface_change: f64,
+    pub iteration_wall_milliseconds: f64,
+    pub surface_cache_dimensions: [u32; 2],
+    pub cache_reused: bool,
+}
+
+struct CanonicalDensityNodes {
+    bytes: Vec<u8>,
+    _allocation: ResourceHandle,
+    active_indices: Vec<u32>,
+    _active_allocation: Option<ResourceHandle>,
+}
+
+struct DirectionalTransport {
+    iterations: [[CloudlightDispatch; 3]; 2],
+    final_incoming: [CloudlightDispatch; 2],
+    camera: CloudlightDispatch,
+    primary: [CloudlightDispatch; 2],
+    clear: CloudlightDispatch,
+    buffers: Vec<Arc<TrackedBuffer>>,
+    textures: [Arc<TrackedTexture>;4],
+    cache_workgroups: [u32;3],
+    surface_workgroups: [u32; 3],
+    allocation_bytes: u64,
+    solve_key: std::cell::Cell<Option<u64>>,
+    solve_diagnostics: std::cell::Cell<Option<DirectionalSolveDiagnostics>>,
+    executed_orders: std::cell::Cell<u32>,
 }
 
 struct TerminationReadback {
@@ -396,6 +438,7 @@ pub(super) struct TerrainMediaResources {
     pub(super) uniform_ambient_radiance: Option<[f32; 3]>,
     pub(super) radiance_provider: Arc<TrackedTexture>,
     pub(super) radiance_provider_identity: u64,
+    radiance_provider_cacheable: bool,
     pub(super) blue_noise_identity: u64,
     pub(super) extinction: Arc<TrackedTexture>,
     pub(super) single_scatter: TrackedTexture,
@@ -427,6 +470,8 @@ pub(super) struct TerrainMediaResources {
     cloudlight_uniforms: TrackedBuffer,
     pub(super) pipelines: RealtimeMediaPipelines,
     terrain_trace: Option<RealtimeTerrainTrace>,
+    canonical_density_nodes: Option<CanonicalDensityNodes>,
+    directional_occlusion: std::cell::Cell<Option<bool>>,
     single_scatter_dispatches: u64,
     multiple_scatter_dispatches: u64,
     density_froxel_count: u64,
@@ -514,6 +559,7 @@ impl ViewerMediaPass {
             options.froxel_depth_slices,
         )?;
         resources.uniform_ambient_radiance = Some(options.ambient_radiance);
+        resources.diffuse_ibl = diffuse_ibl_irradiance(options.ambient_radiance);
         Ok(Self {
             resources,
             medium,
@@ -549,10 +595,13 @@ impl ViewerMediaPass {
             frame.camera_position, frame.inverse_view_projection, frame.sun_direction,
             sun_radiance, true,
         );
+        if let Some(ambient) = self.resources.uniform_ambient_radiance {
+            fill_radiance_provider(queue, &self.resources.radiance_provider, self.resources.viewport, ambient)?;
+        }
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("nephele.viewer.surface_cloudlight.encoder"),
         });
-        self.resources.encode_cloudlight(queue, &mut encoder, uniforms)?;
+        self.resources.encode_cloudlight(device, queue, &mut encoder, uniforms)?;
         queue.submit(Some(encoder.finish()));
         Ok(())
     }
@@ -610,6 +659,7 @@ impl ViewerMediaPass {
             self.options.froxel_depth_slices,
         )?;
         self.resources.uniform_ambient_radiance = Some(self.options.ambient_radiance);
+        self.resources.diffuse_ibl = diffuse_ibl_irradiance(self.options.ambient_radiance);
         let Some(preparation) = preparation.filter(|_| frame_was_prepared) else {
             return Ok(());
         };
@@ -1205,6 +1255,7 @@ impl TerrainMediaResources {
             uniform_ambient_radiance: None,
             radiance_provider: Arc::new(radiance_provider),
             radiance_provider_identity: 0,
+            radiance_provider_cacheable: true,
             blue_noise_identity,
             extinction: Arc::new(extinction),
             single_scatter,
@@ -1231,6 +1282,8 @@ impl TerrainMediaResources {
             cloudlight_uniforms,
             pipelines,
             terrain_trace: None,
+            canonical_density_nodes: None,
+            directional_occlusion: std::cell::Cell::new(None),
             single_scatter_dispatches: 0,
             multiple_scatter_dispatches: 0,
             density_froxel_count: 0,
@@ -1260,6 +1313,27 @@ impl TerrainMediaResources {
         majorant
             .validate_for(medium)
             .map_err(crate::core::error::RenderError::render)?;
+        let identity = medium.identity(density_version);
+        if self.medium_identity != Some(identity) {
+            if let Some(previous) = self.terrain_trace.take() {
+                self.device_local_bytes = self.device_local_bytes.saturating_sub(previous.allocation_bytes);
+            }
+            self.canonical_density_nodes = match medium.density() {
+                crate::media::DensityField::Grid3D(field) => {
+                    let bytes = 16 + field.r16_density_bits().len() as u64 * 4;
+                    let allocation = tracked_host_allocation(bytes, "nephele.media.canonical_density_nodes")?;
+                    let mut data = Vec::with_capacity(bytes as usize);
+                    let dimensions = field.dimensions();
+                    data.extend_from_slice(bytemuck::cast_slice(&[dimensions[0], dimensions[1], dimensions[2], 0]));
+                    for &bits in field.r16_density_bits() {
+                        let density = field.mapping().to_physical(half::f16::from_bits(bits).to_f32());
+                        data.extend_from_slice(&density.to_le_bytes());
+                    }
+                    Some(CanonicalDensityNodes { bytes: data, _allocation: allocation, active_indices: Vec::new(), _active_allocation: None })
+                }
+                _ => None,
+            };
+        }
         let count =
             u64::from(self.grid.width) * u64::from(self.grid.height) * u64::from(self.grid.depth);
         let _staging =
@@ -1289,7 +1363,6 @@ impl TerrainMediaResources {
                     } else {
                         (0.0, [0.0; 3])
                     };
-                    out.density_froxel_count += u64::from(physical_density > 0.0);
                     for value in extinction {
                         out.texels
                             .push(required_positive_f16(value, "extinction", &mut out.f16_flush)?);
@@ -1299,6 +1372,7 @@ impl TerrainMediaResources {
                         "density",
                         &mut out.f16_flush,
                     )?);
+                    out.density_froxel_count += u64::from(out.texels.last().copied().unwrap_or(0) != 0);
                     let (light_t, diagnostic) =
                         canonical_sun_transmittance(medium, world, sun_direction, homogeneous_reach)?;
                     out.sun.record(diagnostic);
@@ -1358,6 +1432,24 @@ impl TerrainMediaResources {
             density_froxel_count += part.density_froxel_count;
             f16_flush.merge(part.f16_flush);
             sun_transmittance_diagnostic.merge(part.sun);
+        }
+        if let Some(nodes)=self.canonical_density_nodes.as_mut() {
+            nodes._active_allocation=None;
+            nodes.active_indices=Vec::new();
+            nodes._active_allocation=Some(tracked_host_allocation(count*4,"nephele.media.directional.active_indices")?);
+            let mut active=0u32;
+            nodes.active_indices=texels.chunks_exact(4).map(|p| {
+                if p[3]!=0 { active+=1; active } else { 0 }
+            }).collect();
+            if self.density_froxel_count!=density_froxel_count {
+                if let Some(previous)=self.terrain_trace.take() {
+                    self.device_local_bytes=self.device_local_bytes.saturating_sub(previous.allocation_bytes);
+                }
+            }
+            if let Some(transport)=self.terrain_trace.as_ref().and_then(|t|t.directional.as_ref()) {
+                queue.write_texture(wgpu::ImageCopyTexture { texture:&transport.textures[3],mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All },
+                    bytemuck::cast_slice(&nodes.active_indices),wgpu::ImageDataLayout {offset:0,bytes_per_row:Some(grid.width*4),rows_per_image:Some(grid.height)},grid.extent());
+            }
         }
         queue.write_texture(
             wgpu::ImageCopyTexture {
@@ -1683,18 +1775,16 @@ impl TerrainMediaResources {
             });
             let group0 = empty(0);
             let group1 = empty(1);
+            let terrain_entries=[texture_entry(1,height_binding),texture_entry(2,minmax_binding),buffer_entry(3,&terrain_buffer),buffer_entry(10,&curvature_buffer)];
             let group2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(label), layout: &pipeline.get_bind_group_layout(2),
-                entries: &[
-                    texture_entry(1, height_binding), texture_entry(2, minmax_binding),
-                    buffer_entry(3, &terrain_buffer), buffer_entry(10, &curvature_buffer),
-                ],
+                entries: if entry=="main_nephele_directional_clear" { &[] } else { &terrain_entries },
             });
             let group3 = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(label), layout: &pipeline.get_bind_group_layout(3), entries,
             });
             Ok::<_, crate::core::error::RenderError>(CloudlightDispatch {
-                pipeline, groups: [group0, group1, group2, group3],
+                pipeline, groups: [group0, group1, group2, group3], label: label.to_string(),
             })
         };
         let world_sun = cloud_dispatch(
@@ -1705,6 +1795,102 @@ impl TerrainMediaResources {
             "main_nephele_surface_cloudlight", "nephele.media.surface_cloudlight.pipeline",
             &[buffer_entry(8, &self.cloudlight_uniforms), texture_entry(15, &world_sun_view), texture_entry(16, &surface_view)],
         )?;
+        let directional = if let Some(nodes) = self.canonical_density_nodes.as_ref() {
+            // Surface-cache resolution follows the froxel grid, not the DEM.
+            // The original DEM remains authoritative for heights and tracing.
+            let surface_bytes = u64::from(self.grid.width) * u64::from(self.grid.height) * 8;
+            let sizes = [surface_bytes, surface_bytes];
+            if sizes.into_iter().chain([nodes.bytes.len() as u64]).any(|size| size > u64::from(device.limits().max_storage_buffer_binding_size)) {
+                return Err(crate::core::error::RenderError::render("directional transport exceeds the adapter's storage binding size"));
+            }
+            let mut buffers = sizes.into_iter().map(|size| tracked_create_buffer(device, &wgpu::BufferDescriptor {
+                label: Some("nephele.media.directional.cache"), size,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }).map(Arc::new)).collect::<crate::core::error::RenderResult<Vec<_>>>()?;
+            buffers.push(Arc::new(crate::core::resource_tracker::tracked_create_buffer_init(device, &wgpu::util::BufferInitDescriptor {
+                label: Some("nephele.media.directional.density"), contents: &nodes.bytes, usage: wgpu::BufferUsages::STORAGE,
+            })?));
+            buffers.push(Arc::new(tracked_create_buffer(device, &wgpu::BufferDescriptor {
+                label: Some("nephele.media.directional.first_surface"), size: surface_bytes,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })?));
+            buffers.push(Arc::new(tracked_create_buffer(device, &wgpu::BufferDescriptor {
+                label: Some("nephele.media.directional.progress"), size: 16,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })?));
+            buffers.push(Arc::new(tracked_create_buffer(device, &wgpu::BufferDescriptor {
+                label: Some("nephele.media.directional.progress_readback"), size: 16,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })?));
+            // Texture storage avoids a whole-view buffer binding and stores
+            // only occupied froxels. Packing changes no transport coefficient.
+            let texels=self.density_froxel_count.checked_mul(DIRECTIONAL_DIRECTIONS)
+                .ok_or_else(||crate::core::error::RenderError::render("directional cache index overflow"))?.max(1);
+            let width=texels.min(u64::from(device.limits().max_texture_dimension_2d)) as u32;
+            let height=texels.div_ceil(u64::from(width));
+            if height>u64::from(device.limits().max_texture_dimension_2d) || texels>u64::from(u32::MAX) {
+                return Err(crate::core::error::RenderError::render("directional cache exceeds the adapter texture or WGSL index dimensions"));
+            }
+            let extent=wgpu::Extent3d {width,height:height as u32,depth_or_array_layers:1};
+            let usage=wgpu::TextureUsages::TEXTURE_BINDING|wgpu::TextureUsages::STORAGE_BINDING;
+            let (source0,b0)=tracked_texture(device,"nephele.media.directional.source0",extent,wgpu::TextureDimension::D2,wgpu::TextureFormat::Rgba16Float,usage)?;
+            let (source1,b1)=tracked_texture(device,"nephele.media.directional.source1",extent,wgpu::TextureDimension::D2,wgpu::TextureFormat::Rgba16Float,usage)?;
+            let (incoming,bi)=tracked_texture(device,"nephele.media.directional.incoming",extent,wgpu::TextureDimension::D2,wgpu::TextureFormat::Rgba32Uint,usage)?;
+            let (active,ba)=tracked_texture(device,"nephele.media.directional.active",self.grid.extent(),wgpu::TextureDimension::D3,wgpu::TextureFormat::R32Uint,wgpu::TextureUsages::TEXTURE_BINDING|wgpu::TextureUsages::COPY_DST)?;
+            queue.write_texture(wgpu::ImageCopyTexture {texture:&active,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},bytemuck::cast_slice(&nodes.active_indices),wgpu::ImageDataLayout {offset:0,bytes_per_row:Some(self.grid.width*4),rows_per_image:Some(self.grid.height)},self.grid.extent());
+            let textures=[Arc::new(source0),Arc::new(source1),Arc::new(incoming),Arc::new(active)];
+            let views=textures.each_ref().map(|texture|texture.create_view(&wgpu::TextureViewDescriptor::default()));
+            let sky = self.radiance_provider.create_view(&wgpu::TextureViewDescriptor::default());
+            let scatter = self.in_scatter.create_view(&wgpu::TextureViewDescriptor::default());
+            let single = self.single_filtered.create_view(&wgpu::TextureViewDescriptor::default());
+            let dispatch = |entry, label, parity: usize| {
+                let source = &views[parity];
+                let next_source = &views[1-parity];
+                let surface = &buffers[parity];
+                let next_surface = &buffers[1-parity];
+                // Auto-layouts contain only bindings reached by this entry.
+                let mut entries = if entry=="main_nephele_directional_clear" {vec![]} else {vec![buffer_entry(8, &self.cloudlight_uniforms)]};
+                match entry {
+                    "main_nephele_directional_incoming" => entries.extend([
+                        texture_entry(10, &extinction), buffer_entry(17, &buffers[2]), texture_entry(18, source), buffer_entry(21, surface), texture_entry(23, &sky), texture_entry(27,&views[2]), texture_entry(28,&views[3]),
+                    ]),
+                    "main_nephele_directional_source" => entries.extend([
+                        texture_entry(10, &extinction), buffer_entry(17, &buffers[2]), texture_entry(18, source), texture_entry(19, next_source), texture_entry(20, &views[2]), texture_entry(28,&views[3]), buffer_entry(30,&buffers[4]),
+                    ]),
+                    "main_nephele_directional_surface" => entries.extend([
+                        texture_entry(10, &extinction), buffer_entry(17, &buffers[2]), texture_entry(18, source), buffer_entry(21, surface), buffer_entry(22, next_surface), texture_entry(23, &sky), texture_entry(28,&views[3]), buffer_entry(30,&buffers[4]),
+                    ]),
+                    "main_nephele_directional_camera" => entries.extend([
+                        texture_entry(10, &extinction), buffer_entry(17, &buffers[2]), texture_entry(20, &views[2]), texture_entry(23, &sky), texture_entry(24, &scatter), texture_entry(25, &single), buffer_entry(26, &buffers[3]), texture_entry(28,&views[3]),
+                    ]),
+                    "main_nephele_directional_primary" => entries.extend([
+                        texture_entry(10, &extinction), texture_entry(16, &surface_view), buffer_entry(17, &buffers[2]), texture_entry(18, source), buffer_entry(21, surface), texture_entry(23, &sky), texture_entry(28,&views[3]),
+                    ]),
+                    "main_nephele_directional_clear" => entries.extend([texture_entry(19,&views[1]),texture_entry(29,&views[0])]),
+                    _ => unreachable!("fixed directional entry points"),
+                }
+                cloud_dispatch(entry, label, &entries)
+            };
+            let iteration = |parity| Ok::<_, crate::core::error::RenderError>([
+                dispatch("main_nephele_directional_incoming", "nephele.media.directional.incoming", parity)?,
+                dispatch("main_nephele_directional_source", "nephele.media.directional.source", parity)?,
+                dispatch("main_nephele_directional_surface", "nephele.media.directional.surface", parity)?,
+            ]);
+            let iterations = [iteration(0)?, iteration(1)?];
+            let final_incoming = [dispatch("main_nephele_directional_incoming", "nephele.media.directional.incoming", 0)?,dispatch("main_nephele_directional_incoming", "nephele.media.directional.incoming", 1)?];
+            let camera = dispatch("main_nephele_directional_camera", "nephele.media.directional.camera", 0)?;
+            let primary = [dispatch("main_nephele_directional_primary", "nephele.media.directional.primary", 0)?,dispatch("main_nephele_directional_primary", "nephele.media.directional.primary", 1)?];
+            let clear=dispatch("main_nephele_directional_clear","nephele.media.directional.clear",0)?;
+            let allocation_bytes = sizes.into_iter().sum::<u64>() + nodes.bytes.len() as u64 + surface_bytes+b0+b1+bi+ba+buffers[4].size();
+            Some(DirectionalTransport { iterations, final_incoming, camera, primary, clear, buffers, textures,
+                cache_workgroups:[width.div_ceil(8),(height as u32).div_ceil(8),1],
+                surface_workgroups: [self.grid.width.div_ceil(8), self.grid.height.div_ceil(8), 1], allocation_bytes,
+                solve_key: std::cell::Cell::new(None), solve_diagnostics: std::cell::Cell::new(None), executed_orders: std::cell::Cell::new(0) })
+        } else { None };
         if let Some(previous) = self.terrain_trace.take() {
             self.device_local_bytes = self
                 .device_local_bytes
@@ -1713,7 +1899,8 @@ impl TerrainMediaResources {
         let allocation_bytes = pyramid.byte_size
             + hit_bytes * 2
             + std::mem::size_of_val(&terrain_uniform) as u64
-            + std::mem::size_of_val(&curvature_uniform) as u64;
+            + std::mem::size_of_val(&curvature_uniform) as u64
+            + directional.as_ref().map_or(0, |d| d.allocation_bytes);
         self.device_local_bytes += allocation_bytes;
         self.terrain_albedo = albedo;
         self.terrain_trace = Some(RealtimeTerrainTrace {
@@ -1726,6 +1913,7 @@ impl TerrainMediaResources {
             phase_hits,
             world_sun,
             surface_cloudlight,
+            directional,
             _terrain_uniform: terrain_buffer,
             _curvature_uniform: curvature_buffer,
             _pyramid: pyramid,
@@ -1738,6 +1926,7 @@ impl TerrainMediaResources {
 
     fn encode_cloudlight(
         &self,
+        device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         uniforms: MediaUniforms,
@@ -1746,6 +1935,76 @@ impl TerrainMediaResources {
             crate::core::error::RenderError::render("cloud light requires production terrain_trace")
         })?;
         queue.write_buffer(&self.cloudlight_uniforms, 0, bytemuck::bytes_of(&uniforms));
+        if let Some(directional) = trace.directional.as_ref() {
+            self.directional_occlusion.set(Some(uniforms.scattering[0]>0.5));
+            directional.executed_orders.set(0);
+            let key=stable_words_hash(bytemuck::cast_slice::<MediaUniforms,u32>(std::slice::from_ref(&uniforms)).iter()
+                .map(|word|u64::from(*word)).chain([self.radiance_provider_identity]));
+            if self.radiance_provider_cacheable && directional.solve_key.get()==Some(key) { return Ok(()); }
+            directional.solve_key.set(None);
+            directional.solve_diagnostics.set(None);
+            let started=std::time::Instant::now();
+            for buffer in &directional.buffers[..2] {
+                encoder.clear_buffer(buffer, 0, None);
+            }
+            let workgroups = [self.grid.width.div_ceil(4), self.grid.height.div_ceil(4), self.grid.depth.div_ceil(4)];
+            let dispatch = |encoder: &mut wgpu::CommandEncoder, dispatch: &CloudlightDispatch, groups: [u32; 3]| {
+                crate::core::shader_registry::record_shader_use(&dispatch.label);
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("nephele.media.directional"), timestamp_writes: None });
+                pass.set_pipeline(&dispatch.pipeline);
+                for (index, group) in dispatch.groups.iter().enumerate() { pass.set_bind_group(index as u32, group, &[]); }
+                pass.dispatch_workgroups(groups[0], groups[1], groups[2]);
+            };
+            dispatch(encoder,&directional.clear,directional.cache_workgroups);
+            let mut orders=0u32;
+            loop {
+                encoder.clear_buffer(&directional.buffers[4],0,None);
+                let [incoming, source, surface] = &directional.iterations[(orders%2) as usize];
+                dispatch(encoder, incoming, workgroups);
+                dispatch(encoder, source, workgroups);
+                dispatch(encoder, surface, directional.surface_workgroups);
+                if orders==0 {
+                    encoder.copy_buffer_to_buffer(&directional.buffers[1],0,&directional.buffers[3],0,directional.buffers[3].size());
+                }
+                encoder.copy_buffer_to_buffer(&directional.buffers[4],0,&directional.buffers[5],0,16);
+                let submitted=std::mem::replace(encoder,device.create_command_encoder(&wgpu::CommandEncoderDescriptor {label:Some("nephele.media.directional.continue")}));
+                queue.submit([submitted.finish()]);
+                let slice=directional.buffers[5].slice(..);
+                let (sender,receiver)=std::sync::mpsc::channel();
+                slice.map_async(wgpu::MapMode::Read,move |result| {let _=sender.send(result);});
+                crate::core::gpu::wait_for_device_idle(device);
+                receiver.recv().map_err(crate::core::error::RenderError::render)?
+                    .map_err(crate::core::error::RenderError::render)?;
+                let mapped=slice.get_mapped_range();
+                let mut progress=[0u32;4];
+                progress.copy_from_slice(bytemuck::cast_slice(&mapped));
+                drop(mapped);
+                directional.buffers[5].unmap();
+                if progress[3]!=0 {
+                    return Err(crate::core::error::RenderError::render("directional transport lost monotonicity or exceeded finite f16 radiance"));
+                }
+                orders=orders.checked_add(1).ok_or_else(||crate::core::error::RenderError::render("directional transport order count exceeds u32"))?;
+                if progress[0]==0 {
+                    directional.solve_diagnostics.set(Some(DirectionalSolveDiagnostics {
+                        orders,converged:true,maximum_source_change:f64::from(f32::from_bits(progress[1])),
+                        maximum_surface_change:f64::from(f32::from_bits(progress[2])),
+                        iteration_wall_milliseconds:started.elapsed().as_secs_f64()*1000.0,
+                        surface_cache_dimensions:[self.grid.width,self.grid.height],
+                        cache_reused:false,
+                    }));
+                    break;
+                }
+            }
+            let parity=(orders%2) as usize;
+            dispatch(encoder, &directional.final_incoming[parity], workgroups);
+            dispatch(encoder, &directional.camera, workgroups);
+            dispatch(encoder, &directional.primary[parity], [self.viewport.0.div_ceil(8), self.viewport.1.div_ceil(8), 1]);
+            let submitted=std::mem::replace(encoder,device.create_command_encoder(&wgpu::CommandEncoderDescriptor {label:Some("nephele.media.directional.output")}));
+            queue.submit([submitted.finish()]);
+            directional.solve_key.set(Some(key));
+            directional.executed_orders.set(orders);
+            return Ok(());
+        }
         let n = self.grid.depth.div_ceil(4);
         for (dispatch, label, workgroups) in [
             (&trace.world_sun, "nephele.media.world_sun.pipeline", [n, n, n]),
@@ -1774,6 +2033,7 @@ impl TerrainMediaResources {
     ) -> MediaUniforms {
         let mut uniforms = MediaUniforms::zeroed();
         uniforms.inv_view_proj = inverse_view_projection.to_cols_array_2d();
+        uniforms.view_proj = inverse_view_projection.inverse().to_cols_array_2d();
         uniforms.camera = [camera.x, camera.y, camera.z, 0.0];
         uniforms.sun = [sun_direction.x, sun_direction.y, sun_direction.z, 0.0];
         uniforms.sun_radiance = [sun_radiance[0], sun_radiance[1], sun_radiance[2], 1.0];
@@ -1781,6 +2041,9 @@ impl TerrainMediaResources {
         uniforms.sigma_t[..3].copy_from_slice(&self.sigma_t);
         uniforms.depth = self.depth_transform.wgsl_params();
         uniforms.viewport = [self.viewport.0, self.viewport.1, 0, 0];
+        uniforms.grid = [self.grid.width, self.grid.height, self.grid.depth, 0];
+        uniforms.terrain_albedo[..3].copy_from_slice(&self.terrain_albedo);
+        uniforms.diffuse_ibl[..3].copy_from_slice(&self.diffuse_ibl);
         let (g, hg) = match self.phase {
             crate::media::Phase::Isotropic => (0.0, 0.0),
             crate::media::Phase::HenyeyGreenstein { g } => (g, 1.0),
@@ -1842,6 +2105,13 @@ impl TerrainMediaResources {
                 "realtime media execution requires a prepared production terrain_trace scene",
             )
         })?;
+        if let Some(directional)=trace.directional.as_ref() {
+            let orders=directional.executed_orders.get();
+            self.single_scatter_dispatches += u64::from(orders>0);
+            self.multiple_scatter_dispatches += u64::from(orders);
+            self.pending_history = Some((history_key, decision, glam::Mat4::from_cols_array_2d(&uniforms.view_proj)));
+            return Ok(decision);
+        }
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("nephele.media.terrain_trace"),
@@ -2284,15 +2554,44 @@ impl TerrainMediaResources {
     }
 
     pub(super) fn allocation_breakdown(&self) -> crate::media::AllocationBreakdown {
+        let convergence_readback=self.terrain_trace.as_ref().and_then(|t|t.directional.as_ref())
+            .map_or(0,|d|d.buffers[5].size());
         crate::media::AllocationBreakdown {
-            // Persistent media resources are device-local. Acceptance peak
-            // host-visible evidence comes from the scoped allocation ledger.
-            host_visible_bytes: 0,
+            // The convergence staging buffer is the sole persistent mapped
+            // media resource. The scoped ledger records peak host allocations.
+            host_visible_bytes: convergence_readback,
             froxel_device_local_bytes: self.device_local_bytes - self.density_device_local_bytes,
             density_device_local_bytes: self.density_device_local_bytes,
             majorant_device_local_bytes: 0,
-            staging_readback_bytes: self.staging_bytes,
+            staging_readback_bytes: self.staging_bytes+convergence_readback,
         }
+    }
+
+    fn directional_known_query_count(&self) -> Option<(u64,bool)> {
+        let enabled=self.directional_occlusion.get()?;
+        let transport=self.terrain_trace.as_ref()?.directional.as_ref()?;
+        let orders=transport.executed_orders.get();
+        if orders==0 {return Some((0,true));}
+        let pixels=u64::from(self.viewport.0)*u64::from(self.viewport.1);
+        if !enabled {return Some((pixels,true));}
+        let active=self.density_froxel_count;
+        let vertices=transport.buffers[0].size()/8;
+        let directions=DIRECTIONAL_DIRECTIONS;
+        Some((u64::from(orders)*(active+vertices)*(directions+1)
+            +active*(directions*2+1)+pixels,false))
+    }
+
+    fn directional_query_count(&self,device: &wgpu::Device,queue: &wgpu::Queue) -> crate::core::error::RenderResult<Option<u64>> {
+        let Some((known,complete))=self.directional_known_query_count() else {return Ok(None);};
+        if complete {return Ok(Some(known));}
+        let pixels=u64::from(self.viewport.0)*u64::from(self.viewport.1);
+        // The primary shader marks its actual bilinear hits with exact f16
+        // alpha 3. Raster depth coverage is not a substitute for those hits.
+        let _allocation=tracked_host_allocation(pixels*16,"nephele.media.directional.query_readback")?;
+        let rgba=crate::core::hdr::read_hdr_texture(device,queue,&self.surface_cloudlight,self.viewport.0,self.viewport.1,wgpu::TextureFormat::Rgba16Float)
+            .map_err(crate::core::error::RenderError::render)?;
+        let hits=rgba.chunks_exact(4).filter(|p|p[3]==3.0).count() as u64;
+        Ok(Some(known+hits*DIRECTIONAL_DIRECTIONS))
     }
 
     fn diagnostics(&self, adapter: &wgpu::Adapter) -> MediaExecutionDiagnostics {
@@ -2332,9 +2631,13 @@ impl TerrainMediaResources {
             single_scatter_dispatches: self.single_scatter_dispatches,
             multiple_scatter_dispatches: self.multiple_scatter_dispatches,
             terrain_trace_queries: self
-                .terrain_trace
-                .as_ref()
-                .map_or(0, |trace| trace.query_count),
+                .directional_known_query_count()
+                .map_or_else(||self.terrain_trace.as_ref().map_or(0,|trace|trace.query_count),|(count,_)|count),
+            terrain_trace_queries_complete:self.directional_known_query_count().is_none_or(|(_,complete)|complete),
+            directional_transport:self.terrain_trace.as_ref().and_then(|t|t.directional.as_ref()).and_then(|d|d.solve_diagnostics.get().map(|mut status| {
+                status.cache_reused=d.executed_orders.get()==0;
+                status
+            })),
             sun_transmittance_method: self.sun_transmittance_diagnostic.method.into(),
             sun_transmittance_bias: self.sun_transmittance_diagnostic.bias.into(),
             sun_transmittance_max_segment_length: self
@@ -2641,6 +2944,10 @@ impl crate::terrain::renderer::TerrainScene {
             crate::core::error::RenderError::render("realtime media is not attached")
         })?;
         let mut diagnostics = resources.diagnostics(&self.adapter);
+        if let Some(count)=resources.directional_query_count(self.device.as_ref(),self.queue.as_ref())? {
+            diagnostics.terrain_trace_queries=count;
+            diagnostics.terrain_trace_queries_complete=true;
+        }
         let froxel_depth = resources.grid.depth;
         let termination = resources
             .termination_readback(self.device.as_ref(), self.queue.as_ref())?
@@ -2711,7 +3018,7 @@ impl crate::terrain::renderer::TerrainScene {
             .lock()
             .map_err(|_| crate::core::error::RenderError::render("media_resources mutex poisoned"))?
             .as_ref()
-            .map(|resources| resources.staging_bytes)
+            .map(|resources| resources.allocation_breakdown().staging_readback_bytes)
             .ok_or_else(|| {
                 crate::core::error::RenderError::render("realtime media is not attached")
             })
@@ -2733,6 +3040,9 @@ impl crate::terrain::renderer::TerrainScene {
             return Ok(());
         };
         let sky = &decoded.sky;
+        // Live rendered skies may contain state beyond the static HDR identity.
+        // Reuse is safe only for the completely identified static providers.
+        resources.radiance_provider_cacheable=rendered.is_none();
         let mut identity_words = vec![
             u64::from(rendered.is_some()),
             u64::from(environment.is_some()),
@@ -2819,6 +3129,7 @@ impl crate::terrain::renderer::TerrainScene {
         Ok(
             crate::terrain::renderer::render_graph::TerrainMediaGraphConfig {
                 enabled: true,
+                directional: resources.canonical_density_nodes.is_some(),
                 froxel_grid: resources.grid,
                 resource_version: resources.resource_version,
             },
@@ -2853,6 +3164,16 @@ impl crate::terrain::renderer::TerrainScene {
         execution.bind_texture(handles.world_medium, resources.world_medium.clone())?;
         execution.bind_texture(handles.world_sun, resources.world_sun.clone())?;
         execution.bind_texture(handles.surface_cloudlight, resources.surface_cloudlight.clone())?;
+        if let Some(buffer_handles) = handles.directional_buffers {
+            let directional = resources.terrain_trace.as_ref().and_then(|t| t.directional.as_ref())
+                .ok_or_else(|| crate::core::error::RenderError::render("directional graph requires prepared transport buffers"))?;
+            for (handle, buffer) in buffer_handles.into_iter().zip(&directional.buffers) {
+                execution.bind_buffer(handle, buffer.clone())?;
+            }
+            for (handle,texture) in handles.directional_textures.unwrap().into_iter().zip(&directional.textures) {
+                execution.bind_texture(handle,texture.clone())?;
+            }
+        }
         execution.bind_texture(handles.integrated, resources.integrated.clone())?;
         execution.bind_texture(handles.transmittance, resources.transmittance.clone())?;
         execution.bind_texture(handles.cloud_shadow, resources.cloud_shadow.clone())?;
@@ -2996,12 +3317,36 @@ impl crate::terrain::renderer::TerrainScene {
         encoder: &mut wgpu::CommandEncoder,
         params: &crate::terrain::render_params::TerrainRenderParams,
         decoded: &crate::terrain::render_params::DecodedTerrainSettings,
+        env_maps: &crate::lighting::ibl_wrapper::IBL,
+    ) -> crate::core::error::RenderResult<()> {
+        let (camera, view, projection) = Self::build_camera_matrices(params);
+        if self.realtime_media_directional_enabled()? {
+        let viewport = self.media_resources.lock().map_err(|_| crate::core::error::RenderError::render("media_resources mutex poisoned"))?.as_ref().map(|r| r.viewport);
+        let Some(viewport) = viewport else { return Ok(()); };
+        let sky = self.render_sky_texture(encoder, decoded, view, projection, camera, viewport.0, viewport.1)
+            .map_err(crate::core::error::RenderError::render)?;
+        self.prepare_realtime_media_radiance_provider(encoder, sky.as_ref(), decoded,
+            env_maps.hdr_image().map(AsRef::as_ref), env_maps.intensity.max(0.0), ibl_mean_radiance(env_maps))?;
+        }
+        self.encode_attached_surface_cloudlight_with_matrices(encoder, params, decoded, camera, view, projection)
+    }
+
+    pub(super) fn realtime_media_directional_enabled(&self) -> crate::core::error::RenderResult<bool> {
+        Ok(self.media_resources.lock().map_err(|_|crate::core::error::RenderError::render("media_resources mutex poisoned"))?
+            .as_ref().is_some_and(|r|r.canonical_density_nodes.is_some()))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn encode_attached_surface_cloudlight_with_matrices(
+        &self, encoder: &mut wgpu::CommandEncoder,
+        params: &crate::terrain::render_params::TerrainRenderParams,
+        decoded: &crate::terrain::render_params::DecodedTerrainSettings,
+        camera: glam::Vec3, view: glam::Mat4, projection: glam::Mat4,
     ) -> crate::core::error::RenderResult<()> {
         let resources = self.media_resources.lock().map_err(|_| {
             crate::core::error::RenderError::render("media_resources mutex poisoned")
         })?;
         let Some(resources) = resources.as_ref() else { return Ok(()); };
-        let (camera, view, projection) = Self::build_camera_matrices(params);
         let sun_direction = terrain_light_direction(&params.camera_mode, decoded.light.direction);
         let occlusion = *self.media_terrain_occlusion_enabled.lock().map_err(|_| {
             crate::core::error::RenderError::render("media terrain-occlusion control mutex poisoned")
@@ -3010,7 +3355,7 @@ impl crate::terrain::renderer::TerrainScene {
             camera, (projection * view).inverse(), sun_direction,
             decoded.light.color.map(|v| v * decoded.light.intensity), occlusion,
         );
-        resources.encode_cloudlight(self.queue.as_ref(), encoder, uniforms)
+        resources.encode_cloudlight(self.device.as_ref(),self.queue.as_ref(), encoder, uniforms)
     }
 
     pub(super) fn encode_attached_realtime_media_inject_for_terrain(
@@ -4443,6 +4788,8 @@ mod tests {
             single_scatter_dispatches: 1,
             multiple_scatter_dispatches: 1,
             terrain_trace_queries: 2,
+            terrain_trace_queries_complete: true,
+            directional_transport: None,
             sun_transmittance_method: "bounded_nested_midpoint".into(),
             sun_transmittance_bias: "fine_midpoint_with_coarse_fine_abs_rgb_error".into(),
             sun_transmittance_max_segment_length: Some(10.0),
