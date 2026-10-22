@@ -1409,40 +1409,29 @@ mod fused_kernel_tests {
     #[test]
     fn fog_disabled_aerial_perspective_keeps_the_base_line_statement() {
         let source = fused_kernel().expect("fused kernel assembly");
-        // The base line's statement survives verbatim, in the fog-off branch.
         let base_statement = "frame_radiance = frame_radiance + sun + ibl;";
+        // The base line's statement survives VERBATIM on the fog-disabled
+        // branch. Asserting the whole block pins the order, the branch and
+        // the text in one check; the count pins that the statement is
+        // nowhere else.
+        let block = concat!(
+            "        if (aer_t < 1.0) {\n",
+            "            frame_radiance = frame_radiance + (sun + ibl) * aer_t\n",
+            "                + terrain_env_effective(rd) * (1.0 - aer_t);\n",
+            "        } else {\n",
+            "            frame_radiance = frame_radiance + sun + ibl;\n",
+            "        }\n",
+        );
+        assert_eq!(
+            source.matches(block).count(),
+            1,
+            "the aerial-perspective block must appear exactly once, verbatim"
+        );
         assert_eq!(
             source.matches(base_statement).count(),
             1,
             "the base line's radiance statement must appear exactly once, \
              and it must be the fog-disabled branch"
-        );
-        // ...and that occurrence is the one the fog-off branch executes.
-        let aerial = body(&source, "main_terrain");
-        let if_at = aerial
-            .find("if (aer_t < 1.0)")
-            .expect("the aerial-perspective branch");
-        let else_at = aerial
-            .find("} else {")
-            .expect("the fog-disabled else branch");
-        let base_at = aerial
-            .find(base_statement)
-            .expect("the base line's statement");
-        let fog_at = aerial
-            .find("(sun + ibl) * aer_t")
-            .expect("the fog branch's re-associated sum");
-        // The re-associated sum may only exist INSIDE the fog branch: the
-        // branch that a zero density takes must be the base line's own
-        // statement, and the base line's statement must not appear anywhere
-        // else (the count above pins that).
-        assert!(if_at < fog_at, "the fog sum must be inside the fog branch");
-        assert!(
-            fog_at < else_at,
-            "the fog sum must be inside the fog branch, not the fog-disabled one"
-        );
-        assert!(
-            else_at < base_at,
-            "the fog-disabled branch must run the base line's statement"
         );
     }
 

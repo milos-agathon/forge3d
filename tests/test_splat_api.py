@@ -812,9 +812,6 @@ def test_transformed_applies_a_similarity_without_mutating_the_source():
             cloud.transformed(bad["scale"], (1.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
     with pytest.raises(ValueError, match="rotation"):
         cloud.transformed(1.0, (0.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
-def _srgb_to_linear(c):
-    c = np.asarray(c, dtype=np.float64) / 255.0
-    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
 
 
 def _linear_to_srgb_u8(v):
