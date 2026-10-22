@@ -81,8 +81,11 @@ normalises the HDRI's exposure on load and clamps its sun disc so it reads
 as a bright blob instead of an IBL firefly; `--hdr PATH` supplies any
 `.hdr/.rgbe/.exr`, `--hdr none` forces the analytic Hosek-Wilkie sky
 (hero: turbidity 5, ground albedo 0.35; map views: 2.5 / 0.2), and
-`--hdr-rotation DEG` places the HDRI's sun. Map views keep the
-cartographic NW light (az 215 / el 45).
+`--hdr-rotation DEG` places the HDRI's sun. The rotation uses the sun's
+azimuth convention (0 deg = +x, 90 deg = +z; the sheet's world north is
+-z), and the captured sky's own sun sits where the capture put it, so
+`--hdr-rotation` is how you line the visible disc up with the analytic
+sun's shadows. Map views keep the cartographic NW light (az 215 / el 45).
 Distance is rendered as aerial perspective: the same exponential height fog
 that dims sun rays also blends distant surfaces toward the sky colour
 (`--fog` density, default 4e-4, and `--fog-falloff`, default 1.5e-3), so

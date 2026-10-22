@@ -70,6 +70,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -131,7 +132,11 @@ HIT_LEGEND = {
 #: view presets as (azimuth deg, elevation deg); "canonical" = fixture camera
 VIEW_PRESETS: Dict[str, Optional[Tuple[float, float]]] = {
     "canonical": None,
-    "hero": (35.0, 10.0),  # cinematic low oblique with sky above the summit
+    # The angles of a view. "hero" and "low" share them and differ in the
+    # framing around them: the hero raises the target, widens the lens and
+    # lights the scene from the front, so the summit keeps sky above it;
+    # "low" is the same viewpoint with the default framing.
+    "hero": (35.0, 10.0),
     "oblique": (35.0, 50.0),
     "high": (30.0, 60.0),
     "top": (0.0, 88.0),
@@ -152,16 +157,55 @@ def _is_lfs_pointer(path: Path) -> bool:
         return False
 
 
+def _lfs_sha256(path: Path) -> Optional[str]:
+    """The SHA256 an LFS pointer names, or None if the file is not a pointer.
+
+    The pointer that stands in for a large asset carries the hash of the
+    real bytes, so a download can be checked against it.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    if not text.startswith("version https://git-lfs.github.com/spec/v1"):
+        return None
+    for line in text.splitlines():
+        if line.startswith("oid sha256:"):
+            return line[len("oid sha256:") :].strip()
+    return None
+
+
+def _sha256_file(path: Path) -> str:
+    """The SHA256 of a file, read in chunks (the assets are tens of MiB)."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _resolve_dem_path(path: Path) -> Path:
     """Local .tif is a Git LFS pointer -> fetch the real binary once."""
     if not _is_lfs_pointer(path):
         return path
+    expected = _lfs_sha256(path)
+    if expected is None:
+        raise RuntimeError(
+            f"{path.name} is a Git LFS pointer without an oid; its bytes cannot be verified"
+        )
     cache_dir = Path.home() / ".forge3d" / "datasets"
     cache_dir.mkdir(parents=True, exist_ok=True)
     cached = cache_dir / path.name
-    if cached.exists() and cached.stat().st_size > 1000:
-        print(f"[dem] using cached download: {cached}")
-        return cached
+    if cached.exists():
+        # The pointer names the hash of the real bytes, so a cached download
+        # is checked against it: a truncated or corrupted cache must
+        # re-download rather than render as a wrong terrain.
+        if _sha256_file(cached) != expected:
+            print(f"[dem] cached {cached.name} does not match its pointer's hash; re-downloading")
+            cached.unlink(missing_ok=True)
+        else:
+            print(f"[dem] using cached download: {cached}")
+            return cached
     if path.is_relative_to(REPO_ROOT):
         rel = str(path.relative_to(REPO_ROOT)).replace("assets/", "", 1)
         url = f"{LFS_BASE_URL}/{rel}"
@@ -173,6 +217,9 @@ def _resolve_dem_path(path: Path) -> Path:
     try:
         urllib.request.urlretrieve(url, cached)
     except Exception as exc:  # pragma: no cover - network dependent
+        # A partial download must not be left behind to be mistaken for a
+        # cache hit next time.
+        cached.unlink(missing_ok=True)
         raise RuntimeError(
             f"could not download {path.name} from {url}: {exc}\n"
             "install git-lfs (`git lfs pull`) or pass --terrain <file.tif>"
@@ -180,6 +227,11 @@ def _resolve_dem_path(path: Path) -> Path:
     if cached.stat().st_size < 1000:
         cached.unlink(missing_ok=True)
         raise RuntimeError(f"downloaded file for {path.name} is too small (still a pointer?)")
+    if expected is not None and _sha256_file(cached) != expected:
+        cached.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"downloaded {path.name} does not match the SHA256 in its LFS pointer"
+        )
     print(f"[dem] downloaded {cached.stat().st_size // 1024} KiB -> {cached}")
     return cached
 
@@ -191,14 +243,11 @@ def _hdr_cache_ok(path: Path) -> bool:
     :data:`HDR_PRESET_MD5`; a truncated or corrupted cache must re-download
     rather than render as a wrong sky.
     """
-    import hashlib
-
     return (
         path.exists()
         and path.stat().st_size > 1000
         and hashlib.md5(path.read_bytes()).hexdigest() == HDR_PRESET_MD5
     )
-
 
 def _resolve_hdr(spec: str, use_dem: bool) -> Optional[str]:
     """Return a path to an equirect HDRI, or None for the analytic sky.
@@ -1170,7 +1219,9 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--hdr-rotation", type=float, default=0.0,
                         help="rotate the HDRI about +y in degrees to place its sun; "
                              "same convention as --sun-azimuth (0 deg = +x, 90 deg = +z; "
-                             "world north is -z), so a positive angle moves a feature toward +z")
+                             "world north is -z). The captured sky's own sun sits where "
+                             "the capture put it, so set this to align the visible disc "
+                             "with the analytic sun's shadows")
     render.add_argument("--fog", type=float, default=0.0004,
                         help="aerial-perspective fog density per world unit "
                              "(distance haze toward the sky; 0 disables)")
@@ -1537,14 +1588,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else (0.35 if is_hero else 0.2)
     )
     light_kwargs = dict(
-        exposure=args.exposure,
-        sky_intensity=sky_i,
-        sky_turbidity=sky_t,
-        sky_ground_albedo=sky_ga,
+        # The sun and the exposure belong to a VIEW.
         sun_azimuth_deg=sun_az,
         sun_elevation_deg=sun_el,
         sun_intensity=sun_intensity,
         sun_color=sun_color,
+        exposure=args.exposure,
+        # The sky, the environment, the fog and the LiDAR radius belong to
+        # the SCENE, and are shared by every view of a sequence.
+        sky_intensity=sky_i,
+        sky_turbidity=sky_t,
+        sky_ground_albedo=sky_ga,
         # An HDRI replaces the analytic sky (its exposure is normalised on
         # load, so sky_intensity scales it like the Hosek-Wilkie bake).
         env_map=hdr_path,
@@ -1564,6 +1618,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             else float(manifest.get("lidar_radius", 0.2))
         ),
     )
+    # The sequence API takes the per-view set inside each FusedView and the
+    # shared set at the top level; the still render takes both in one call.
+    view_kwargs = {
+        key: light_kwargs[key]
+        for key in (
+            "sun_azimuth_deg",
+            "sun_elevation_deg",
+            "sun_intensity",
+            "sun_color",
+            "exposure",
+        )
+    }
+    shared_kwargs = {
+        key: value for key, value in light_kwargs.items() if key not in view_kwargs
+    }
     print(f"[render] {args.width}x{args.height}, {args.samples} spp ...")
     if args.tile:
         tw, th = (int(v) for v in args.tile)
@@ -1732,34 +1801,49 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     "rendering the fly-through untiled"
                 )
         t0 = time.time()
-        frames = []
-        for i in range(args.animate):
-            frame_cam = _orbit_camera(
-                camera.look_at, az + 360.0 * i / args.animate, el, dist, camera.fov_y_deg
-            )
-            frame = splat.render_fused(
-                splats=cloud,
-                pointcloud=pointcloud,
-                point_positions=None if point_arrays is None else point_arrays[0],
-                point_colors=None if point_arrays is None else point_arrays[1],
-                terrain=terrain,
-                camera=frame_cam,
-                width=aw,
-                height=ah,
-                samples=args.samples,
+        # The fly-through is a SEQUENCE: one scene, one residency pool, one
+        # compiled kernel, N views. Rendering each frame on its own rebuilt
+        # the scene and re-streamed every page N times.
+        views = [
+            splat.FusedView(
+                camera=_orbit_camera(
+                    camera.look_at,
+                    az + 360.0 * i / args.animate,
+                    el,
+                    dist,
+                    camera.fov_y_deg,
+                ),
                 seed=args.seed,
-                return_aovs=False,
-                certificate=False,
-                tile=anim_tile,
-                **light_kwargs,
+                **view_kwargs,
             )
-            frame_rgba = frame if isinstance(frame, np.ndarray) else frame.rgba
+            for i in range(args.animate)
+        ]
+        outs = splat.render_fused_sequence(
+            splats=cloud,
+            pointcloud=pointcloud,
+            point_positions=None if point_arrays is None else point_arrays[0],
+            point_colors=None if point_arrays is None else point_arrays[1],
+            terrain=terrain,
+            views=views,
+            width=aw,
+            height=ah,
+            samples=args.samples,
+            return_aovs=False,
+            certificate=False,
+            tile=anim_tile,
+            **shared_kwargs,
+        )
+        frames = []
+        for index, out in enumerate(outs):
+            frame_rgba = out if isinstance(out, np.ndarray) else out.rgba
             frames.append(
                 Image.fromarray(frame_rgba, "RGBA")
                 .convert("RGB")
                 .convert("P", palette=Image.ADAPTIVE, colors=256)
             )
-            print(f"[anim] frame {i + 1}/{args.animate}  ({time.time() - t0:.0f}s elapsed)")
+            print(
+                f"[anim] frame {index + 1}/{args.animate}  ({time.time() - t0:.0f}s elapsed)"
+            )
         gif_path = out_dir / "splat_fused_fly.gif"
         frames[0].save(
             gif_path,

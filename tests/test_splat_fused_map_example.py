@@ -111,6 +111,49 @@ def test_bad_arguments_exit_with_a_clean_error(tmp_path, argv, capsys):
     assert "Traceback" not in captured.err, "the error was an uncaught traceback"
 
 
+def test_the_dem_download_is_checked_against_its_pointer(tmp_path, monkeypatch):
+    """The LFS pointer names the SHA256 of the real bytes: use it.
+
+    The HDRI preset is md5-checked on every hit; the DEM download was
+    trusted on size alone, so a truncated or corrupted download rendered as
+    a wrong terrain.
+    """
+    mod = _load_module()
+    payload = b"not a real raster, but the hash is what matters" * 100
+    digest = hashlib.sha256(payload).hexdigest()
+    pointer = tmp_path / "dem.tif"
+    pointer.write_text(
+        "version https://git-lfs.github.com/spec/v1\n"
+        f"oid sha256:{digest}\n"
+        f"size {len(payload)}\n"
+    )
+    assert mod._lfs_sha256(pointer) == digest
+
+    # A file that is not a pointer has no hash to check.
+    plain = tmp_path / "plain.tif"
+    plain.write_bytes(payload)
+    assert mod._lfs_sha256(plain) is None
+
+    # A download whose bytes do not match the pointer is not trusted: the
+    # corrupt cache is discarded and re-fetched, not rendered as a wrong
+    # terrain. (The re-fetch itself needs the network, so the run may end in
+    # a download error — what matters is that the bad cache is gone.)
+    cache = tmp_path / ".forge3d" / "datasets"
+    cache.mkdir(parents=True)
+    bad = cache / "dem.tif"
+    bad.write_bytes(b"corrupted" * 200)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    with pytest.raises(RuntimeError):
+        mod._resolve_dem_path(pointer)
+    assert not bad.exists(), "the corrupt cache was kept"
+
+    # And a cache that DOES match is used as it is.
+    good = cache / "dem.tif"
+    good.write_bytes(payload)
+    assert mod._resolve_dem_path(pointer) == good
+
+
 def test_default_run_nonblank_and_deterministic(tmp_path):
     if not gpu_available():
         pytest.skip("no GPU adapter available")
