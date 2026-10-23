@@ -147,19 +147,57 @@ def test_dupla_dd_demo_is_backend_pinned_and_byte_identical():
 
 def test_matches_committed_golden(tmp_path):
     """The canonical render must equal the committed golden hash, byte-exact."""
-    assert GOLDEN_PATH.exists(), (
-        f"missing golden hash file {GOLDEN_PATH}; generate it with\n"
+    golden_path = (GOLDEN_PATH.with_name(f"{CANONICAL_SCENE}.dx12.sha256")
+                   if _local_backend().lower() == "dx12" else GOLDEN_PATH)
+    assert golden_path.exists(), (
+        f"missing golden hash file {golden_path}; generate it with\n"
         f"  python -m forge3d.determinism --out-png ref.png\n"
         f"under FORGE3D_DETERMINISTIC=1 + a pinned WGPU_BACKENDS and commit the hash"
     )
-    golden = GOLDEN_PATH.read_text().split()[0].strip()
-    actual = render_reference(
-        CANONICAL_SCENE,
-        width=512,
-        height=512,
-        backend=_local_backend(),
-        out_png=tmp_path / "render_golden_check.png",
+    golden = golden_path.read_text().split()[0].strip()
+    # Check quality in the render's process: degradation records are local
+    # to that process, so a parent-side query cannot detect shader failures.
+    png = tmp_path / "render_golden_check.png"
+    diagnostics = tmp_path / "render_golden_check.diagnostics.json"
+    env = dict(os.environ)
+    env.update(FORGE3D_DETERMINISTIC="1", WGPU_BACKENDS=_local_backend())
+    env.pop("WGPU_BACKEND", None)
+    if env.get("FORGE3D_TEST_INSTALLED_WHEEL") != "1":
+        source_python = Path(__file__).resolve().parents[1] / "python"
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(source_python), env["PYTHONPATH"]]
+            if env.get("PYTHONPATH") else [str(source_python)]
+        )
+    script = """
+import hashlib, json, sys
+from pathlib import Path
+import numpy as np
+import forge3d as f3d
+from forge3d._native import get_native_module
+from forge3d.determinism import CANONICAL_SCENE, _render_reference_inprocess
+from forge3d._png import decode_png
+f3d.clear_native_degradations()
+sha = _render_reference_inprocess(CANONICAL_SCENE, 512, 512, sys.argv[1])
+errors = [item for item in f3d.native_degradations()
+          if item['kind'] in {'validation_error', 'uncaptured_gpu_error'}]
+Path(sys.argv[2]).write_text(json.dumps(errors, indent=2), encoding='utf-8')
+print(json.dumps({'sha256': sha, 'gpu_errors': len(errors),
+                  'nonblack': bool(np.any(decode_png(Path(sys.argv[1]).read_bytes())[..., :3])),
+                  'adapter': f3d.device_probe(), 'extension': get_native_module().__file__,
+                  'extension_sha256': hashlib.sha256(Path(get_native_module().__file__).read_bytes()).hexdigest()}))
+"""
+    child = subprocess.run(
+        [sys.executable, "-c", script, str(png), str(diagnostics)],
+        env=env, check=True, capture_output=True, text=True,
     )
+    report = json.loads(child.stdout.strip().splitlines()[-1])
+    (tmp_path / "render_golden_check.report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    assert report["gpu_errors"] == 0, f"GPU errors: see {diagnostics}"
+    assert report["nonblack"], f"canonical render is all-black: see {png}"
+    assert report["adapter"]["software_fallback"] is False, report["adapter"]
+    assert report["adapter"]["backend"].lower() == _local_backend().lower(), report["adapter"]
+    actual = hashlib.sha256(png.read_bytes()).hexdigest()
+    assert actual == report["sha256"]
     assert actual == golden, (
         f"determinism hash mismatch against committed golden\n"
         f"  golden: {golden}\n  actual: {actual}\n"

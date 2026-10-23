@@ -4,11 +4,49 @@ use numpy::PyUntypedArrayMethods;
 use pyo3::types::PyDict;
 use sha2::{Digest, Sha256};
 
+fn terrain_cache_bypass_reason(
+    scene: &TerrainScene,
+    params: &render_params::TerrainRenderParams,
+) -> Option<&'static str> {
+    if params.anamnesis_input_snapshot.is_none() {
+        return Some("parameter_identity_unavailable");
+    }
+    let decoded = params.decoded();
+    if decoded.vt.enabled && !decoded.vt.layers.is_empty() {
+        return Some("material_virtual_textures");
+    }
+    if matches!(
+        decoded.shadow.technique.to_ascii_uppercase().as_str(),
+        "VSM" | "EVSM" | "MSM"
+    ) {
+        return Some("moment_shadows");
+    }
+    scene.anamnesis_cache_bypass_reason()
+}
+
 fn append_content_digest(target: &mut Vec<u8>, domain: &[u8], content: &[u8]) {
     target.extend_from_slice(&(domain.len() as u64).to_le_bytes());
     target.extend_from_slice(domain);
     target.extend_from_slice(&(content.len() as u64).to_le_bytes());
     target.extend_from_slice(&Sha256::digest(content));
+}
+
+fn anamnesis_resource_state(
+    material_set: &crate::render::material_set::MaterialSet,
+    env_maps: &crate::lighting::ibl_wrapper::IBL,
+    adapter: &wgpu::Adapter,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> PyResult<Vec<u8>> {
+    let mut state = Vec::new();
+    append_content_digest(&mut state, b"material", &material_set.anamnesis_bytes(device, queue)?);
+    let ibl = env_maps
+        .anamnesis_bytes()
+        .map_err(|error| PyRuntimeError::new_err(format!("{error:#}")))?;
+    append_content_digest(&mut state, b"ibl", &ibl);
+    let adapter = format!("{:?}", adapter.get_info());
+    append_content_digest(&mut state, b"physical-adapter", adapter.as_bytes());
+    Ok(state)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -26,18 +64,11 @@ fn terrain_cache_options<'py>(
     let Some(cache) = cache else {
         return Ok(None);
     };
-    if matches!(
-        params
-            .decoded()
-            .shadow
-            .technique
-            .to_ascii_uppercase()
-            .as_str(),
-        "VSM" | "EVSM" | "MSM"
-    ) {
-        return Err(PyRuntimeError::new_err(
-            "native terrain ANAMNESIS rejects moment-shadow techniques until their moment texture is a declared graph output",
-        ));
+    if terrain_cache_bypass_reason(scene, params).is_some() {
+        // Moment textures and mutable streaming/scatter resources are not
+        // complete graph outputs. Accept the inert cache option and encode
+        // freshly instead of serving an incomplete declaration.
+        return Ok(None);
     }
     let root = cache.extract::<std::path::PathBuf>().or_else(|_| {
         cache
@@ -49,6 +80,13 @@ fn terrain_cache_options<'py>(
         .getattr("asdict")?
         .call1((params.python_object.bind(py),))?;
     let params_mapping = params_dict.downcast::<PyDict>()?;
+    // The public LUT constructor owns a float32 ndarray. JSON cannot encode
+    // that container directly; preserve every normalized sample in the key.
+    if let Some(lut) = params_mapping.get_item("height_curve_lut")? {
+        if !lut.is_none() {
+            params_mapping.set_item("height_curve_lut", lut.call_method0("tolist")?)?;
+        }
+    }
     let canonical = py.import_bound("forge3d._canonical_json")?;
     let kwargs = PyDict::new_bound(py);
     kwargs.set_item("error_context", "native terrain ANAMNESIS state")?;
@@ -85,8 +123,14 @@ fn terrain_cache_options<'py>(
         .call((shadow_projection,), Some(&kwargs))?
         .extract::<Vec<u8>>()?;
 
+    let snapshot = params
+        .anamnesis_input_snapshot
+        .as_deref()
+        .ok_or_else(|| PyRuntimeError::new_err("terrain parameter identity unavailable"))?;
+    append_content_digest(&mut shadow_bytes, b"decoded-input-snapshot", snapshot);
     let mut state = Vec::new();
     state.extend_from_slice(b"forge3d.terrain.native-inputs/v2\0");
+    append_content_digest(&mut state, b"decoded-input-snapshot", snapshot);
     state.extend_from_slice(&(params_bytes.len() as u64).to_le_bytes());
     state.extend_from_slice(&params_bytes);
     let material_bytes = material_set
@@ -144,26 +188,37 @@ fn terrain_cache_options<'py>(
             None => state.push(0),
         }
     }
+    let detail = &params.decoded().detail;
+    let mut material_maps = std::collections::BTreeMap::new();
     for path in [
         params.decoded().materials.normal_path.as_ref(),
         params.decoded().materials.roughness_path.as_ref(),
         params.decoded().materials.mask_path.as_ref(),
         params.decoded().materials.albedo_path.as_ref(),
+        detail
+            .detail_normal_path
+            .as_ref()
+            .filter(|_| detail.enabled && detail.detail_strength > 0.0),
     ] {
         match path {
             Some(path) => {
                 state.push(1);
-                let content = std::fs::read(path).map_err(|error| {
-                    PyRuntimeError::new_err(format!(
-                        "failed to identity terrain material map {path:?}: {error}"
-                    ))
-                })?;
+                let content = match material_maps.entry(path.clone()) {
+                    std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        entry.insert(std::fs::read(path).map_err(|error| {
+                            PyRuntimeError::new_err(format!(
+                                "failed to identify terrain material map {path:?}: {error}"
+                            ))
+                        })?)
+                    }
+                };
                 let extension = std::path::Path::new(path)
                     .extension()
                     .and_then(|value| value.to_str())
                     .unwrap_or_default()
                     .to_ascii_lowercase();
-                append_content_digest(&mut state, extension.as_bytes(), &content);
+                append_content_digest(&mut state, extension.as_bytes(), content);
             }
             None => state.push(0),
         }
@@ -175,12 +230,49 @@ fn terrain_cache_options<'py>(
         .append_anamnesis_external_state(&mut shadow_bytes)
         .map_err(|error| PyRuntimeError::new_err(format!("{error:#}")))?;
     super::anamnesis::TerrainCacheOptions::new(root, state, height_bytes, shadow_bytes)
-        .map(Some)
+        .map(|mut options| {
+            options.material_maps = material_maps;
+            Some(options)
+        })
         .map_err(|error| PyRuntimeError::new_err(format!("{error:#}")))
 }
 
 #[pymethods]
 impl TerrainRenderer {
+    /// Private sequence-adapter boundary: identify the resources owned by
+    /// this renderer without opening a store or encoding a terrain frame.
+    fn _anamnesis_resource_fingerprint(
+        &self,
+        py: Python<'_>,
+        material_set: &crate::render::material_set::MaterialSet,
+        env_maps: &crate::lighting::ibl_wrapper::IBL,
+    ) -> PyResult<Option<Py<pyo3::types::PyBytes>>> {
+        if !self.scene.supports_anamnesis_cache() {
+            return Ok(None);
+        }
+        let mut state = anamnesis_resource_state(material_set, env_maps, &self.scene.adapter, &self.scene.device, &self.scene.queue)?;
+        self.scene
+            .append_anamnesis_external_state(&mut state)
+            .map_err(|error| PyRuntimeError::new_err(format!("{error:#}")))?;
+        Ok(Some(
+            pyo3::types::PyBytes::new_bound(py, &Sha256::digest(state)).unbind(),
+        ))
+    }
+
+    /// Identity of fresh default resources, without compiling an unused
+    /// TerrainScene. An existing renderer always uses the instance probe.
+    #[staticmethod]
+    fn _anamnesis_default_resource_fingerprint(
+        py: Python<'_>,
+        material_set: &crate::render::material_set::MaterialSet,
+        env_maps: &crate::lighting::ibl_wrapper::IBL,
+    ) -> PyResult<Py<pyo3::types::PyBytes>> {
+        let ctx = crate::core::gpu::try_ctx()?;
+        let mut state = anamnesis_resource_state(material_set, env_maps, &ctx.adapter, &ctx.device, &ctx.queue)?;
+        super::anamnesis::append_default_external_state(&mut state);
+        Ok(pyo3::types::PyBytes::new_bound(py, &Sha256::digest(state)).unbind())
+    }
+
     #[new]
     pub fn new(session: &crate::core::session::Session) -> PyResult<Self> {
         let ctx = crate::core::gpu::try_ctx()?;
@@ -197,6 +289,7 @@ impl TerrainRenderer {
             scene,
             last_anamnesis_report: crate::core::anamnesis::CacheReport::default(),
             last_anamnesis_graph_submissions: 0,
+            last_anamnesis_bypass_reason: None,
         })
     }
 
@@ -262,6 +355,8 @@ impl TerrainRenderer {
     ) -> PyResult<Py<crate::Frame>> {
         self.last_anamnesis_report = crate::core::anamnesis::CacheReport::default();
         self.last_anamnesis_graph_submissions = 0;
+        self.last_anamnesis_bypass_reason = None;
+        self.scene.last_anamnesis_pass_keys.clear();
         if self
             .scene
             .offline_session_active()
@@ -285,6 +380,15 @@ impl TerrainRenderer {
         let certificate_enabled = certificate
             .as_ref()
             .is_some_and(|value| !value.is_none() && !matches!(value.extract::<bool>(), Ok(false)));
+        self.last_anamnesis_bypass_reason = if cache.is_some() {
+            if certificate_enabled {
+                Some("certificate")
+            } else {
+                terrain_cache_bypass_reason(&self.scene, params)
+            }
+        } else {
+            None
+        };
         let cache_options = terrain_cache_options(
             py,
             if certificate_enabled {
@@ -335,11 +439,12 @@ impl TerrainRenderer {
     ) -> PyResult<(Py<crate::Frame>, Py<crate::AovFrame>)> {
         self.last_anamnesis_report = crate::core::anamnesis::CacheReport::default();
         self.last_anamnesis_graph_submissions = 0;
-        if cache.as_ref().is_some_and(|value| !value.is_none()) {
-            return Err(PyRuntimeError::new_err(
-                "native terrain ANAMNESIS does not yet serialize the multi-attachment AOV graph; use cache=None",
-            ));
-        }
+        self.last_anamnesis_bypass_reason = None;
+        self.scene.last_anamnesis_pass_keys.clear();
+        // ANAMNESIS does not yet serialize the multi-attachment AOV graph.
+        // Every attachment is freshly encoded; no cache is opened or served.
+        self.last_anamnesis_bypass_reason = cache.as_ref().map(|_| "render_with_aov");
+        drop(cache);
         if self
             .scene
             .offline_session_active()
@@ -390,6 +495,8 @@ impl TerrainRenderer {
         dict.set_item("bytes_written", report.bytes_written)?;
         dict.set_item("wall_ms_saved", report.wall_ms_saved)?;
         dict.set_item("hit_rate", report.hit_rate())?;
+        dict.set_item("pass_keys", &self.scene.last_anamnesis_pass_keys)?;
+        dict.set_item("bypass_reason", self.last_anamnesis_bypass_reason)?;
         dict.set_item(
             "graph_command_submissions",
             self.last_anamnesis_graph_submissions,
@@ -1256,8 +1363,7 @@ impl TerrainRenderer {
         super::streaming::validate_flat_height_streaming_lod(lod)
             .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
         let tile_resolution = tile_resolution.clamp(8, 1024);
-        let reader: std::sync::Arc<dyn crate::terrain::page_table::HeightReader> =
-            dataset.reader();
+        let reader: std::sync::Arc<dyn crate::terrain::page_table::HeightReader> = dataset.reader();
         let overview = overview_lonlat_bounds
             .map(crate::terrain::page_table::OverviewUvTransform::from_lonlat_bounds)
             .transpose()
@@ -1317,8 +1423,7 @@ impl TerrainRenderer {
             ));
         }
         let tile_resolution = tile_resolution.clamp(8, 1024);
-        let reader: std::sync::Arc<dyn crate::terrain::page_table::HeightReader> =
-            dataset.reader();
+        let reader: std::sync::Arc<dyn crate::terrain::page_table::HeightReader> = dataset.reader();
         let overview = overview_lonlat_bounds
             .map(crate::terrain::page_table::OverviewUvTransform::from_lonlat_bounds)
             .transpose()
@@ -1343,7 +1448,9 @@ impl TerrainRenderer {
             overview,
         )
         .map_err(|error| {
-            PyRuntimeError::new_err(format!("enable_height_streaming_cog_globe failed: {error:#}"))
+            PyRuntimeError::new_err(format!(
+                "enable_height_streaming_cog_globe failed: {error:#}"
+            ))
         })?;
         self.scene.height_streaming = Some(state);
         self.scene.geometry_provider = None;
@@ -1384,17 +1491,20 @@ impl TerrainRenderer {
                 "COG globe height streaming requires stream_height_tiles_globe() with f64 ECEF coordinates",
             ));
         }
-        let stats = state.stream_step(
-            queue.as_ref(),
-            super::streaming::HeightStreamingCamera::Flat(glam::Vec3::new(
-                camera_pos.0,
-                camera_pos.1,
-                camera_pos.2,
-            )),
-            &feedback_uvs,
-            max_uploads,
-        )
-        .map_err(|error| PyRuntimeError::new_err(format!("height streaming failed: {error:#}")))?;
+        let stats = state
+            .stream_step(
+                queue.as_ref(),
+                super::streaming::HeightStreamingCamera::Flat(glam::Vec3::new(
+                    camera_pos.0,
+                    camera_pos.1,
+                    camera_pos.2,
+                )),
+                &feedback_uvs,
+                max_uploads,
+            )
+            .map_err(|error| {
+                PyRuntimeError::new_err(format!("height streaming failed: {error:#}"))
+            })?;
         height_streaming_stats_to_py(py, &stats)
     }
 
@@ -1415,8 +1525,8 @@ impl TerrainRenderer {
                 "globe streaming camera ECEF must be finite and non-zero",
             ));
         }
-        let focus = camera.normalize()
-            * crate::terrain::clipmap::globe::GlobeFrame::WGS84_MEAN_RADIUS_M;
+        let focus =
+            camera.normalize() * crate::terrain::clipmap::globe::GlobeFrame::WGS84_MEAN_RADIUS_M;
         self.stream_height_tiles_globe_focus(py, camera, focus, max_uploads)
     }
 
@@ -1442,9 +1552,9 @@ impl TerrainRenderer {
                 "height streaming not enabled; call enable_height_streaming() first",
             )
         })?;
-        let stats = state
-            .stats()
-            .map_err(|error| PyRuntimeError::new_err(format!("height streaming failed: {error:#}")))?;
+        let stats = state.stats().map_err(|error| {
+            PyRuntimeError::new_err(format!("height streaming failed: {error:#}"))
+        })?;
         height_streaming_stats_to_py(py, &stats)
     }
 }
@@ -1475,16 +1585,19 @@ impl TerrainRenderer {
                 "flat height streaming requires stream_height_tiles()",
             ));
         }
-        let stats = state.stream_step(
-            queue.as_ref(),
-            super::streaming::HeightStreamingCamera::Globe {
-                camera_anchor: camera_ecef,
-                focus_ecef,
-            },
-            &feedback_uvs,
-            max_uploads,
-        )
-        .map_err(|error| PyRuntimeError::new_err(format!("height streaming failed: {error:#}")))?;
+        let stats = state
+            .stream_step(
+                queue.as_ref(),
+                super::streaming::HeightStreamingCamera::Globe {
+                    camera_anchor: camera_ecef,
+                    focus_ecef,
+                },
+                &feedback_uvs,
+                max_uploads,
+            )
+            .map_err(|error| {
+                PyRuntimeError::new_err(format!("height streaming failed: {error:#}"))
+            })?;
         // Globe meshes encode a new camera-relative tangent frame after each
         // ECEF update, even when their local 2D center remains near zero.
         self.scene.geometry_provider = None;
@@ -1507,10 +1620,7 @@ fn height_streaming_stats_to_py(
     dict.set_item("tiles_uploaded", stats.tiles_uploaded)?;
     dict.set_item("coarse_prefilled", stats.coarse_prefilled)?;
     dict.set_item("resident_height_bytes", stats.resident_height_bytes)?;
-    dict.set_item(
-        "gpu_visible_current_bytes",
-        stats.gpu_visible_current_bytes,
-    )?;
+    dict.set_item("gpu_visible_current_bytes", stats.gpu_visible_current_bytes)?;
     dict.set_item(
         "gpu_visible_high_water_bytes",
         stats.gpu_visible_high_water_bytes,

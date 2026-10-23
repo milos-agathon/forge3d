@@ -9,7 +9,7 @@ use super::key::{pass_key, InputKey, PassKey};
 use super::report::CacheReport;
 use super::store::ContentStore;
 use crate::core::framegraph_impl::{PassDesc, RendererGraphPlan, ResourceBarrier, ResourceHandle};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Result;
 use std::io::{Error, ErrorKind};
 use std::time::Instant;
@@ -188,7 +188,13 @@ impl GraphScheduler {
         F: FnMut(&PassDesc, GraphPassAction<'_>) -> Result<GraphPassOutcome>,
     {
         let mut resource_keys = leaf_keys.clone();
-        for pass in graph.ordered_passes() {
+        let ordered: Vec<&PassDesc> = graph.ordered_passes().collect();
+        // Indices of on-demand passes keyed but not yet executed. They run
+        // only for an executing consumer; any left at the end were elided.
+        let mut deferred: Vec<usize> = Vec::new();
+        // Graph indices of restored and elided passes, reported in graph order.
+        let mut hit_indices: Vec<usize> = Vec::new();
+        for (index, pass) in ordered.iter().copied().enumerate() {
             let inputs = pass
                 .reads
                 .iter()
@@ -221,6 +227,13 @@ impl GraphScheduler {
             );
             let barriers = graph.barriers_before(&pass.name);
             let cacheable = pass.cache_disabled_reason.is_none();
+            if pass.materialize_on_demand && !cacheable && self.store.is_some() {
+                deferred.push(index);
+                for output in &pass.writes {
+                    resource_keys.insert(*output, key);
+                }
+                continue;
+            }
             if let (true, Some(store)) = (cacheable, self.store.as_ref()) {
                 if let Some((blob, metadata)) = store.get(key)? {
                     match run(
@@ -241,10 +254,11 @@ impl GraphScheduler {
                             ))
                         }
                     }
-                    self.report.hits.push(pass.name.clone());
+                    hit_indices.push(index);
                     self.report.bytes_read += blob.len() as u64;
                     self.report.wall_ms_saved += metadata.measured_wall_ms.max(0.0);
                 } else {
+                    materialize_deferred(graph, &ordered, &mut deferred, pass, &mut run, &mut self.report)?;
                     let started = Instant::now();
                     let blob = match run(
                         pass,
@@ -275,6 +289,7 @@ impl GraphScheduler {
                     self.report.bytes_written += blob.len() as u64;
                 }
             } else {
+                materialize_deferred(graph, &ordered, &mut deferred, pass, &mut run, &mut self.report)?;
                 match run(
                     pass,
                     GraphPassAction::Execute {
@@ -298,6 +313,13 @@ impl GraphScheduler {
                 resource_keys.insert(*output, key);
             }
         }
+        // Every consumer of these passes was restored. The restored keys
+        // commit to theirs, so they are logical hits that read no bytes.
+        hit_indices.extend(deferred);
+        hit_indices.sort_unstable();
+        self.report
+            .hits
+            .extend(hit_indices.into_iter().map(|index| ordered[index].name.clone()));
         Ok(resource_keys)
     }
 
@@ -308,6 +330,53 @@ impl GraphScheduler {
     pub fn into_report(self) -> CacheReport {
         self.report
     }
+}
+
+/// Execute, in graph order, the deferred on-demand passes that `consumer`
+/// transitively reads, then drop them from `deferred`.
+fn materialize_deferred<F>(
+    graph: &RendererGraphPlan,
+    ordered: &[&PassDesc],
+    deferred: &mut Vec<usize>,
+    consumer: &PassDesc,
+    run: &mut F,
+    report: &mut CacheReport,
+) -> Result<()>
+where
+    F: FnMut(&PassDesc, GraphPassAction<'_>) -> Result<GraphPassOutcome>,
+{
+    let mut needed: BTreeSet<ResourceHandle> = consumer.reads.iter().copied().collect();
+    let mut selected = Vec::new();
+    for &index in deferred.iter().rev() {
+        let pass = ordered[index];
+        if pass.writes.iter().any(|handle| needed.contains(handle)) {
+            selected.push(index);
+            needed.extend(pass.reads.iter().copied());
+        }
+    }
+    selected.reverse();
+    for &index in &selected {
+        let pass = ordered[index];
+        let barriers = graph.barriers_before(&pass.name);
+        match run(
+            pass,
+            GraphPassAction::Execute {
+                barriers: &barriers,
+                capture_output: false,
+            },
+        )? {
+            GraphPassOutcome::Executed(_) => {}
+            GraphPassOutcome::Restored => {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("on-demand graph pass {:?} did not execute", pass.name),
+                ))
+            }
+        }
+        report.misses.push(pass.name.clone());
+    }
+    deferred.retain(|index| !selected.contains(index));
+    Ok(())
 }
 
 impl Scheduler {
@@ -596,6 +665,139 @@ mod tests {
         assert_eq!(changed.report().misses, ["first", "second"]);
         assert_eq!(changed.report().bytes_read, 0);
         assert!(changed.report().bytes_written > 0);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn on_demand_pass_is_never_served_and_runs_only_for_executing_consumers() {
+        use crate::core::framegraph_impl::{
+            PassType, RendererGraphBuilder, ResourceDesc, ResourceType,
+        };
+        use wgpu::{Extent3d, TextureFormat, TextureUsages};
+
+        let build_graph = |resolve_uniform: &[u8]| {
+            let mut builder = RendererGraphBuilder::new();
+            let desc = |name: &str| ResourceDesc {
+                name: name.into(),
+                resource_type: ResourceType::ColorAttachment,
+                format: Some(TextureFormat::Rgba8Unorm),
+                extent: Some(Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                }),
+                size: None,
+                usage: Some(TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING),
+                can_alias: false,
+                is_transient: false,
+            };
+            let leaf = builder.add_resource(desc("leaf"));
+            let depth = builder.add_resource(desc("depth"));
+            let beauty = builder.add_resource(desc("beauty"));
+            let output = builder.add_resource(desc("output"));
+            builder
+                .add_pass("shadow", PassType::Graphics, |pass| {
+                    pass.read(leaf)
+                        .write(depth)
+                        .pipeline_descriptor(b"shadow-pipeline".to_vec())
+                        .uniform_bytes(b"shadow-uniform".to_vec())
+                        .disable_cache("depth is never served")
+                        .materialize_on_demand();
+                    Ok(())
+                })
+                .unwrap();
+            builder
+                .add_pass("forward", PassType::Graphics, |pass| {
+                    pass.read(depth)
+                        .write(beauty)
+                        .pipeline_descriptor(b"forward-pipeline".to_vec())
+                        .uniform_bytes(b"forward-uniform".to_vec());
+                    Ok(())
+                })
+                .unwrap();
+            builder
+                .add_pass("resolve", PassType::Transfer, |pass| {
+                    pass.read(beauty)
+                        .write(output)
+                        .pipeline_descriptor(b"resolve-pipeline".to_vec())
+                        .uniform_bytes(resolve_uniform.to_vec());
+                    Ok(())
+                })
+                .unwrap();
+            (builder.compile().unwrap(), leaf)
+        };
+        let run = |scheduler: &mut GraphScheduler, resolve_uniform: &[u8]| {
+            let (graph, leaf) = build_graph(resolve_uniform);
+            let leaf_keys = BTreeMap::from([(leaf, super::super::leaf_key(b"leaf"))]);
+            let mut executed = Vec::new();
+            let mut restored = Vec::new();
+            scheduler
+                .execute_graph_with(&graph, &leaf_keys, |pass, action| match action {
+                    GraphPassAction::Execute { capture_output, .. } => {
+                        // Only cacheable passes capture a blob for the store.
+                        assert_eq!(capture_output, pass.name != "shadow");
+                        executed.push(pass.name.clone());
+                        Ok(GraphPassOutcome::Executed(pass.name.as_bytes().to_vec()))
+                    }
+                    GraphPassAction::Restore { .. } => {
+                        assert_ne!(pass.name, "shadow", "on-demand output was served");
+                        restored.push(pass.name.clone());
+                        Ok(GraphPassOutcome::Restored)
+                    }
+                })
+                .unwrap();
+            (executed, restored)
+        };
+
+        // Without a store the pass executes in graph order, exactly as before.
+        let engine = EngineFingerprint::current().canonical_bytes();
+        let mut inert = GraphScheduler::disabled(b"caps".to_vec(), engine.clone());
+        let (graph, leaf) = build_graph(b"resolve");
+        let leaf_keys = BTreeMap::from([(leaf, super::super::leaf_key(b"leaf"))]);
+        let mut order = Vec::new();
+        inert
+            .execute_graph_with(&graph, &leaf_keys, |pass, action| match action {
+                GraphPassAction::Execute { capture_output, .. } => {
+                    assert!(!capture_output);
+                    order.push(pass.name.clone());
+                    Ok(GraphPassOutcome::Executed(Vec::new()))
+                }
+                GraphPassAction::Restore { .. } => panic!("inert graph cannot restore"),
+            })
+            .unwrap();
+        assert_eq!(order, ["shadow", "forward", "resolve"]);
+        assert!(inert.report().hits.is_empty() && inert.report().misses.is_empty());
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("forge3d-anamnesis-on-demand-{nonce}"));
+        let store = ContentStore::new(&root, 64 * 1024, true).unwrap();
+
+        // Cold: the on-demand pass runs immediately before its consumer.
+        let mut cold = GraphScheduler::new(store.clone(), b"caps".to_vec(), engine.clone());
+        let (executed, restored) = run(&mut cold, b"resolve");
+        assert_eq!(executed, ["shadow", "forward", "resolve"]);
+        assert!(restored.is_empty());
+        assert_eq!(cold.report().misses, ["shadow", "forward", "resolve"]);
+
+        // All hit: nothing executes, the on-demand pass is elided.
+        let mut warm = GraphScheduler::new(store.clone(), b"caps".to_vec(), engine.clone());
+        let (executed, restored) = run(&mut warm, b"resolve");
+        assert!(executed.is_empty());
+        assert_eq!(restored, ["forward", "resolve"]);
+        assert_eq!(warm.report().hits, ["shadow", "forward", "resolve"]);
+        assert!(warm.report().misses.is_empty());
+
+        // A miss that does not read the on-demand output does not run it.
+        let mut changed = GraphScheduler::new(store, b"caps".to_vec(), engine);
+        let (executed, restored) = run(&mut changed, b"changed-resolve");
+        assert_eq!(executed, ["resolve"]);
+        assert_eq!(restored, ["forward"]);
+        assert_eq!(changed.report().misses, ["resolve"]);
+        assert_eq!(changed.report().hits, ["shadow", "forward"]);
+
         fs::remove_dir_all(root).unwrap();
     }
 }

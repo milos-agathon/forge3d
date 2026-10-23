@@ -504,6 +504,8 @@ class VectorScene:
         polyline into LIMES's exact analytic stroke coverage path; this
         collector always emits round caps and round joins.
         """
+        from ._cache_policy import report_cache_bypass
+        report_cache_bypass(cache, "vector.render_oit")
         if quality not in {"default", "analytic"}:
             raise ValueError("quality must be 'default' or 'analytic'")
         if quality == "analytic":
@@ -544,7 +546,7 @@ class VectorScene:
             polyline_rgba=self._polyline_rgba or None,
             stroke_width=self._stroke_width or None,
             certificate=certificate,
-            cache=cache,
+            cache=None,
         )
         return result
 
@@ -559,12 +561,14 @@ class VectorScene:
     ) -> np.ndarray:
         """Render the vector snapshot through the selected quality path."""
 
+        from ._cache_policy import report_cache_bypass
+        report_cache_bypass(cache, "vector.render_snapshot")
         return self.render_oit(
             width,
             height,
             quality=quality,
             certificate=certificate,
-            cache=cache,
+            cache=None,
         )
 
     def render_pick_map(
@@ -577,6 +581,8 @@ class VectorScene:
         cache: str | None = None,
     ) -> np.ndarray:
         """Render full R32Uint picking map for the collected vectors."""
+        from ._cache_policy import report_cache_bypass
+        report_cache_bypass(cache, "vector.render_pick_map")
         from . import vector_render_pick_map_py as _pick
         result = _pick(
             int(width), int(height),
@@ -584,7 +590,7 @@ class VectorScene:
             polylines=self._polylines or None,
             base_pick_id=int(base_pick_id),
             certificate=certificate,
-            cache=cache,
+            cache=None,
         )
         return result
 
@@ -601,6 +607,8 @@ class VectorScene:
 
         Returns (rgba: np.ndarray(H,W,4) uint8, picks: np.ndarray(H,W) uint32)
         """
+        from ._cache_policy import report_cache_bypass
+        report_cache_bypass(cache, "vector.render_oit_and_pick")
         from . import vector_render_oit_and_pick_py as _both
         result = _both(
             int(width), int(height),
@@ -612,6 +620,6 @@ class VectorScene:
             stroke_width=self._stroke_width or None,
             base_pick_id=int(base_pick_id),
             certificate=certificate,
-            cache=cache,
+            cache=None,
         )
         return result

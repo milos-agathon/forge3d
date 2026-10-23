@@ -5,10 +5,18 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from typing import Any, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 
 def _json_safe(value: Any) -> Any:
+    if value is None or type(value) in (str, int, float, bool):
+        return value
+    # Exact builtins cannot override to_dict; subclasses retain that protocol.
+    if type(value) is dict:
+        return {str(key): _json_safe(value[key]) for key in sorted(value, key=str)}
+    if type(value) in (list, tuple):
+        return [_json_safe(item) for item in value]
     if hasattr(value, "to_dict") and callable(value.to_dict):
         return _json_safe(value.to_dict())
     if isinstance(value, Mapping):
@@ -22,7 +30,7 @@ def _json_safe(value: Any) -> Any:
         return [_json_safe(item) for item in value]
     if isinstance(value, os.PathLike):
         return os.fspath(value)
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if isinstance(value, (str, int, float, bool)):
         return value
     raise TypeError(f"MapScene recipe values must be JSON-serializable, got {type(value).__name__}")
 

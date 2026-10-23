@@ -62,8 +62,10 @@ def render_offscreen_rgba(
 
     # --- Native path: Scene.render_rgba() is an instance method. ---
     if _is_native_scene(scene):
+        from .._cache_policy import report_cache_bypass
+        report_cache_bypass(cache, "helpers.offscreen.render_offscreen_rgba")
         try:
-            return scene.render_rgba(certificate=certificate, cache=cache)
+            return scene.render_rgba(certificate=certificate, cache=None)
         except (RuntimeError, OSError) as exc:
             print(
                 f"[forge3d] native render_rgba failed, using CPU fallback: {exc}",

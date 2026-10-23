@@ -15,6 +15,7 @@ pub struct TerrainScene {
     pub(super) queue: Arc<wgpu::Queue>,
     pub(super) adapter: Arc<wgpu::Adapter>,
     pub(super) allocation_owner: crate::core::resource_tracker::AllocationOwner,
+    pub(super) last_anamnesis_pass_keys: std::collections::BTreeMap<String, String>,
     pub(super) pipeline: Mutex<PipelineCache>,
     pub(super) bind_group_layout: wgpu::BindGroupLayout,
     pub(super) ibl_bind_group_layout: wgpu::BindGroupLayout,
@@ -226,6 +227,7 @@ pub struct TerrainRenderer {
     pub(super) scene: TerrainScene,
     pub(super) last_anamnesis_report: crate::core::anamnesis::CacheReport,
     pub(super) last_anamnesis_graph_submissions: usize,
+    pub(super) last_anamnesis_bypass_reason: Option<&'static str>,
 }
 
 pub(super) struct OfflineAccumulationState {

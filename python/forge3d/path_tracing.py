@@ -255,7 +255,8 @@ class PathTracer:
           - path-tracing style: render_rgba(width,height,scene,camera,seed=...,frames=...,use_gpu=...,denoiser=...,svgf_iters=...,synthetic_ok=True)
 
         """
-        _ = cache
+        from ._cache_policy import report_cache_bypass
+        report_cache_bypass(cache, "path_tracing.render_rgba")
         synthetic_ok = bool(kwargs.pop("synthetic_ok", False))
         _require_synthetic_ok(synthetic_ok, "PathTracer.render_rgba")
         def _finish(arr: np.ndarray) -> np.ndarray:
@@ -441,7 +442,8 @@ class PathTracer:
 
         If the callback returns True, rendering stops early.
         """
-        _ = cache
+        from ._cache_policy import report_cache_bypass
+        report_cache_bypass(cache, "path_tracing.render_progressive")
         _require_synthetic_ok(synthetic_ok, "PathTracer.render_progressive")
         width, height = self._width, self._height
         spp = int(spp)
@@ -529,7 +531,8 @@ def render_aovs(
     Values are procedurally generated and deterministic with the given seed.
 
     """
-    _ = cache
+    from ._cache_policy import report_cache_bypass
+    report_cache_bypass(cache, "path_tracing.render_aovs")
     _require_synthetic_ok(synthetic_ok, "render_aovs")
     width = int(width)
     height = int(height)
@@ -724,7 +727,8 @@ def render_rgba(
     **kwargs: Any,
 ) -> np.ndarray:
     """Render RGBA image (fallback implementation)."""
-    _ = cache
+    from ._cache_policy import report_cache_bypass
+    report_cache_bypass(cache, "path_tracing.render_rgba")
     # Handle positional arguments for width/height
     if len(args) >= 2 and isinstance(args[0], (int, np.integer)) and isinstance(args[1], (int, np.integer)):
         width = int(args[0])
@@ -1004,7 +1008,8 @@ def hybrid_render_terrain_reference(
     ``refraction_model='none'``. Unsupported model names or model pairs raise
     an exception; they never fall back to flat or vacuum rendering.
     """
-    _ = cache
+    from ._cache_policy import report_cache_bypass
+    report_cache_bypass(cache, "path_tracing.hybrid_render_terrain_reference")
     native_render = get_native_symbol("hybrid_render_terrain_reference")
     if native_render is None:
         raise RuntimeError(

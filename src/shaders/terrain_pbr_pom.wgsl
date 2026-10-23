@@ -871,6 +871,16 @@ var<uniform> material_layer_uniforms: MaterialLayerUniforms;
 
 
 const TERRAIN_VT_MATERIAL_CAPACITY: u32 = 4u;
+// Five sampling coordinates, each for the existing four material identities.
+// Fixed vector slots avoid a dynamic private request array/count loop in FXC.
+// Zero means no resident request; key+1 is the existing feedback key encoding.
+var<private> terrain_vt_provenance_x: vec4<u32> = vec4<u32>(0u);
+var<private> terrain_vt_provenance_y: vec4<u32> = vec4<u32>(0u);
+var<private> terrain_vt_provenance_z: vec4<u32> = vec4<u32>(0u);
+var<private> terrain_vt_provenance_normal: vec4<u32> = vec4<u32>(0u);
+var<private> terrain_vt_provenance_mask: vec4<u32> = vec4<u32>(0u);
+var<private> terrain_vt_provenance_invalid: u32 = 0u;
+
 const TERRAIN_VT_FAMILY_ALBEDO: u32 = 0u;
 const TERRAIN_VT_FAMILY_NORMAL: u32 = 1u;
 const TERRAIN_VT_FAMILY_MASK: u32 = 2u;
@@ -963,8 +973,9 @@ struct TerrainFrameCounters {
 @group(6) @binding(16)
 var<storage, read_write> terrain_frame_counters: TerrainFrameCounters;
 
-// ORBIS acceptance bindings are reachable only from the compute entry below;
-// ordinary terrain render entry points therefore retain their seven groups.
+// TERRAIN_ORBIS_BINDINGS_BEGIN
+// Source-isolated from ordinary modules: wgpu validates every global binding,
+// even when the selected entry point does not reference it.
 struct OrbisProbeUniforms {
     absolute_view_proj: mat4x4<f32>,
     local_to_ecef: mat4x4<f32>,
@@ -999,6 +1010,7 @@ struct OrbisDrawIndexedIndirectArgs {
 @group(7) @binding(3) var<storage, read> orbis_selection_header: OrbisOutputHeader;
 @group(7) @binding(4) var<storage, read> orbis_selected_draws: array<OrbisDrawIndexedIndirectArgs>;
 @group(7) @binding(5) var<storage, read> orbis_mesh_indices: array<u32>;
+// TERRAIN_ORBIS_BINDINGS_END
 struct TerrainMaterialNoise {
     snow_macro: f32,
     snow_detail: f32,
@@ -2643,6 +2655,72 @@ fn terrain_vt_feedback_index(family_slot: u32, material_index: u32, mip_level: u
     return (((logical_material * max(terrain_vt_uniforms.config2.x, 1u)) + mip_level) * base_pages_y + tile_y) * base_pages_x + tile_x;
 }
 
+// Keep resident sampling's call graph free of UAV-dependent branches.
+// FXC ps_5_1 rejects later normal derivatives when an earlier atomic result
+// controls fragment-lane execution. The unique-page count uses exactly the
+// same bit transition as before, but only as an arithmetic atomic increment.
+fn terrain_vt_write_provenance_feedback_key(key_index: u32) {
+    let word_index = key_index / 32u;
+    if (word_index >= max(terrain_vt_uniforms.config3.x, 1u)) {
+        atomicAdd(&terrain_vt_feedback[1], 1u);
+        return;
+    }
+    let shift = key_index % 32u;
+    let bit = 1u << shift;
+    let previous = atomicOr(&terrain_vt_feedback[word_index + 2u], bit);
+    let newly_set = ((~previous) & bit) >> shift;
+    atomicAdd(&terrain_vt_feedback[0], newly_set);
+}
+
+fn terrain_vt_write_resident_provenance_feedback(
+    family_slot: u32, material_index: u32, mip_level: u32, tile_x: u32, tile_y: u32, provenance_slot: u32,
+) {
+    if (terrain_vt_uniforms.config2.w == 0u
+        || tile_x >= max(terrain_vt_uniforms.config1.z, 1u)
+        || tile_y >= max(terrain_vt_uniforms.config1.w, 1u)) {
+        return;
+    }
+    // Material sampling records only private values. Publish after shade_main
+    // has evaluated every normal derivative; no UAV is reachable from shading.
+    let encoded = terrain_vt_feedback_index(family_slot, material_index, mip_level, tile_x, tile_y) + 1u;
+    let component = vec4<u32>(material_index) == vec4<u32>(0u, 1u, 2u, 3u);
+    switch provenance_slot {
+        case 0u: { terrain_vt_provenance_x = select(terrain_vt_provenance_x, vec4<u32>(encoded), component); }
+        case 1u: { terrain_vt_provenance_y = select(terrain_vt_provenance_y, vec4<u32>(encoded), component); }
+        case 2u: { terrain_vt_provenance_z = select(terrain_vt_provenance_z, vec4<u32>(encoded), component); }
+        case 3u: { terrain_vt_provenance_normal = select(terrain_vt_provenance_normal, vec4<u32>(encoded), component); }
+        case 4u: { terrain_vt_provenance_mask = select(terrain_vt_provenance_mask, vec4<u32>(encoded), component); }
+        default: { terrain_vt_provenance_invalid += 1u; }
+    }
+}
+
+fn terrain_vt_commit_provenance_key(encoded: u32) {
+    if (encoded != 0u) {
+        terrain_vt_write_provenance_feedback_key(encoded - 1u);
+    }
+}
+
+fn terrain_vt_commit_provenance_quad(keys: vec4<u32>) {
+    terrain_vt_commit_provenance_key(keys.x);
+    terrain_vt_commit_provenance_key(keys.y);
+    terrain_vt_commit_provenance_key(keys.z);
+    terrain_vt_commit_provenance_key(keys.w);
+}
+
+fn terrain_vt_flush_provenance_feedback() {
+    if (!terrain_vt_provenance_capture()) {
+        return;
+    }
+    terrain_vt_commit_provenance_quad(terrain_vt_provenance_x);
+    terrain_vt_commit_provenance_quad(terrain_vt_provenance_y);
+    terrain_vt_commit_provenance_quad(terrain_vt_provenance_z);
+    terrain_vt_commit_provenance_quad(terrain_vt_provenance_normal);
+    terrain_vt_commit_provenance_quad(terrain_vt_provenance_mask);
+    if (terrain_vt_provenance_invalid != 0u) {
+        atomicAdd(&terrain_vt_feedback[1], terrain_vt_provenance_invalid);
+    }
+}
+
 fn terrain_vt_write_feedback(family_slot: u32, material_index: u32, mip_level: u32, tile_x: u32, tile_y: u32) {
     if (terrain_vt_uniforms.config2.w == 0u) {
         return;
@@ -2655,16 +2733,7 @@ fn terrain_vt_write_feedback(family_slot: u32, material_index: u32, mip_level: u
     let key_index = terrain_vt_feedback_index(family_slot, material_index, mip_level, tile_x, tile_y);
     let capacity = max(terrain_vt_uniforms.config3.x, 1u);
     if (terrain_vt_provenance_capture()) {
-        let word_index = key_index / 32u;
-        if (word_index >= capacity) {
-            atomicAdd(&terrain_vt_feedback[1], 1u);
-            return;
-        }
-        let bit = 1u << (key_index % 32u);
-        let previous = atomicOr(&terrain_vt_feedback[word_index + 2u], bit);
-        if ((previous & bit) == 0u) {
-            atomicAdd(&terrain_vt_feedback[0], 1u);
-        }
+        terrain_vt_write_provenance_feedback_key(key_index);
         return;
     }
     // `+ 1` keeps 0 reserved for an empty slot in malformed/partial readback.
@@ -2859,6 +2928,7 @@ fn terrain_vt_resolve_family_uv(
     ddx_uv: vec2<f32>,
     ddy_uv: vec2<f32>,
     layer: f32,
+    provenance_slot: u32,
 ) -> vec4<f32> {
     if (!terrain_vt_enabled() || !terrain_vt_family_enabled(family_slot)) {
         return vec4<f32>(
@@ -2891,12 +2961,13 @@ fn terrain_vt_resolve_family_uv(
         );
         if (entry.z > 0.5) {
             if (terrain_vt_provenance_capture()) {
-                terrain_vt_write_feedback(
+                terrain_vt_write_resident_provenance_feedback(
                     family_slot,
                     material_index,
                     mip_level,
                     page.x,
                     page.y,
+                    provenance_slot,
                 );
             }
             let page_origin = det_barrier2(vec2<f32>(f32(page.x), f32(page.y)) * page_size);
@@ -3064,10 +3135,11 @@ fn terrain_vt_sample_family_uv(
     ddx_uv: vec2<f32>,
     ddy_uv: vec2<f32>,
     layer: f32,
+    provenance_slot: u32,
 ) -> vec3<f32> {
     // Color (albedo) path: resident tiles yield linear color; fallback colors
     // are authored as linear and used as-is.
-    return terrain_vt_resolve_family_uv(family_slot, uv, ddx_uv, ddy_uv, layer).rgb;
+    return terrain_vt_resolve_family_uv(family_slot, uv, ddx_uv, ddy_uv, layer, provenance_slot).rgb;
 }
 
 // Data-family sampling (normal / mask): resident tiles are decoded back to
@@ -3082,7 +3154,7 @@ fn terrain_vt_sample_family_data(
     ddy_uv: vec2<f32>,
     layer: f32,
 ) -> vec4<f32> {
-    let resolved = terrain_vt_resolve_family_uv(family_slot, uv, ddx_uv, ddy_uv, layer);
+    let resolved = terrain_vt_resolve_family_uv(family_slot, uv, ddx_uv, ddy_uv, layer, select(4u, 3u, family_slot == TERRAIN_VT_FAMILY_NORMAL));
     if (resolved.w > 0.5) {
         let linear_data_atlas = terrain_vt_uniforms
             .family_info[min(family_slot, 2u)].virtual_size.z != 0u;
@@ -3110,13 +3182,14 @@ fn sample_material_layer_uv(
     ddx_uv: vec2<f32>,
     ddy_uv: vec2<f32>,
     layer: f32,
+    provenance_slot: u32,
 ) -> vec3<f32> {
     if (!terrain_vt_enabled() || !terrain_vt_family_enabled(TERRAIN_VT_FAMILY_ALBEDO)) {
         let layer_index = i32(layer);
         return textureSampleGrad(material_albedo_tex, material_samp, uv, layer_index, ddx_uv, ddy_uv).rgb;
     }
 
-    return terrain_vt_sample_family_uv(TERRAIN_VT_FAMILY_ALBEDO, uv, ddx_uv, ddy_uv, layer);
+    return terrain_vt_sample_family_uv(TERRAIN_VT_FAMILY_ALBEDO, uv, ddx_uv, ddy_uv, layer, provenance_slot);
 }
 
 /// Triplanar sampling with textureSampleGrad for correct mip selection.
@@ -3132,9 +3205,9 @@ fn sample_triplanar(
     let weights = compute_triplanar_weights(normal, blend_sharpness);
 
     let tri = terrain_vt_triplanar_feedback_uvs(world_pos, scale);
-    let color_x = sample_material_layer_uv(tri.uv_x, tri.ddx_x, tri.ddy_x, layer);
-    let color_y = sample_material_layer_uv(tri.uv_y, tri.ddx_y, tri.ddy_y, layer);
-    let color_z = sample_material_layer_uv(tri.uv_z, tri.ddx_z, tri.ddy_z, layer);
+    let color_x = sample_material_layer_uv(tri.uv_x, tri.ddx_x, tri.ddy_x, layer, 0u);
+    let color_y = sample_material_layer_uv(tri.uv_y, tri.ddx_y, tri.ddy_y, layer, 1u);
+    let color_z = sample_material_layer_uv(tri.uv_z, tri.ddx_z, tri.ddy_z, layer, 2u);
 
     return det_barrier3(det_barrier3(color_x * weights.x) + det_barrier3(color_y * weights.y)) + det_barrier3(color_z * weights.z);
 }
@@ -4692,7 +4765,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             // image's top-to-bottom row convention, without the old zoom.
             drape_uv = vec2<f32>(input.tex_coord.x, 1.0 - input.tex_coord.y);
         }
-        let drape = textureSample(material_drape_tex, material_map_samp, drape_uv);
+        let drape = textureSampleLevel(material_drape_tex, material_map_samp, drape_uv, 0.0);
         final_albedo = det_mix3(final_albedo, drape.rgb, drape.a);
     }
 
@@ -5866,6 +5939,7 @@ fn forward_shade_with_feedback(input : VertexOutput) -> FragmentOutput {
     let feedback_ddx_world = terrain_screen_ddx_world(input.world_position);
     let feedback_ddy_world = terrain_screen_ddy_world(input.world_position);
     let out = shade_main(input);
+    terrain_vt_flush_provenance_feedback();
     atomicAdd(&terrain_frame_counters.material_invocations, 1u);
     atomicAdd(&terrain_frame_counters.forward_material_invocations, 1u);
     terrain_vt_write_surface_feedback(
@@ -5890,6 +5964,7 @@ fn fs_aov_main(input : VertexOutput) -> FragmentOutput {
     let feedback_ddx_world = terrain_screen_ddx_world(input.world_position);
     let feedback_ddy_world = terrain_screen_ddy_world(input.world_position);
     var out = shade_main(input);
+    terrain_vt_flush_provenance_feedback();
     atomicAdd(&terrain_frame_counters.material_invocations, 1u);
     atomicAdd(&terrain_frame_counters.forward_material_invocations, 1u);
     terrain_vt_write_surface_feedback(
@@ -6256,6 +6331,7 @@ fn vs_clipmap_main(
     return out;
 }
 
+// TERRAIN_ORBIS_PROBE_BEGIN
 fn orbis_project(matrix: mat4x4<f32>, position: vec3<f32>) -> vec4<f32> {
     let clip = det_mat4_mul_vec4(matrix, vec4<f32>(position, 1.0));
     return vec4<f32>(det_div2(clip.xy, vec2<f32>(clip.w)), clip.w, 0.0);
@@ -6351,3 +6427,4 @@ fn orbis_metric_probe(@builtin(global_invocation_id) invocation: vec3<u32>) {
     sample.production.w = select(0.0, 1.0, clip_morph.x < 0.0);
     orbis_projection_samples[index] = sample;
 }
+// TERRAIN_ORBIS_PROBE_END

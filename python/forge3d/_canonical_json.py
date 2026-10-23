@@ -4,11 +4,26 @@ from __future__ import annotations
 
 import json
 import math
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 
 def canonical_json_value(value: Any, *, error_context: str) -> Any:
     """Normalize finite JSON values for byte-stable serialization."""
+    # Exact builtins dominate render declarations. Preserve the generic
+    # Mapping/subclass behavior below without protocol checks on each scalar.
+    kind = type(value)
+    if value is None or kind in (bool, int, str):
+        return value
+    if kind is float:
+        if not math.isfinite(value):
+            raise ValueError(f"{error_context} does not permit NaN or infinite floats")
+        return 0.0 if value == 0.0 else value
+    if kind is dict:
+        return {str(key): canonical_json_value(item, error_context=error_context)
+                for key, item in value.items()}
+    if kind in (list, tuple):
+        return [canonical_json_value(item, error_context=error_context) for item in value]
     if isinstance(value, Mapping):
         return {
             str(key): canonical_json_value(item, error_context=error_context)
