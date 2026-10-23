@@ -58,9 +58,16 @@ pub fn load_hdr<P: AsRef<Path>>(path: P) -> RenderResult<HdrImage> {
     // Read scanlines
     let mut rgbe_data = read_scanlines(&mut reader, width, height)?;
 
-    // A "+Y" file stores its rows bottom to top, so flip them back.
+    // A "+Y" file stores its rows bottom to top, so flip the ROW ORDER back.
+    // Reversing the whole pixel vector would also mirror each row left to
+    // right, which is a 180-degree rotation, not a flip.
     if bottom_up {
-        rgbe_data.reverse();
+        let row = width as usize;
+        let mut flipped = Vec::with_capacity(rgbe_data.len());
+        for start in (0..rgbe_data.len()).step_by(row).rev() {
+            flipped.extend_from_slice(&rgbe_data[start..start + row]);
+        }
+        rgbe_data = flipped;
     }
 
     // Convert RGBe to linear RGB
@@ -414,9 +421,10 @@ mod tests {
             std::process::id(),
             nonce
         ));
-        // Two rows of four pixels: the first stored row is RED, the second
-        // BLUE. In a "+Y" file the first stored row is the BOTTOM one, so
-        // the decoded image must have red at the bottom.
+        // Two rows of four pixels, each row a gradient rather than one flat
+        // colour: a row-reversal and a whole-vector reversal agree on the rows
+        // but disagree on the columns, so the gradient is what tells them
+        // apart. Stored row 0 is R,G,B,G and row 1 is C,M,Y,C.
         let write = |name: &str, orientation: &str| {
             let mut p = std::env::temp_dir();
             p.push(format!(
@@ -434,13 +442,17 @@ mod tests {
                 .as_bytes(),
             )
             .unwrap();
-            let red = [255u8, 0, 0, 129];
-            let blue = [0u8, 0, 255, 129];
-            for _ in 0..4 {
-                f.write_all(&red).unwrap();
-            }
-            for _ in 0..4 {
-                f.write_all(&blue).unwrap();
+            for px in [
+                [255u8, 0, 0, 129],   // red
+                [0, 255, 0, 129],     // green
+                [0, 0, 255, 129],     // blue
+                [0, 255, 0, 129],     // green
+                [0, 255, 255, 129],   // cyan
+                [255, 0, 255, 129],   // magenta
+                [255, 255, 0, 129],   // yellow
+                [0, 255, 255, 129],   // cyan
+            ] {
+                f.write_all(&px).unwrap();
             }
             p
         };
@@ -452,14 +464,41 @@ mod tests {
         std::fs::remove_file(&minus).ok();
         std::fs::remove_file(&plus).ok();
 
+        let px = |img: &HdrImage, row: usize, col: usize| {
+            let at = (row * img.width as usize + col) * 3;
+            (img.data[at], img.data[at + 1], img.data[at + 2])
+        };
         let red = |img: &HdrImage, row: usize| img.data[(row * img.width as usize) * 3];
+
         // The -Y file stores red first, so red is the top row.
         assert!(red(&top, 0) > red(&top, 1), "-Y: the first stored row is the top");
-        // The +Y file stores red first too, but red is the BOTTOM row, so
-        // the decoder must have flipped it.
+        // The +Y file stores red first too, but red is the BOTTOM row, so the
+        // decoder must have flipped the rows...
         assert!(
             red(&bottom, 1) > red(&bottom, 0),
             "+Y: the first stored row is the bottom"
         );
+        // ...and only the rows: every column keeps its own colour. A
+        // whole-vector reversal would put green at the bottom-left.
+        for (row, colours) in [
+            // Decoded row 0 is the top: that is the stored row 1 (C, M, Y, C).
+            (0usize, [[0.0, 1.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, 0.0], [0.0, 1.0, 1.0]]),
+            // Decoded row 1 is the bottom: the stored row 0 (R, G, B, G).
+            (1usize, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]]),
+        ] {
+            for (col, want) in colours.iter().enumerate() {
+                let got = px(&bottom, row, col);
+                let lit: [f32; 3] = [got.0, got.1, got.2];
+                let max = lit.iter().cloned().fold(0.0f32, f32::max);
+                assert!(max > 0.0, "row {row} col {col} decoded black");
+                let scaled = [lit[0] / max, lit[1] / max, lit[2] / max];
+                for ch in 0..3 {
+                    assert!(
+                        (scaled[ch] - want[ch]).abs() < 1e-3,
+                        "row {row} col {col} channel {ch}: {scaled:?} != {want:?}"
+                    );
+                }
+            }
+        }
     }
 }
