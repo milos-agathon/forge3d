@@ -1964,8 +1964,8 @@ impl TerrainMediaResources {
             let extent=wgpu::Extent3d {width,height:height as u32,depth_or_array_layers:1};
             let usage=wgpu::TextureUsages::TEXTURE_BINDING|wgpu::TextureUsages::STORAGE_BINDING;
             let source_usage=usage|wgpu::TextureUsages::COPY_SRC;
-            let (source0,b0)=tracked_texture(device,"nephele.media.directional.source0",extent,wgpu::TextureDimension::D2,wgpu::TextureFormat::Rgba16Float,source_usage)?;
-            let (source1,b1)=tracked_texture(device,"nephele.media.directional.source1",extent,wgpu::TextureDimension::D2,wgpu::TextureFormat::Rgba16Float,source_usage)?;
+            let (source0,b0)=tracked_texture(device,"nephele.media.directional.source0",extent,wgpu::TextureDimension::D2,wgpu::TextureFormat::Rg32Uint,source_usage)?;
+            let (source1,b1)=tracked_texture(device,"nephele.media.directional.source1",extent,wgpu::TextureDimension::D2,wgpu::TextureFormat::Rg32Uint,source_usage)?;
             let (incoming,bi)=tracked_texture(device,"nephele.media.directional.incoming",extent,wgpu::TextureDimension::D2,wgpu::TextureFormat::Rgba32Uint,usage)?;
             let (active,ba)=tracked_texture(device,"nephele.media.directional.active",self.grid.extent(),wgpu::TextureDimension::D3,wgpu::TextureFormat::R32Uint,wgpu::TextureUsages::TEXTURE_BINDING|wgpu::TextureUsages::COPY_DST)?;
             queue.write_texture(wgpu::ImageCopyTexture {texture:&active,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},bytemuck::cast_slice(&nodes.active_indices),wgpu::ImageDataLayout {offset:0,bytes_per_row:Some(self.grid.width*4),rows_per_image:Some(self.grid.height)},self.grid.extent());

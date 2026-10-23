@@ -256,8 +256,8 @@ fn main_nephele_surface_cloudlight(@builtin(global_invocation_id) id: vec3<u32>)
 const NEPHELE_DIRECTIONS: u32 = 192u;
 struct NepheleDensityNodes { dimensions: vec4<u32>, values: array<f32>, }
 @group(3) @binding(17) var<storage, read> nd_density: NepheleDensityNodes;
-@group(3) @binding(18) var nd_source: texture_2d<f32>;
-@group(3) @binding(19) var nd_source_next: texture_storage_2d<rgba16float,write>;
+@group(3) @binding(18) var nd_source: texture_2d<u32>;
+@group(3) @binding(19) var nd_source_next: texture_storage_2d<rg32uint,write>;
 @group(3) @binding(20) var nd_incoming: texture_2d<u32>;
 @group(3) @binding(21) var<storage, read> nd_surface: array<vec2<u32>>;
 @group(3) @binding(22) var<storage, read_write> nd_surface_next: array<vec2<u32>>;
@@ -267,7 +267,7 @@ struct NepheleDensityNodes { dimensions: vec4<u32>, values: array<f32>, }
 @group(3) @binding(26) var<storage, read> nd_first_surface: array<vec2<u32>>;
 @group(3) @binding(27) var nd_incoming_out: texture_storage_2d<rgba32uint,write>;
 @group(3) @binding(28) var nd_active: texture_3d<u32>;
-@group(3) @binding(29) var nd_source_zero: texture_storage_2d<rgba16float,write>;
+@group(3) @binding(29) var nd_source_zero: texture_storage_2d<rg32uint,write>;
 struct NepheleConvergence {
     changed: atomic<u32>,
     source_delta: atomic<u32>,
@@ -422,7 +422,7 @@ fn nd_characteristic(p: vec3<f32>, j: u32) -> vec3<f32> {
                 for (var c=0u;c<3u;c=c+1u) {
                     if (nephele.sigma_t[c]>0.0) { weight[c]=(1.0-exp(-segment[c]))/nephele.sigma_t[c]; }
                 }
-                value += trans*weight*textureLoad(nd_source,nd_cache_coordinate(at,j,textureDimensions(nd_source)),0).rgb/rho;
+                value += trans*weight*nd_unpack(textureLoad(nd_source,nd_cache_coordinate(at,j,textureDimensions(nd_source)),0).xy)/rho;
             }
             trans *= exp(-segment);
         }
@@ -437,13 +437,15 @@ fn nd_vertex_point(id: vec2<u32>) -> vec3<f32> {
     let xz = terrain.origin_spacing.xy+uv*terrain.origin_spacing.zw;
     return vec3<f32>(xz.x,mix(mix(h.x,h.y,f.x),mix(h.z,h.w,f.x),f.y),xz.y);
 }
-fn nd_measure_change(previous: vec3<f32>, next: vec3<f32>) -> u32 {
+fn nd_measure_change(previous_packed: vec2<u32>, next_packed: vec2<u32>) -> u32 {
+    let previous = nd_unpack(previous_packed);
+    let next = nd_unpack(next_packed);
     // 65504 is the largest finite f16 value. Reject overflow and loss of the
     // positive operator's monotonicity instead of clipping or looping forever.
     if (any(!(next>=vec3<f32>(0.0))) || any(next>vec3<f32>(65504.0)) || any(next<previous)) {
         atomicStore(&nd_progress.invalid,1u);
     }
-    if (any(next!=previous)) { atomicStore(&nd_progress.changed,1u); }
+    if (any(next_packed!=previous_packed)) { atomicStore(&nd_progress.changed,1u); }
     let delta=abs(next-previous);
     return bitcast<u32>(max(delta.x,max(delta.y,delta.z)));
 }
@@ -470,10 +472,10 @@ fn main_nephele_directional_source(@builtin(global_invocation_id) id: vec3<u32>)
         for (var k=0u;k<NEPHELE_DIRECTIONS;k=k+1u) {
             sum += (12.566370614359172/f32(NEPHELE_DIRECTIONS))*nephele_cloudlight_phase(dot(d,nd_direction(k)))*bitcast<vec4<f32>>(textureLoad(nd_incoming,nd_cache_coordinate(at,k,textureDimensions(nd_incoming)),0)).rgb;
         }
-        let next=nd_unpack(nd_pack(nephele.sigma_s.rgb*rho*sum));
-        let previous=textureLoad(nd_source,nd_cache_coordinate(at,j,textureDimensions(nd_source)),0).rgb;
-        atomicMax(&nd_progress.source_delta,nd_measure_change(previous,next));
-        textureStore(nd_source_next,nd_cache_coordinate(at,j,textureDimensions(nd_source_next)),vec4<f32>(next,0.0));
+        let packed=nd_pack(nephele.sigma_s.rgb*rho*sum);
+        let previous=textureLoad(nd_source,nd_cache_coordinate(at,j,textureDimensions(nd_source)),0).xy;
+        atomicMax(&nd_progress.source_delta,nd_measure_change(previous,packed));
+        textureStore(nd_source_next,nd_cache_coordinate(at,j,textureDimensions(nd_source_next)),vec4<u32>(packed,0u,0u));
     }
 }
 @compute @workgroup_size(8,8,1)
@@ -488,7 +490,7 @@ fn main_nephele_directional_surface(@builtin(global_invocation_id) id: vec3<u32>
     }
     let at=id.x+nephele.grid.x*id.y;
     let packed=nd_pack(nephele.terrain_albedo.rgb*sum*0.3183098861837907);
-    atomicMax(&nd_progress.surface_delta,nd_measure_change(nd_unpack(nd_surface[at]),nd_unpack(packed)));
+    atomicMax(&nd_progress.surface_delta,nd_measure_change(nd_surface[at],packed));
     nd_surface_next[at]=packed;
 }
 @compute @workgroup_size(4,4,4)
@@ -537,6 +539,6 @@ fn main_nephele_directional_primary(@builtin(global_invocation_id) id: vec3<u32>
 @compute @workgroup_size(8,8,1)
 fn main_nephele_directional_clear(@builtin(global_invocation_id) id:vec3<u32>) {
     if (any(id.xy>=textureDimensions(nd_source_next))) { return; }
-    textureStore(nd_source_next,id.xy,vec4<f32>(0.0));
-    textureStore(nd_source_zero,id.xy,vec4<f32>(0.0));
+    textureStore(nd_source_next,id.xy,vec4<u32>(0u));
+    textureStore(nd_source_zero,id.xy,vec4<u32>(0u));
 }
