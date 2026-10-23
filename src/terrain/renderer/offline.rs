@@ -488,7 +488,7 @@ impl TerrainScene {
         )?;
 
         let materials =
-            self.prepare_material_context_with_mode(material_set, &offline_params, &decoded, true)?;
+            self.prepare_material_context_with_mode(material_set, &offline_params, &decoded, true, None)?;
         let ibl_bind_group = self.prepare_ibl_bind_group(env_maps)?;
         let height_curve_lut_uploaded = if offline_params.height_curve_mode.as_str() == "lut" {
             offline_params

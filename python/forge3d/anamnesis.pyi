@@ -20,6 +20,7 @@ class SequenceResult:
     elapsed_seconds: float
     reference_only: bool
     pass_keys: dict[str, str]
+    bypass_reason: str | None
     @property
     def prediction_matches(self) -> bool: ...
 

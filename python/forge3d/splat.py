@@ -578,7 +578,7 @@ def render_fused(
             writes it there.
         cache: accepted for the ANAMNESIS render contract. The fused
             integrator streams its scene per view and has no render-graph
-            cache, so the value is ignored.
+            cache. A non-None value emits a cache-bypass warning.
 
     Returns:
         ``(height, width, 4)`` uint8 RGBA, or a :class:`FusedRenderResult`
@@ -593,6 +593,8 @@ def render_fused(
         forge3d.DegradedCapability: the device grants too few storage
             buffers per stage for the fused kernel.
     """
+    from ._cache_policy import report_cache_bypass
+    report_cache_bypass(cache, "splat.render_fused")
     native = _native("render_fused")
     if samples < 1:
         raise ValueError(f"samples must be >= 1, got {samples}")
@@ -654,7 +656,7 @@ def render_fused(
         policy=str(policy),
         aovs=bool(return_aovs),
         certificate=_certificate_arg(certificate),
-        cache=cache,
+        cache=None,
         **tile_kwargs,
         **scene,
     )
@@ -751,6 +753,8 @@ def render_fused_sequence(
         One ``(height, width, 4)`` uint8 image, or one
         :class:`FusedRenderResult` with ``return_aovs``, per view.
     """
+    from ._cache_policy import report_cache_bypass
+    report_cache_bypass(cache, "splat.render_fused_sequence")
     native = _native("render_fused_sequence")
     if samples < 1:
         raise ValueError(f"samples must be >= 1, got {samples}")
@@ -824,7 +828,7 @@ def render_fused_sequence(
         policy=str(policy),
         aovs=bool(return_aovs),
         certificate=_certificate_arg(certificate),
-        cache=cache,
+        cache=None,
         **tile_kwargs,
         **scene,
     )
@@ -873,8 +877,10 @@ def render_fused_reference(
 
     ``certificate`` follows the render-certificate contract of
     :func:`render_fused`; ``cache`` is accepted for the ANAMNESIS render
-    contract and ignored (the reference trace has no render-graph cache).
+    contract. A non-None value emits a cache-bypass warning because the reference trace has no render-graph cache.
     """
+    from ._cache_policy import report_cache_bypass
+    report_cache_bypass(cache, "splat.render_fused_reference")
     native = _native("render_fused_reference")
     cam = _resolve_camera(camera)
     scene, _ = _scene_kwargs(splats, pointcloud, terrain)
@@ -902,7 +908,7 @@ def render_fused_reference(
             min_sun_cosine=float(min_sun_cosine),
             lidar_surfels=bool(lidar_surfels),
             certificate=_certificate_arg(certificate),
-            cache=cache,
+            cache=None,
             **scene,
         )
     )

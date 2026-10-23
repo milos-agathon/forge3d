@@ -425,7 +425,8 @@ class Renderer:
         self, *, certificate: bool | str | Path = False, cache: str | Path | None = None
     ) -> np.ndarray:
         """Render a basic triangle pattern (fallback test method)."""
-        _ = cache
+        from ._cache_policy import report_cache_bypass
+        report_cache_bypass(cache, "__init__.render_triangle_rgba")
         from . import _degradation
 
         _degradation.record(

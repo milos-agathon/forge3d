@@ -618,6 +618,7 @@ def test_e_anamnesis_physical_jobs_are_acceptance_scoped_honestly():
         "test-anamnesis-portability-seed",
         "test-anamnesis-portability",
         "test-anamnesis-production",
+        "test-anamnesis-hermeticity",
     ):
         job = ci_yml.split(f"  {job_name}:", 1)[1].split(
             "\n    runs-on:", 1
@@ -641,6 +642,7 @@ def test_e_anamnesis_physical_jobs_are_acceptance_scoped_honestly():
         "test-anamnesis-portability-seed",
         "test-anamnesis-portability",
         "test-anamnesis-production",
+        "test-anamnesis-hermeticity",
     ):
         assert (
             f"check_selected \"$anamnesis_physical_selected\" "
@@ -818,6 +820,7 @@ def test_f_pr_core_is_lightweight_and_full_profiles_are_acceptance_only():
         "test-golden-images",
         "test-m06-full-geospatial-viewer",
         "test-anamnesis-production",
+        "test-anamnesis-hermeticity",
         "test-python-full-linux",
         "test-python-full-windows",
         "test-python-full-macos",

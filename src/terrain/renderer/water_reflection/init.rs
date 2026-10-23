@@ -99,11 +99,11 @@ pub(in crate::terrain::renderer) fn create_water_reflection_init_resources(
         },
     )?;
     let texel_bytes = color_format.block_copy_size(None).ok_or_else(|| {
-        crate::core::error::RenderError::Render(
-            "Unsupported water reflection fallback format".into(),
-        )
+        crate::core::error::RenderError::render(format!(
+            "water reflection fallback format {color_format:?} has no single-texel copy size"
+        ))
     })?;
-    let fallback_pixel = vec![0u8; texel_bytes as usize];
+    let transparent_texel = vec![0u8; texel_bytes as usize];
     queue.write_texture(
         wgpu::ImageCopyTexture {
             texture: &water_reflection_fallback_texture,
@@ -111,7 +111,7 @@ pub(in crate::terrain::renderer) fn create_water_reflection_init_resources(
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },
-        &fallback_pixel,
+        &transparent_texel,
         wgpu::ImageDataLayout {
             offset: 0,
             bytes_per_row: Some(texel_bytes),

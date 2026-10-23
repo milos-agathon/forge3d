@@ -214,6 +214,7 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         ("test-anamnesis-portability-seed", "anamnesis-physical-portable-store"),
         ("test-anamnesis-portability", "anamnesis-portability-evidence"),
         ("test-anamnesis-production", "anamnesis-production-evidence"),
+        ("test-anamnesis-hermeticity", "anamnesis-hermeticity-evidence"),
     ]
     if tessella_enabled:
         physical_artifacts.append(
@@ -666,6 +667,7 @@ def test_physical_selection_truth_table_and_job_conditions() -> None:
         "test-anamnesis-portability-seed": expected_condition("anamnesis"),
         "test-anamnesis-portability": expected_condition("anamnesis"),
         "test-anamnesis-production": expected_condition("anamnesis"),
+        "test-anamnesis-hermeticity": expected_condition("anamnesis"),
     }
     if "test-tessella-gpu" in jobs:
         expected["test-tessella-gpu"] = expected_condition("tessella")

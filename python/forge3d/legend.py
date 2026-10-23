@@ -127,7 +127,8 @@ class Legend:
     @_captured_cpu_render("python.legend.render", "legend.cpu", draw_calls=1)
     def render(self, *, certificate: bool | str = False, cache: str | None = None) -> np.ndarray:
         """Render geometry plus every label through packaged native text."""
-        _ = cache
+        from ._cache_policy import report_cache_bypass
+        report_cache_bypass(cache, "legend.render")
         from ._map_scene_render import _draw_text, _text_outline_metrics
 
         def extent(text: str, size: int) -> tuple[int, int]:

@@ -5,6 +5,8 @@ use image::{DynamicImage, GenericImageView};
 #[cfg(feature = "extension-module")]
 use log::{info, warn};
 #[cfg(feature = "extension-module")]
+use sha2::{Digest, Sha256};
+#[cfg(feature = "extension-module")]
 use std::sync::Arc;
 #[cfg(feature = "extension-module")]
 use wgpu::{
@@ -29,8 +31,8 @@ pub(crate) struct GpuMaterialSet {
     pub(crate) view: wgpu::TextureView,
     pub(crate) sampler: wgpu::Sampler,
     pub(crate) layer_count: u32,
-    pub(crate) resident_identity: [u8; 32],
     pub(crate) layer_centers: [f32; MAX_LAYERS],
+    pub(crate) anamnesis_key: [u8; 32],
 }
 
 #[cfg(feature = "extension-module")]
@@ -179,23 +181,26 @@ impl GpuMaterialSet {
             layer_pixels.push(mip_chain);
         }
 
-        let texture = tracked_create_texture(
-            device,
-            &TextureDescriptor {
-                label: Some("terrain.materials.albedo"),
-                size: Extent3d {
-                    width: target_width,
-                    height: target_height,
-                    depth_or_array_layers: layer_count_u32.max(1),
-                },
-                mip_level_count,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::Rgba8UnormSrgb,
-                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-                view_formats: &[],
+        let texture_descriptor = TextureDescriptor {
+            label: Some("terrain.materials.albedo"),
+            size: Extent3d {
+                width: target_width,
+                height: target_height,
+                depth_or_array_layers: layer_count_u32.max(1),
             },
-        )?;
+            mip_level_count,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8UnormSrgb,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            view_formats: &[],
+        };
+        let texture = tracked_create_texture(device, &texture_descriptor)?;
+        let mut identity = Sha256::new();
+        identity.update(b"forge3d.terrain.material-gpu/v1\0");
+        let descriptor_bytes = format!("{texture_descriptor:?}").into_bytes();
+        identity.update((descriptor_bytes.len() as u64).to_le_bytes());
+        identity.update(descriptor_bytes);
 
         for (layer_idx, mip_chain) in layer_pixels.iter().enumerate() {
             let mut mip_width = target_width;
@@ -204,6 +209,16 @@ impl GpuMaterialSet {
                 let width = mip_width.max(1);
                 let height = mip_height.max(1);
                 let (padded, padded_bpr) = pad_rgba_rows(width, height, pixels);
+                // Record the exact bytes submitted, after resolution/mip
+                // selection and deterministic row padding, without retaining
+                // a second CPU copy of the texture.
+                identity.update((layer_idx as u32).to_le_bytes());
+                identity.update((mip_level as u32).to_le_bytes());
+                identity.update(width.to_le_bytes());
+                identity.update(height.to_le_bytes());
+                identity.update(padded_bpr.to_le_bytes());
+                identity.update((padded.len() as u64).to_le_bytes());
+                identity.update(&padded);
                 queue.write_texture(
                     wgpu::ImageCopyTexture {
                         texture: &texture,
@@ -236,7 +251,7 @@ impl GpuMaterialSet {
             }
         }
 
-        let view = texture.create_view(&TextureViewDescriptor {
+        let view_descriptor = TextureViewDescriptor {
             label: Some("terrain.materials.albedo.view"),
             format: Some(TextureFormat::Rgba8UnormSrgb),
             dimension: Some(TextureViewDimension::D2Array),
@@ -245,7 +260,11 @@ impl GpuMaterialSet {
             mip_level_count: None,
             base_array_layer: 0,
             array_layer_count: None,
-        });
+        };
+        let view = texture.create_view(&view_descriptor);
+        let descriptor_bytes = format!("{view_descriptor:?}").into_bytes();
+        identity.update((descriptor_bytes.len() as u64).to_le_bytes());
+        identity.update(descriptor_bytes);
 
         let sampler_descriptor = SamplerDescriptor {
             label: Some("terrain.materials.albedo.sampler"),
@@ -263,21 +282,9 @@ impl GpuMaterialSet {
             ..Default::default()
         };
         let sampler = device.create_sampler(&sampler_descriptor);
-        use sha2::{Digest, Sha256};
-        let mut identity = Sha256::new();
-        identity.update(b"forge3d.resident-material-rgba8-srgb/v1");
-        identity.update(target_width.to_le_bytes());
-        identity.update(target_height.to_le_bytes());
-        identity.update(layer_count_u32.to_le_bytes());
-        identity.update(mip_level_count.to_le_bytes());
-        identity.update(format!("{sampler_descriptor:?}").as_bytes());
-        for chain in &layer_pixels {
-            for pixels in chain {
-                identity.update((pixels.len() as u64).to_le_bytes());
-                identity.update(pixels);
-            }
-        }
-        let resident_identity = identity.finalize().into();
+        let descriptor_bytes = format!("{sampler_descriptor:?}").into_bytes();
+        identity.update((descriptor_bytes.len() as u64).to_le_bytes());
+        identity.update(descriptor_bytes);
 
         let mut layer_centers = [0.0f32; MAX_LAYERS];
         if layer_count == 1 {
@@ -294,8 +301,8 @@ impl GpuMaterialSet {
             view,
             sampler,
             layer_count: layer_count_u32,
-            resident_identity,
             layer_centers,
+            anamnesis_key: identity.finalize().into(),
         })
     }
 
