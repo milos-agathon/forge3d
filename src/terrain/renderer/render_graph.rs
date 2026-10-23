@@ -438,8 +438,8 @@ pub(super) fn build_terrain_render_graph(
         }
         if let Some(m) = media_handles {
             // Terrain direct light samples the complete canonical surface-to-sun
-            // segment before the view-ray integration exists. Forward setup also
-            // populates the directional linear-HDR radiance consumed by injection.
+            // segment before view-ray integration. Directional cloudlight already
+            // populated the radiance provider; only the legacy path writes it here.
             pass.read(m.light_transmittance)
                 .read(m.surface_cloudlight)
                 .write(m.scene_depth);
@@ -449,9 +449,9 @@ pub(super) fn build_terrain_render_graph(
         Ok(())
     })?;
     if let Some(m) = media_handles {
-        // The rendered sky populates the narrow radiance-provider seam during
-        // forward setup. Injection therefore follows forward, while both
-        // independent results remain explicit inputs to integration.
+        // Legacy injection follows forward's radiance-provider write. In the
+        // directional path both passes read cloudlight's provider, so injection
+        // may precede forward. Integration consumes both results and scene depth.
         builder.add_pass("nephele.media.inject", PassType::Compute, |pass| {
             pass.read(prepared)
                 .read(shadow)
@@ -579,6 +579,41 @@ mod tests {
             assert!(pass.reads.contains(&texture));
             assert_eq!(pass.writes.contains(&texture),index!=3);
         }
+    }
+    #[test]
+    fn directional_aov_execution_follows_the_compiled_plan() {
+        let graph = build_terrain_render_graph(
+            64, 64, 64, 64, 16, 16, 256, 4, wgpu::TextureFormat::Rgba16Float, true,
+            TerrainMediaGraphConfig { enabled: true, directional: true,
+                froxel_grid: super::super::media::FroxelGrid::for_viewport(64,64), resource_version: 7 },
+            declarations(), false,
+        ).unwrap();
+        let shadow = graph.handles.shadow;
+        let mut plan = graph.plan;
+        let main = super::super::aov::ordered_aov_main_passes(&plan);
+        let position = |name| main.iter().position(|label| label == name).unwrap();
+        assert!(position("nephele.media.inject") < position("terrain.forward_aov"));
+        assert!(super::super::aov::observe_aov_shadow_transition(
+            "terrain.forward_aov", &[], shadow, &mut false,
+        ).is_err());
+        let mut executed = Vec::new();
+        let mut shadow_transition_observed = false;
+        for label in ["terrain.prepare", "nephele.media.cloudlight", "terrain.shadow"]
+            .into_iter().chain(main.iter().map(String::as_str)).chain(["terrain.resolve_aov"])
+        {
+            plan.execute_with_barriers(label, |barriers| {
+                if matches!(label, "nephele.media.inject" | "terrain.forward_aov") {
+                    super::super::aov::observe_aov_shadow_transition(
+                        label, barriers, shadow, &mut shadow_transition_observed,
+                    ).unwrap();
+                }
+                executed.push(label.to_string());
+                Ok::<(), crate::core::error::RenderError>(())
+            }).unwrap();
+        }
+        assert!(shadow_transition_observed);
+        assert_eq!(executed, plan.labels);
+        plan.finish().unwrap();
     }
     #[test]
     fn media_disabled_preserves_graph() {

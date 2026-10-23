@@ -437,17 +437,58 @@ fn nd_vertex_point(id: vec2<u32>) -> vec3<f32> {
     let xz = terrain.origin_spacing.xy+uv*terrain.origin_spacing.zw;
     return vec3<f32>(xz.x,mix(mix(h.x,h.y,f.x),mix(h.z,h.w,f.x),f.y),xz.y);
 }
-fn nd_measure_change(previous_packed: vec2<u32>, next_packed: vec2<u32>) -> u32 {
-    let previous = nd_unpack(previous_packed);
-    let next = nd_unpack(next_packed);
-    // 65504 is the largest finite f16 value. Reject overflow and loss of the
-    // positive operator's monotonicity instead of clipping or looping forever.
-    if (any(!(next>=vec3<f32>(0.0))) || any(next>vec3<f32>(65504.0)) || any(next<previous)) {
-        atomicStore(&nd_progress.invalid,1u);
+fn nd_f16_fields(packed: vec2<u32>) -> vec3<u32> {
+    let fields = vec3<u32>(packed.x & 0xffffu, packed.x >> 16u, packed.y & 0xffffu);
+    return select(fields, vec3<u32>(0u), fields == vec3<u32>(0x8000u));
+}
+fn nd_f16_units(field: u32) -> vec2<u32> {
+    // A finite nonnegative f16 is an integer multiple of 2^-24. Its largest
+    // value needs 40 bits, represented here as low/high u32 words.
+    let exponent = field >> 10u;
+    let significand = (field & 0x3ffu) | select(0u, 0x400u, exponent != 0u);
+    let shift = select(0u, exponent - 1u, exponent != 0u);
+    return vec2<u32>(significand << shift, select(0u, significand >> (32u - shift), shift != 0u));
+}
+fn nd_units_f32_bits(units: vec2<u32>) -> u32 {
+    if (all(units == vec2<u32>(0u))) { return 0u; }
+    // Encode units*2^-24 as IEEE f32, rounding to nearest, ties to even.
+    // No float arithmetic or pack/unpack intrinsic can bypass quantization.
+    var top = firstLeadingBit(units.x);
+    if (units.y != 0u) { top = 32u + firstLeadingBit(units.y); }
+    var fraction: u32;
+    var round_up = false;
+    if (top <= 23u) {
+        fraction = units.x << (23u - top);
+    } else {
+        let shift = top - 23u;
+        fraction = (units.x >> shift) | (units.y << (32u - shift));
+        let remainder = units.x & ((1u << shift) - 1u);
+        let halfway = 1u << (shift - 1u);
+        round_up = remainder > halfway || (remainder == halfway && (fraction & 1u) != 0u);
     }
+    return ((top + 103u) << 23u) + (fraction & 0x7fffffu) + u32(round_up);
+}
+fn nd_measure_change(previous_packed: vec2<u32>, next_packed: vec2<u32>) -> u32 {
     if (any(next_packed!=previous_packed)) { atomicStore(&nd_progress.changed,1u); }
-    let delta=abs(next-previous);
-    return bitcast<u32>(max(delta.x,max(delta.y,delta.z)));
+    let previous = nd_f16_fields(previous_packed);
+    let next = nd_f16_fields(next_packed);
+    // 0x7bff is the largest finite positive f16. After canonicalizing -0,
+    // larger fields include all negative values, infinities and NaNs.
+    // Unsigned field order is value order for the remaining nonnegative f16s.
+    if (any(next > vec3<u32>(0x7bffu)) || any(previous > vec3<u32>(0x7bffu)) || any(next < previous)) {
+        atomicStore(&nd_progress.invalid,1u);
+        return 0u;
+    }
+    var maximum = vec2<u32>(0u);
+    for (var channel = 0u; channel < 3u; channel = channel + 1u) {
+        let before = nd_f16_units(previous[channel]);
+        let after = nd_f16_units(next[channel]);
+        let difference = vec2<u32>(after.x - before.x, after.y - before.y - u32(after.x < before.x));
+        if (difference.y > maximum.y || (difference.y == maximum.y && difference.x > maximum.x)) {
+            maximum = difference;
+        }
+    }
+    return nd_units_f32_bits(maximum);
 }
 @compute @workgroup_size(4,4,4)
 fn main_nephele_directional_incoming(@builtin(global_invocation_id) id: vec3<u32>) {

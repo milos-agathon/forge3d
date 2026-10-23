@@ -11,6 +11,40 @@ pub(super) const AOV_NORMAL_BIT: u8 = 1 << 1;
 pub(super) const AOV_DEPTH_BIT: u8 = 1 << 2;
 pub(super) const AOV_ALL_BITS: u8 = AOV_ALBEDO_BIT | AOV_NORMAL_BIT | AOV_DEPTH_BIT;
 
+pub(super) fn ordered_aov_main_passes(
+    graph: &crate::core::framegraph_impl::RendererGraphPlan,
+) -> Vec<String> {
+    graph
+        .ordered_passes()
+        .filter(|pass| {
+            matches!(
+                pass.name.as_str(),
+                "terrain.forward_aov"
+                    | "nephele.media.inject"
+                    | "nephele.media.integrate"
+                    | "nephele.media.composite"
+                    | "nephele.media.history.commit"
+            )
+        })
+        .map(|pass| pass.name.clone())
+        .collect()
+}
+
+pub(super) fn observe_aov_shadow_transition(
+    label: &str,
+    barriers: &[&crate::core::framegraph_impl::ResourceBarrier],
+    shadow: crate::core::framegraph_impl::ResourceHandle,
+    observed: &mut bool,
+) -> Result<()> {
+    *observed |= barriers.iter().any(|barrier| barrier.resource == shadow);
+    if label == "terrain.forward_aov" && !*observed {
+        return Err(anyhow!(
+            "terrain.forward_aov lost its compiled shadow transition"
+        ));
+    }
+    Ok(())
+}
+
 fn requested_aov_output_mask(settings: &render_params::AovSettingsNative) -> u8 {
     // `render_with_aov` is itself an explicit capture request. Preserve its
     // established contract: the per-channel flags select outputs even when
@@ -1214,88 +1248,104 @@ impl TerrainScene {
                 });
         }
 
-        graph.execute_with_barriers("terrain.forward_aov", |barriers| {
-            if !barriers
-                .iter()
-                .any(|barrier| barrier.resource == graph_shadow)
-            {
-                return Err(anyhow!(
-                    "terrain.forward_aov lost its compiled shadow transition"
-                ));
+        let mut shadow_transition_observed = false;
+        for label in ordered_aov_main_passes(&graph) {
+            match label.as_str() {
+                "terrain.forward_aov" => {
+                    graph.execute_with_barriers("terrain.forward_aov", |barriers| {
+                        observe_aov_shadow_transition(
+                            &label, barriers, graph_shadow, &mut shadow_transition_observed,
+                        )?;
+                        if !self.realtime_media_directional_enabled()? {
+                            self.prepare_realtime_media_radiance_provider(
+                                &mut encoder,
+                                sky_texture.as_ref(),
+                                decoded,
+                                env_maps.hdr_image().map(AsRef::as_ref),
+                                env_maps.intensity.max(0.0),
+                                media::ibl_mean_radiance(env_maps),
+                            )?;
+                        }
+                        let main_scope = ts_begin(&mut timing, &mut encoder, "terrain.main");
+                        self.run_main_pass_with_aov(
+                            &mut encoder,
+                            params,
+                            &render_targets,
+                            &aov_targets,
+                            &pass_bind_groups.main,
+                            &ibl_bind_group,
+                            shadow_bind_group,
+                            &pass_bind_groups.fog,
+                            &water_reflection_bind_group,
+                            &pass_bind_groups.material_layer,
+                            sky_texture.is_some() || uniform_environment_background,
+                            media_enabled,
+                        )?;
+                        ts_end(&mut timing, &mut encoder, main_scope, 1);
+                        Ok::<_, anyhow::Error>(())
+                    })?;
+                    if media_enabled {
+                        // The full terrain render pass and NEPHELE's storage-texture
+                        // compute chain require distinct Metal command buffers. Queue
+                        // submission order preserves the compiled graph dependency while
+                        // making render-attachment writes visible to media sampling.
+                        self.queue.submit(Some(encoder.finish()));
+                        crate::core::gpu::wait_for_device_idle(&self.device);
+                        encoder = self
+                            .device
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("terrain.encoder.aov.media"),
+                            });
+                    }
+                }
+                "nephele.media.inject" => {
+                    graph.execute_with_barriers("nephele.media.inject", |barriers| {
+                        observe_aov_shadow_transition(
+                            &label, barriers, graph_shadow, &mut shadow_transition_observed,
+                        )?;
+                        self.encode_attached_realtime_media_inject_for_terrain(
+                            &mut encoder,
+                            params,
+                            decoded,
+                        )?
+                        .ok_or_else(|| anyhow!("media graph executed without attached resources"))?;
+                        Ok::<_, anyhow::Error>(())
+                    })?;
+                }
+                "nephele.media.integrate" => {
+                    graph.execute_with_barriers("nephele.media.integrate", |_barriers| {
+                        // Forward declares the authoritative depth write as the same
+                        // sampled-texture usage consumed here, so no transition is
+                        // required. Compiled dependency/order validation is the guard.
+                        self.encode_attached_realtime_media_integrate(
+                            &mut encoder,
+                            &render_targets.depth_view,
+                        )?;
+                        Ok::<_, anyhow::Error>(())
+                    })?;
+                }
+                "nephele.media.composite" => {
+                    graph.execute_with_barriers("nephele.media.composite", |_barriers| {
+                        self.encode_attached_realtime_media_composite(
+                            &mut encoder,
+                            &render_targets.internal_view,
+                        )
+                    })?;
+                }
+                "nephele.media.history.commit" => {
+                    graph.execute_with_barriers("nephele.media.history.commit", |_barriers| {
+                        self.commit_attached_realtime_media_history(
+                            &mut encoder,
+                            &render_targets._depth_texture,
+                        )?;
+                        Ok::<_, anyhow::Error>(())
+                    })?;
+                }
+                _ => return Err(anyhow!("unexpected AOV main pass {label}")),
             }
-            if !self.realtime_media_directional_enabled()? {
-            self.prepare_realtime_media_radiance_provider(
-                &mut encoder,
-                sky_texture.as_ref(),
-                decoded,
-                env_maps.hdr_image().map(AsRef::as_ref),
-                env_maps.intensity.max(0.0),
-                media::ibl_mean_radiance(env_maps),
-            )?;
-            }
-            let main_scope = ts_begin(&mut timing, &mut encoder, "terrain.main");
-            self.run_main_pass_with_aov(
-                &mut encoder,
-                params,
-                &render_targets,
-                &aov_targets,
-                &pass_bind_groups.main,
-                &ibl_bind_group,
-                shadow_bind_group,
-                &pass_bind_groups.fog,
-                &water_reflection_bind_group,
-                &pass_bind_groups.material_layer,
-                sky_texture.is_some() || uniform_environment_background,
-                media_enabled,
-            )?;
-            ts_end(&mut timing, &mut encoder, main_scope, 1);
-            Ok::<_, anyhow::Error>(())
-        })?;
+        }
 
         if media_enabled {
-            // The full terrain render pass and NEPHELE's storage-texture
-            // compute chain require distinct Metal command buffers. Queue
-            // submission order preserves the compiled graph dependency while
-            // making render-attachment writes visible to media sampling.
-            self.queue.submit(Some(encoder.finish()));
-            crate::core::gpu::wait_for_device_idle(&self.device);
-            encoder = self
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("terrain.encoder.aov.media"),
-                });
-            graph.execute_with_barriers("nephele.media.inject", |_barriers| {
-                self.encode_attached_realtime_media_inject_for_terrain(
-                    &mut encoder,
-                    params,
-                    decoded,
-                )?
-                .ok_or_else(|| anyhow!("media graph executed without attached resources"))?;
-                Ok::<_, anyhow::Error>(())
-            })?;
-            graph.execute_with_barriers("nephele.media.integrate", |_barriers| {
-                // Forward declares the authoritative depth write as the same
-                // sampled-texture usage consumed here, so no transition is
-                // required. Compiled dependency/order validation is the guard.
-                self.encode_attached_realtime_media_integrate(
-                    &mut encoder,
-                    &render_targets.depth_view,
-                )?;
-                Ok::<_, anyhow::Error>(())
-            })?;
-            graph.execute_with_barriers("nephele.media.composite", |_barriers| {
-                self.encode_attached_realtime_media_composite(
-                    &mut encoder,
-                    &render_targets.internal_view,
-                )
-            })?;
-            graph.execute_with_barriers("nephele.media.history.commit", |_barriers| {
-                self.commit_attached_realtime_media_history(
-                    &mut encoder,
-                    &render_targets._depth_texture,
-                )?;
-                Ok::<_, anyhow::Error>(())
-            })?;
             // Media storage writes feed both the authoritative tonemap and
             // persistent AOV copies. Submit them before those transfer/read
             // consumers so Metal observes the storage-to-sampled/copy edge.
