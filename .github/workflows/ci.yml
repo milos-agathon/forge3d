@@ -2828,6 +2828,7 @@ jobs:
       lane: ${{ steps.nephele-pass.outputs.lane || 'unknown' }}
       verifier: ${{ steps.nephele-pass.outputs.verifier || 'unknown' }}
     env:
+      FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'
       FORGE3D_NO_BOOTSTRAP: '1'
       FORGE3D_TEST_INSTALLED_WHEEL: '1'
       FORGE3D_NEPHELE_LANE: windows-nvidia-vulkan
