@@ -2824,6 +2824,7 @@ jobs:
       (github.event_name == 'workflow_dispatch' &&
        (inputs.scope == 'full' || inputs.scope == 'nephele'))
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
+    timeout-minutes: 90
     outputs:
       lane: ${{ steps.nephele-pass.outputs.lane || 'unknown' }}
       verifier: ${{ steps.nephele-pass.outputs.verifier || 'unknown' }}
@@ -2905,6 +2906,20 @@ jobs:
           $pytestCode = $LASTEXITCODE
           python scripts/assert_junit_zero_skips.py "$junit" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/fast-zero-skip.log"
           if ($pytestCode -ne 0) { exit $pytestCode }
+          exit $LASTEXITCODE
+      - name: Trace one directional transport capture before environment cases
+        shell: pwsh
+        env:
+          FORGE3D_NEPHELE_TRACE: '1'
+        run: |
+          $capture = @'
+          import json
+          from scripts.nephele_acceptance import FixtureScene
+          print("NEPHELE directional trace capture starting", flush=True)
+          capture = FixtureScene().capture(include_no_medium=True)
+          print(json.dumps(dict(capture["diagnostics"])), flush=True)
+          '@
+          python -X faulthandler -u -c $capture *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/directional-trace.log"
           exit $LASTEXITCODE
       - name: Run shader contracts and both NEPHELE environment cases on the physical GPU
         shell: pwsh

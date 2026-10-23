@@ -1944,6 +1944,12 @@ impl TerrainMediaResources {
             directional.solve_key.set(None);
             directional.solve_diagnostics.set(None);
             let started=std::time::Instant::now();
+            let trace_enabled=std::env::var("FORGE3D_NEPHELE_TRACE").is_ok_and(|value| value=="1");
+            let trace_stage=|order:u32,stage:&str| {
+                if trace_enabled {
+                    eprintln!("[NEPHELE directional] order={} stage={stage} elapsed_ms={}",u64::from(order)+1,started.elapsed().as_millis());
+                }
+            };
             for buffer in &directional.buffers[..2] {
                 encoder.clear_buffer(buffer, 0, None);
             }
@@ -1958,6 +1964,7 @@ impl TerrainMediaResources {
             dispatch(encoder,&directional.clear,directional.cache_workgroups);
             let mut orders=0u32;
             loop {
+                trace_stage(orders,"begin");
                 encoder.clear_buffer(&directional.buffers[4],0,None);
                 let [incoming, source, surface] = &directional.iterations[(orders%2) as usize];
                 dispatch(encoder, incoming, workgroups);
@@ -1972,14 +1979,22 @@ impl TerrainMediaResources {
                 let slice=directional.buffers[5].slice(..);
                 let (sender,receiver)=std::sync::mpsc::channel();
                 slice.map_async(wgpu::MapMode::Read,move |result| {let _=sender.send(result);});
+                trace_stage(orders,"before_wait_for_device_idle");
                 crate::core::gpu::wait_for_device_idle(device);
-                receiver.recv().map_err(crate::core::error::RenderError::render)?
+                trace_stage(orders,"after_wait_for_device_idle");
+                trace_stage(orders,"before_recv");
+                let received=receiver.recv();
+                trace_stage(orders,"after_recv");
+                received.map_err(crate::core::error::RenderError::render)?
                     .map_err(crate::core::error::RenderError::render)?;
                 let mapped=slice.get_mapped_range();
                 let mut progress=[0u32;4];
                 progress.copy_from_slice(bytemuck::cast_slice(&mapped));
                 drop(mapped);
                 directional.buffers[5].unmap();
+                if trace_enabled {
+                    eprintln!("[NEPHELE directional] order={} progress={progress:?} elapsed_ms={}",u64::from(orders)+1,started.elapsed().as_millis());
+                }
                 if progress[3]!=0 {
                     return Err(crate::core::error::RenderError::render("directional transport lost monotonicity or exceeded finite f16 radiance"));
                 }
