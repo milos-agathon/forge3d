@@ -206,11 +206,13 @@ def _resolve_dem_path(path: Path) -> Path:
         else:
             print(f"[dem] using cached download: {cached}")
             return cached
-    if path.is_relative_to(REPO_ROOT):
-        rel = str(path.relative_to(REPO_ROOT)).replace("assets/", "", 1)
-        url = f"{LFS_BASE_URL}/{rel}"
+    # The URL is a POSIX path even on Windows: `str(relative_to(...))` uses
+    # backslashes there, which the asset host answers with a 404.
+    if path.is_relative_to(ASSET_DIR):
+        rel = path.relative_to(ASSET_DIR).as_posix()
     else:
-        url = f"{LFS_BASE_URL}/tif/{path.name}"
+        rel = f"tif/{path.name}"
+    url = f"{LFS_BASE_URL}/{rel}"
     print(f"[dem] {path.name} is a Git LFS pointer; downloading real binary...")
     import urllib.request
 
@@ -1306,7 +1308,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if not dem_path.exists():
             print(f"error: DEM not found: {dem_path}", file=sys.stderr)
             return 2
-        raw, resolution, metres_per_cell, place, datum = _load_dem(dem_path)
+        try:
+            raw, resolution, metres_per_cell, place, datum = _load_dem(dem_path)
+        except RuntimeError as exc:
+            # A failed or unverifiable download is a user-facing error, not a
+            # traceback out of the middle of the run.
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
         if args.crop_size > 0 and max(raw.shape) > args.crop_size:
             cs = args.crop_size
             r0 = max(0, (raw.shape[0] - cs) // 2)

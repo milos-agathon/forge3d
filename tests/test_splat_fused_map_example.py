@@ -136,22 +136,50 @@ def test_the_dem_download_is_checked_against_its_pointer(tmp_path, monkeypatch):
 
     # A download whose bytes do not match the pointer is not trusted: the
     # corrupt cache is discarded and re-fetched, not rendered as a wrong
-    # terrain. (The re-fetch itself needs the network, so the run may end in
-    # a download error — what matters is that the bad cache is gone.)
+    # terrain. The re-fetch is monkeypatched, like the HDRI cache test: a
+    # test that calls the network passes whether the call succeeds or fails.
     cache = tmp_path / ".forge3d" / "datasets"
     cache.mkdir(parents=True)
     bad = cache / "dem.tif"
     bad.write_bytes(b"corrupted" * 200)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-    with pytest.raises(RuntimeError):
+
+    calls = []
+
+    def _fake_retrieve(url, dest):  # noqa: ARG001
+        calls.append(url)
+        # Big enough to pass the "still a pointer?" size check, so the HASH
+        # check is the one that rejects it.
+        Path(dest).write_bytes(b"still not the real bytes" * 200)
+
+    monkeypatch.setattr("urllib.request.urlretrieve", _fake_retrieve)
+    with pytest.raises(RuntimeError, match="SHA256"):
         mod._resolve_dem_path(pointer)
+    assert calls, "the corrupt cache was not re-fetched"
     assert not bad.exists(), "the corrupt cache was kept"
 
-    # And a cache that DOES match is used as it is.
+    # And a cache that DOES match is used as it is, with no download at all.
+    calls.clear()
     good = cache / "dem.tif"
     good.write_bytes(payload)
     assert mod._resolve_dem_path(pointer) == good
+    assert calls == [], "a matching cache was re-fetched"
+
+    # The URL is built as a POSIX path: on Windows a backslash separator
+    # would be requested literally and answered with a 404. A pointer under
+    # ASSET_DIR is addressed relative to it.
+    asset_dir = tmp_path / "repo-assets"
+    (asset_dir / "tif").mkdir(parents=True)
+    under = asset_dir / "tif" / "dem.tif"
+    under.write_text(pointer.read_text())
+    monkeypatch.setattr(mod, "ASSET_DIR", asset_dir)
+    good.unlink()
+    calls.clear()
+    with pytest.raises(RuntimeError, match="SHA256"):
+        mod._resolve_dem_path(under)
+    assert calls and calls[-1].endswith("/tif/dem.tif"), calls
+    assert "\\" not in calls[-1], calls[-1]
 
 
 def test_default_run_nonblank_and_deterministic(tmp_path):
