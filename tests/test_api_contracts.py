@@ -1357,6 +1357,13 @@ class TestTerrainRendererHeightStreamingContract:
         )
 
 
+class TestTerrainRendererInteractiveContract:
+    def test_fixed_frame_entry_and_diagnostics_exist(self):
+        _assert_expected_symbols(_native.TerrainRenderer,
+            ["render_interactive", "interactive_pipeline_info"],
+            label="TerrainRenderer native interactive frame methods")
+
+
 # ===========================================================================
 # Section 14: P1.1 SSGI/SSR settings wiring behavior tests
 # ===========================================================================

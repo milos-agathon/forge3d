@@ -1,14 +1,15 @@
 {
   "schema": "forge3d.nephele.integration-approval/1",
   "date": "2026-10-23",
-  "status": "PREPARED; STOP FOR EXACT APPROVAL; NOT RELEASE READY",
+  "status": "APPROVED BATCH APPLIED; CPU CONTRACT CHECKS PASS; EXACT-HEAD WHEEL AND PHYSICAL PROOF PENDING",
   "release_parent": "ca9ad2cec1d9b890e9f50178dd279c4b322dd781",
   "main_parent": "d6b9e556586cceddb9c08f16ffc35f7d71fb4d88",
   "production_tree_before_audit": "eb12295daf0221e18851521a0d32d84049c8672c",
   "PR": "https://github.com/milos-agathon/forge3d/pull/172",
   "approval_words": [
     "approved for the pin and range — but before committing, remove the per-frame readback from the viewer diagnostics path. Before release: decouple the surface cache from DEM resolution and measure frame time on a realistic DEM (≥1024²); report or enforce convergence instead of a fixed 21 orders.",
-    "Yes — prepare the main integration before capture, push it to PR #172, then stop with one exact approval batch (shader pin, contract changes, f32 ledger regeneration, any certificates). Release still requires physical green plus the 1500² DEM frame-time measurement."
+    "Yes — prepare the main integration before capture, push it to PR #172, then stop with one exact approval batch (shader pin, contract changes, f32 ledger regeneration, any certificates). Release still requires physical green plus the 1500² DEM frame-time measurement.",
+    "approved — and correct the manifest's source label for test_api_contracts.py and test_render_certificate_contract.py (they are merged versions, not exact main bytes)."
   ],
   "exact_approval": {
     "shader_pin": {
@@ -266,7 +267,7 @@
         "old_size": 121637,
         "new_size": 121634,
         "source": "proposed combined integration",
-        "applied": false,
+        "applied": true,
         "category": "shader_pin"
       },
       {
@@ -276,7 +277,7 @@
         "old_size": 161512,
         "new_size": 263671,
         "source": "proposed combined integration",
-        "applied": false,
+        "applied": true,
         "category": "f32_ledger_or_assertions"
       },
       {
@@ -286,7 +287,7 @@
         "old_size": 101449,
         "new_size": 107145,
         "source": "proposed combined integration",
-        "applied": false,
+        "applied": true,
         "category": "f32_ledger_or_assertions"
       },
       {
@@ -296,7 +297,7 @@
         "old_size": 32190,
         "new_size": 33287,
         "source": "proposed combined integration",
-        "applied": false,
+        "applied": true,
         "category": "shader_contract_or_existing_test_contract"
       },
       {
@@ -306,7 +307,7 @@
         "old_size": 34060,
         "new_size": 35324,
         "source": "proposed combined integration",
-        "applied": false,
+        "applied": true,
         "category": "shader_contract_or_existing_test_contract"
       },
       {
@@ -316,7 +317,7 @@
         "old_size": null,
         "new_size": 9792,
         "source": "proposed combined integration",
-        "applied": false,
+        "applied": true,
         "category": "shader_contract_or_existing_test_contract"
       },
       {
@@ -325,8 +326,8 @@
         "new_git_bytes_sha256": "f0842129df9c489fd775a3f50db6d1aff30f8fd3db5e16645500b89d60291efe",
         "old_size": 84591,
         "new_size": 84892,
-        "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "source": "Merged version of main and NEPHELE; not exact main bytes.",
+        "applied": true,
         "category": "shader_contract_or_existing_test_contract"
       },
       {
@@ -336,7 +337,7 @@
         "old_size": 9232,
         "new_size": 10118,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "shader_contract_or_existing_test_contract"
       },
       {
@@ -346,7 +347,7 @@
         "old_size": 25704,
         "new_size": 26206,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "shader_contract_or_existing_test_contract"
       },
       {
@@ -356,7 +357,7 @@
         "old_size": 51609,
         "new_size": 52980,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "shader_contract_or_existing_test_contract"
       },
       {
@@ -365,8 +366,8 @@
         "new_git_bytes_sha256": "c8b0f8151ea866c0701851cac9752febc7d5cfc059e5097260659892f89bd6d0",
         "old_size": 19445,
         "new_size": 19527,
-        "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "source": "Merged version of main and NEPHELE; not exact main bytes.",
+        "applied": true,
         "category": "shader_contract_or_existing_test_contract"
       },
       {
@@ -376,7 +377,7 @@
         "old_size": 6586,
         "new_size": 7093,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -386,7 +387,7 @@
         "old_size": 6618,
         "new_size": 7123,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -396,7 +397,7 @@
         "old_size": 6959,
         "new_size": 7565,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -406,7 +407,7 @@
         "old_size": 7352,
         "new_size": 7887,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -416,7 +417,7 @@
         "old_size": 6590,
         "new_size": 10210,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -426,7 +427,7 @@
         "old_size": null,
         "new_size": 15668,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -436,7 +437,7 @@
         "old_size": 7766,
         "new_size": 8290,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -446,7 +447,7 @@
         "old_size": 6587,
         "new_size": 7095,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -456,7 +457,7 @@
         "old_size": 8140,
         "new_size": 8644,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -466,7 +467,7 @@
         "old_size": 8144,
         "new_size": 8696,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -476,7 +477,7 @@
         "old_size": 8142,
         "new_size": 8696,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -486,7 +487,7 @@
         "old_size": 6599,
         "new_size": 7106,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -496,7 +497,7 @@
         "old_size": 7337,
         "new_size": 7847,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -506,7 +507,7 @@
         "old_size": 6588,
         "new_size": 7090,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -516,7 +517,7 @@
         "old_size": 6816,
         "new_size": 11928,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -526,7 +527,7 @@
         "old_size": 6620,
         "new_size": 10920,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -536,7 +537,7 @@
         "old_size": 6570,
         "new_size": 7189,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -546,7 +547,7 @@
         "old_size": 6570,
         "new_size": 12554,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -556,7 +557,7 @@
         "old_size": 7922,
         "new_size": 8428,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -566,7 +567,7 @@
         "old_size": 7784,
         "new_size": 8286,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -576,7 +577,7 @@
         "old_size": 8143,
         "new_size": 8652,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -586,7 +587,7 @@
         "old_size": 6589,
         "new_size": 7090,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -596,7 +597,7 @@
         "old_size": 6591,
         "new_size": 7098,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "certificate"
       },
       {
@@ -606,7 +607,7 @@
         "old_size": 1683,
         "new_size": 5539,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -616,7 +617,7 @@
         "old_size": 368,
         "new_size": 11481,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -626,7 +627,7 @@
         "old_size": 3006,
         "new_size": 8407,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -636,7 +637,7 @@
         "old_size": 5871,
         "new_size": 14225,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -646,7 +647,7 @@
         "old_size": 8885,
         "new_size": 7655,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -656,7 +657,7 @@
         "old_size": null,
         "new_size": 26821,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -666,7 +667,7 @@
         "old_size": 1373,
         "new_size": 6365,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -676,7 +677,7 @@
         "old_size": 12242,
         "new_size": 17368,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -686,7 +687,7 @@
         "old_size": 3840,
         "new_size": 10619,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -696,7 +697,7 @@
         "old_size": 3016,
         "new_size": 8924,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -706,7 +707,7 @@
         "old_size": 1622,
         "new_size": 7393,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -716,7 +717,7 @@
         "old_size": 3127,
         "new_size": 8452,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -726,7 +727,7 @@
         "old_size": 846,
         "new_size": 5045,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -736,7 +737,7 @@
         "old_size": 922,
         "new_size": 5170,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -746,7 +747,7 @@
         "old_size": 3834,
         "new_size": 19929,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -756,7 +757,7 @@
         "old_size": 682,
         "new_size": 8700,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -766,7 +767,7 @@
         "old_size": 8096,
         "new_size": 9505,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -776,7 +777,7 @@
         "old_size": 8096,
         "new_size": 9505,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -786,7 +787,7 @@
         "old_size": 3310,
         "new_size": 9319,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -796,7 +797,7 @@
         "old_size": 1328,
         "new_size": 7283,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -806,7 +807,7 @@
         "old_size": 1639,
         "new_size": 6656,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -816,7 +817,7 @@
         "old_size": 3442,
         "new_size": 7776,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -826,7 +827,7 @@
         "old_size": 6242,
         "new_size": 9038,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       },
       {
@@ -836,7 +837,7 @@
         "old_size": 13196,
         "new_size": 18878,
         "source": "exact origin/main d6b9e556 bytes",
-        "applied": false,
+        "applied": true,
         "category": "pixel_golden"
       }
     ],
@@ -845,7 +846,9 @@
       "sha256": "c132d1db70832e5ac89838bfeb4038a8f5fb3e8c92bdd0d2fa3626cf6cd55e07"
     },
     "main_products_apply": "For each certificate/pixel entry, restore the exact path from d6b9e556586cceddb9c08f16ffc35f7d71fb4d88 and verify its new SHA-256. No regeneration or signing is proposed.",
-    "hash_convention": "Canonical Git blob bytes. Text proposals use LF; pixel/certificate product blobs from main are unchanged."
+    "hash_convention": "Canonical Git blob bytes. Text proposals use LF; pixel/certificate product blobs from main are unchanged.",
+    "approved_manifest_git_sha256": "e71bc615039fb92318142aa91e17c0b10843923164d820fb3d79a6986716ca90",
+    "owner_approval": "approved — and correct the manifest's source label for test_api_contracts.py and test_render_certificate_contract.py (they are merged versions, not exact main bytes)."
   },
   "changed_files_and_reasons": [
     {
@@ -1770,5 +1773,62 @@
     "Add the full-resolution DEM to the shared fixture bundle whenever a physical benchmark depends on it; do not add per-job LFS transfers.",
     "Record the actual camera-mode Rust module name in validation handoffs so filters cannot silently execute zero tests."
   ],
-  "preparation_first_pushed_sha": "d590df3e6be43d301519c388a32df6c67ad14386"
+  "preparation_first_pushed_sha": "d590df3e6be43d301519c388a32df6c67ad14386",
+  "post_approval_validation": {
+    "features": "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+    "environment": {
+      "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+      "FORGE3D_NO_BOOTSTRAP": "1",
+      "FORGE3D_DET_REWRITE": "0"
+    },
+    "checks": [
+      {
+        "name": "fmt",
+        "command": [
+          "cargo",
+          "fmt",
+          "--check"
+        ],
+        "exit_code": 0,
+        "duration_seconds": 0.2853418000158854
+      },
+      {
+        "name": "clippy",
+        "command": [
+          "cargo",
+          "forge3d-clippy-acceptance"
+        ],
+        "exit_code": 0,
+        "duration_seconds": 29.16853130000527
+      },
+      {
+        "name": "ir-contracts",
+        "command": [
+          "cargo",
+          "test",
+          "--lib",
+          "--features",
+          "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+          "verify::ir::tests",
+          "--",
+          "--nocapture"
+        ],
+        "exit_code": 0,
+        "duration_seconds": 34.3877935000055,
+        "executed_passed": 46,
+        "summary": "test result: ok. 46 passed; 0 failed; 1 ignored"
+      }
+    ],
+    "f32": {
+      "passed": 37,
+      "failed": 0,
+      "skipped": 0,
+      "pytest_seconds": 66.26,
+      "environment": {
+        "FORGE3D_NO_BOOTSTRAP": "1"
+      },
+      "junit": ".release-evidence/2026-10-23/approved-f32.xml",
+      "zero_skips_assertion": "PASS"
+    }
+  }
 }

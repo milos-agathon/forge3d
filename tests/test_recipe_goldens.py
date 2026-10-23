@@ -70,6 +70,8 @@ class RecipeGolden:
     bit_depth: int = 8
     ssim_min: float = SSIM_MIN
     mean_abs_max: float = MEAN_ABS_MAX
+    warmup_temporal: bool = False
+    expected_underdeveloped: tuple[str, ...] = ()
 
     @property
     def canonical_golden_path(self) -> Path:
@@ -821,7 +823,7 @@ def _auto_water(tmp_path: Path) -> f3d.MapScene:
 def _cloud_shadows(tmp_path: Path) -> f3d.MapScene:
     dem = np.zeros((16, 16), dtype=np.float32)
     dem[5:11, 5:11] = 0.35
-    return _base_scene(
+    scene = _base_scene(
         tmp_path,
         "mapscene_cloud_shadows",
         width=128,
@@ -835,12 +837,18 @@ def _cloud_shadows(tmp_path: Path) -> f3d.MapScene:
                 "enabled": True,
                 "shadows_enabled": True,
                 "coverage": 0.72,
-                "density": 0.48,
-                "shadow_strength": 0.38,
+                "density": 0.8,
+                "shadow_strength": 0.95,
                 "quality": "high",
             },
         },
+        lighting_settings={
+            "renderer_config": {"gi": {"modes": ["ibl"]}},
+            "ibl": {"intensity": 0.02},
+        },
     )
+    scene.recipe.lighting.intensity = 5.0
+    return scene
 
 
 def _tiles3d_points(tmp_path: Path) -> f3d.MapScene:
@@ -916,6 +924,13 @@ def _png16_color(tmp_path: Path) -> f3d.MapScene:
     return _base_scene(tmp_path, "mapscene_png16_color", bit_depth=16, width=80, height=48)
 
 
+def _concordia_mixed(tmp_path: Path) -> f3d.MapScene:
+    from _concordia_scene import scene
+    model = scene(atmosphere=True)
+    model.recipe.output.path = str(tmp_path / "mapscene_concordia.png")
+    return model
+
+
 RECIPE_GOLDENS = (
     RecipeGolden("mapscene_terrain_raster", "terrain_raster", _terrain_raster, ("mapscene.render_png", "mapscene.render_backend")),
     RecipeGolden("mapscene_vector_labels", "labels_vectors", _vector_labels, ("mapscene.vector_composite", "mapscene.label_composite")),
@@ -933,9 +948,9 @@ RECIPE_GOLDENS = (
     RecipeGolden("mapscene_thematic_choropleth", "thematic_choropleth", _choropleth, ("mapscene.vector_composite",)),
     RecipeGolden("mapscene_offline_aovs", "offline_accumulation", _offline_aovs, ("mapscene.offline_accumulation", "mapscene.aov_export")),
     RecipeGolden("mapscene_buildings", "buildings", _buildings, ("mapscene.building_composite", "mapscene.building_gpu_mesh_composite")),
-    RecipeGolden("mapscene_screen_space_contact", "screen_space_effects", _screen_space_contact, ("mapscene.screen_space", "mapscene.ssao", "mapscene.ssgi", "mapscene.taa")),
+    RecipeGolden("mapscene_screen_space_contact", "screen_space_effects", _screen_space_contact, ("mapscene.screen_space", "mapscene.ssao", "mapscene.ssgi", "mapscene.taa"), warmup_temporal=True),
     RecipeGolden("mapscene_screen_space_reflection", "screen_space_effects", _screen_space_reflection, ("mapscene.screen_space", "mapscene.ssr")),
-    RecipeGolden("mapscene_textured_gltf_landmark", "gltf_textured_assets", _textured_gltf_landmark, ("gltf.textured_mapscene_render", "buildings.textured_pbr")),
+    RecipeGolden("mapscene_textured_gltf_landmark", "gltf_textured_assets", _textured_gltf_landmark, ("gltf.textured_mapscene_render",), expected_underdeveloped=("buildings.textured_pbr",)),
     RecipeGolden("mapscene_furniture_graticule", "map_furniture", _furniture, ("mapscene.furniture_composite",)),
     RecipeGolden("mapscene_alignment_utm", "alignment_crs", _alignment, ("mapscene.vector_composite",)),
     RecipeGolden("mapscene_material_maps", "terrain_materials", _material_maps, ("mapscene.render_png",)),
@@ -954,6 +969,10 @@ RECIPE_GOLDENS = (
         _copc_points,
         ("point_cloud.mapscene_render", "point_cloud.edl"),
     ),
+    RecipeGolden("mapscene_concordia", "native_interactive", _concordia_mixed,
+        ("mapscene.ssao", "mapscene.ssgi", "mapscene.ssr", "mapscene.taa",
+         "mapscene.cloud_shadows", "mapscene.building_gpu_mesh_composite",
+         "mapscene.vector_composite", "mapscene.label_composite"), warmup_temporal=True),
     RecipeGolden("mapscene_png16_color", "output_color", _png16_color, ("mapscene.render_png_16bit",), bit_depth=16),
 )
 
@@ -1059,11 +1078,11 @@ def _emit_or_verify_certificate(spec: RecipeGolden) -> None:
 
     assert cert_path.exists(), (
         f"Missing recipe golden certificate {cert_path}. "
-        "Regenerate with FORGE3D_UPDATE_RECIPE_GOLDENS=1."
+        "Refresh certificates via certificate-refresh.yml on protected main after pixel review."
     )
     assert SIGNING_PUB_PATH.exists(), (
         f"Missing signing public key {SIGNING_PUB_PATH}. "
-        "Regenerate with FORGE3D_UPDATE_RECIPE_GOLDENS=1."
+        "Restore the pinned production public key before using the protected certificate workflow."
     )
     pubkey = SIGNING_PUB_PATH.read_text(encoding="utf-8").strip()
     committed = json.loads(cert_path.read_text(encoding="utf-8"))
@@ -1100,7 +1119,7 @@ def _emit_or_verify_certificate(spec: RecipeGolden) -> None:
     missing = sorted(set(committed_hashes) - set(fresh_hashes))
     assert not missing, (
         f"WGSL modules {missing} named in the committed certificate were never "
-        "compiled by this render; regenerate with FORGE3D_UPDATE_RECIPE_GOLDENS=1 "
+        "compiled by this render; refresh certificates via certificate-refresh.yml on protected main "
         "after verifying the pixel goldens"
     )
     changed = {
@@ -1109,8 +1128,8 @@ def _emit_or_verify_certificate(spec: RecipeGolden) -> None:
         if fresh_hashes[label] != committed_hashes[label]
     }
     assert not changed, (
-        "WGSL source changed since golden certificates were generated; regenerate "
-        "with FORGE3D_UPDATE_RECIPE_GOLDENS=1 after verifying the pixel goldens: "
+        "WGSL source changed since golden certificates were generated; refresh certificates "
+        "via certificate-refresh.yml on protected main after pixel review: "
         f"{changed}"
     )
 
@@ -1263,7 +1282,14 @@ def _render_recipe_golden_pixels(tmp_path: Path, spec: RecipeGolden) -> None:
     assert intent["backend"] == "gpu_terrain"
 
     _clear_degradation_sinks()
-    report = scene.render()
+    if spec.warmup_temporal:
+        import forge3d.map_scene as ms
+        with ms._shared_terrain_render_context():
+            scene.render()
+            report = scene.render()
+        assert scene.last_render_metadata["native_pipeline"]["temporal_history_used"]
+    else:
+        report = scene.render()
     if nvidia_vulkan_golden_selected("FORGE3D_RECIPE_GOLDEN_VARIANT"):
         adapter_probe = f3d.device_probe("vulkan")
         assert_nvidia_vulkan_golden_adapter(
@@ -1278,6 +1304,8 @@ def _render_recipe_golden_pixels(tmp_path: Path, spec: RecipeGolden) -> None:
     assert scene.last_render_backend == "gpu_terrain"
     for feature in spec.expected_features:
         assert report.supported_features[feature] == "supported"
+    for feature in spec.expected_underdeveloped:
+        assert report.supported_features[feature] == "underdeveloped"
     if spec.family == "buildings":
         metadata = scene.last_render_metadata or {}
         assert metadata["building_backend"] == "terrain_scatter_instanced_mesh"

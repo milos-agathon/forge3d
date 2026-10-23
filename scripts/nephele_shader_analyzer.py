@@ -316,6 +316,12 @@ def analyze_shaders(repo_root:Path)->dict[str,Any]:
             try: _,after_parameters=_balanced(text,opening); opening_body=text.find("{",after_parameters); body,_=_balanced(text,opening_body,"{","}")
             except ValueError: continue
             _RUST_FUNCTIONS.setdefault(match.group(1),[]).append((path,text,body))
+    builder_sources = {}
+    if (repo_root/"src/terrain/renderer/interactive/shaders.rs").is_file():
+        from scripts.nephele_shader_builders import execute_builders, builder_variants
+        builder_sources = execute_builders(repo_root, _balanced, _assignment)
+    def executed_variants(expression, path, text, before):
+        return builder_variants(expression,path,text,before,_assignment,builder_sources) if builder_sources else []
     include_edges=[]; embedded_sources={}; shader_source_files=[]; naga_files=[]; construction_files=set(); wrapper_specs={}; wrapper_calls=set(); wrapper_delegations=[]; self_naga=[]; sites=[]; assemblies={}; unresolved=[]
     for path,text in rust.items():
         relative=path.relative_to(repo_root).as_posix()
@@ -358,6 +364,10 @@ def analyze_shaders(repo_root:Path)->dict[str,Any]:
                     parent=min(parents,key=lambda function:function["body_end"]-function["body_start"]) if parents else None
                     wrapper_specs[label]={"path":path,"relative":relative,"function":enclosing["name"],"source_parameter_index":parameter_index,"scope":(parent["body_start"],parent["body_end"]) if parent else None}
                     continue
+                executed = executed_variants(expression,path,text,match.start())
+                if executed:
+                    for index,source in enumerate(executed): assemblies[f"{label}#executed-builder-{index}"]=source
+                    continue
                 resolved=_resolve(expression,path,text,match.start(),constants,set())
                 assignment=_assignment(text,bare,match.start()) if re.fullmatch(r"[A-Za-z_]\w*",bare) else None
                 if resolved is None and assignment and "include_str!" in assignment:
@@ -396,7 +406,14 @@ def analyze_shaders(repo_root:Path)->dict[str,Any]:
                 arguments=_split_args(body); index=spec["source_parameter_index"]
                 call_label=f"{caller_relative}:{caller_text.count(chr(10),0,call.start())+1}:{spec['function']}"
                 if index>=len(arguments): unresolved.append(f"{call_label}:missing wrapper source argument"); continue
-                expression=arguments[index]; resolved=_resolve(expression,caller_path,caller_text,call.start(),constants,set())
+                expression=arguments[index]
+                executed = executed_variants(expression,caller_path,caller_text,call.start())
+                if executed:
+                    for index,source in enumerate(executed):
+                        assemblies[f"{wrapper_label}<-{call_label}#executed-builder-{index}"]=source
+                    wrapper_calls.add(f"{wrapper_label}<-{call_label}")
+                    continue
+                resolved=_resolve(expression,caller_path,caller_text,call.start(),constants,set())
                 if resolved is not None:
                     assembly_label=f"{wrapper_label}<-{call_label}"; assemblies[assembly_label]=resolved; wrapper_calls.add(f"{wrapper_label}<-{call_label}"); continue
                 bare=expression.strip().lstrip("&").removesuffix(".into()"); assignment=_assignment(caller_text,bare,call.start()) if re.fullmatch(r"[A-Za-z_]\w*",bare) else None
@@ -441,6 +458,8 @@ def analyze_shaders(repo_root:Path)->dict[str,Any]:
     for wrapper_label,delegated_wrapper in wrapper_delegations:
         if (wrapper_label,delegated_wrapper) not in resolved_delegations:
             unresolved.append(f"{wrapper_label}<-{delegated_wrapper}:wrapper delegation has no resolved live caller")
+    for builder, variants in builder_sources.items():
+        for index,source in enumerate(variants): assemblies[f"executed-rust-builder::{builder}::{index}"]=source
     if unresolved: raise ValueError("unresolved production shader source expressions: "+"; ".join(sorted(unresolved)))
     naga_count,naga_labels=_naga_analyze(assemblies) if (repo_root/"Cargo.toml").is_file() else (0,[])
     sources={path.relative_to(repo_root).as_posix():path.read_text(encoding="utf-8") for path in wgsl_paths}; sources.update(assemblies); sources.update(embedded_sources); violations=[]; stale=0

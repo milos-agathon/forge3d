@@ -2,7 +2,7 @@
   "adapter": {
     "backend": "vulkan",
     "device": "NVIDIA GeForce RTX 3070",
-    "driver_info": "595.95",
+    "driver_info": "610.60",
     "vendor": "4318"
   },
   "allocations": {
@@ -40,6 +40,8 @@
       "mesh_instanced_terrain_fallback": 4,
       "mesh_instanced_terrain_uniforms": 32,
       "mesh_instanced_uniforms": 240,
+      "orbis.globe.background.uniform": 208,
+      "orbis.globe.earth-texture": 4,
       "overlay_dummy": 4,
       "overlay_dummy_tmp": 4,
       "overlay_page_table_dummy": 32,
@@ -62,32 +64,34 @@
       "scene.mosaic_params_ubo": 16,
       "scene.tile_slot_ubo": 16,
       "scene.tile_ubo": 16,
-      "src/terrain/renderer/constructor.rs:489": 4,
-      "src/terrain/renderer/constructor.rs:490": 1024,
-      "src/terrain/renderer/constructor.rs:491": 1,
-      "src/terrain/renderer/constructor.rs:492": 4,
-      "src/terrain/renderer/constructor.rs:493": 1048576,
-      "src/terrain/renderer/constructor.rs:494": 1048576,
-      "src/terrain/renderer/constructor.rs:499": 4,
-      "src/terrain/renderer/constructor.rs:504": 16,
-      "src/terrain/renderer/constructor.rs:505": 8,
+      "src/terrain/renderer/constructor.rs:583": 4,
+      "src/terrain/renderer/constructor.rs:584": 1024,
+      "src/terrain/renderer/constructor.rs:585": 1,
+      "src/terrain/renderer/constructor.rs:586": 4,
+      "src/terrain/renderer/constructor.rs:587": 1048576,
+      "src/terrain/renderer/constructor.rs:588": 1048576,
+      "src/terrain/renderer/constructor.rs:593": 4,
+      "src/terrain/renderer/constructor.rs:598": 16,
+      "src/terrain/renderer/constructor.rs:599": 8,
       "ssao-blur-settings": 40,
       "ssao-depth": 24576,
       "ssao-noise": 64,
       "ssao-settings": 40,
       "ssao-view-params": 256,
       "sun_vis.uniform_buffer": 64,
+      "terrain.aether.scattering.fallback": 8,
       "terrain.ao_debug_fallback": 4,
-      "terrain.coarse_ao": 256,
       "terrain.depth.render_target": 24576,
       "terrain.detail_normal_fallback": 4,
-      "terrain.fog.uniform_buffer": 64,
+      "terrain.fog.uniform_buffer": 96,
+      "terrain.height-page-table.disabled": 96,
       "terrain.height_ao_fallback": 4,
       "terrain.height_curve_lut": 1024,
       "terrain.heightmap": 256,
       "terrain.ibl_uniform_buffer": 16,
       "terrain.internal.render_target": 24576,
       "terrain.material_layer.uniform_buffer": 224,
+      "terrain.material_maps.albedo": 4,
       "terrain.material_maps.mask": 4,
       "terrain.material_maps.normal": 4,
       "terrain.material_maps.roughness": 4,
@@ -95,7 +99,7 @@
       "terrain.noop_shadow.csm_uniforms": 864,
       "terrain.noop_shadow.maps": 4,
       "terrain.noop_shadow.moments": 8,
-      "terrain.overlay_buffer": 96,
+      "terrain.overlay_buffer": 128,
       "terrain.probes.grid_uniform_buffer": 48,
       "terrain.probes.ssbo": 144,
       "terrain.reflection_probes.fallback_texture": 48,
@@ -114,7 +118,7 @@
       "terrain.water_reflection.depth": 1054720,
       "terrain.water_reflection.fallback": 4,
       "terrain.water_reflection.texture": 1054720,
-      "terrain.water_reflection.uniform_buffer": 128,
+      "terrain.water_reflection.uniform_buffer": 160,
       "text_dummy_atlas": 4,
       "text_mesh_uniforms": 240,
       "text_msdf_atlas": 688000,
@@ -126,9 +130,9 @@
       "vt_fallback_colors": 256,
       "vt_feedback_fallback": 16,
       "vt_page_table_fallback": 64,
-      "vt_uniforms": 112
+      "vt_uniforms": 160
     },
-    "peak_device_local_bytes": 474214462,
+    "peak_device_local_bytes": 474214890,
     "peak_host_visible_bytes": 33792
   },
   "capabilities": {
@@ -167,24 +171,27 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "5a0bf9317bb0",
-    "version": "1.34.0",
+    "git_sha": "673a01d996df",
+    "version": "1.45.0",
     "wgsl_module_hashes": {
+      "ibl.precompute.shader.brdf": "1ae542caaac04a941c211ec924c0072a3110cbff03aff23e140ea9305ba8dc75",
+      "ibl.precompute.shader.equirect": "c77440fdaca6bb421e6775d86cb0be2f7cb3638e103de07121027e338c2a9772",
+      "ibl.precompute.shader.prefilter": "7e705dff6742aa1a9ad760a42561d01d66899e27408043c0e62f8c907f9d1694",
       "overlays_shader": "3f7493a10d4734daa97dedac61a21ab27ebc20e1c9353018abb40f31fdfa803d",
-      "terrain.shadow_depth.shader": "5cb47cb163eba8496ca4c80b931f961d2d51c752cbddbf116690106bfa2a8ce0",
-      "terrain_pbr_pom.shader": "eb5127b8502f542a78926eeba26f9e0211c3ecad712a8abfa86bd57672b52b42",
-      "text_overlay_shader": "06e0fd5a97f2ad8d44664a1dc8f0e7fdd90231f032a863f7e23315314cb8e0df"
+      "terrain.shadow_depth.shader": "0e96b377bb089fcf83499ebaedee708ee3cf2adf2330b68ac6b848bcc7992f15",
+      "terrain_pbr_pom.shader": "c4a501446d238755cc707e3dab23b28ed634a7adbfcda13069d46b7b7b14e9ae",
+      "text_overlay_shader": "b21d02a2f703089b81e02e776ef228819aaca8d05f0dd9de1d1108f1da063925"
     }
   },
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 1.9619840383529663,
+      "gpu_ms": 1.627135992050171,
       "label": "terrain.shadow"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.material_vt"
     },
     {
@@ -204,7 +211,7 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.05119999870657921,
+      "gpu_ms": 0.09830400347709656,
       "label": "terrain.main"
     },
     {
@@ -214,12 +221,12 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.0030720001086592674,
+      "gpu_ms": 0.002047999994829297,
       "label": "scene.main"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.009216000325977802,
+      "gpu_ms": 0.0071680000983178616,
       "label": "scene.readback_copy"
     },
     {
@@ -232,7 +239,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "ce239b8bbb649a2d8159917876f318a08b0c36c51ea29bd17152f24eb0749fd22b10cf8395bdb32e3dd025f54516491360aae617bfb371c19480981f9c865900",
+    "sig": "aac0b142117efd6d12d12bd79cf97f34ddec72e66aaf65591e94e3906acefd9547be1a693de9a5894e8d6400f9de24a05e6408a7812ac2a47bbdd34cc00b4e0f",
     "signed_fields": [
       "adapter",
       "allocations",
