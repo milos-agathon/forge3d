@@ -382,6 +382,132 @@ struct DirectionalTransport {
     executed_orders: std::cell::Cell<u32>,
 }
 
+#[derive(Clone, Copy, Default, PartialEq)]
+struct DirectionalStoredLayout {
+    offset: u64,
+    row_bytes: u64,
+    padded_row_bytes: u64,
+    rows: u32,
+}
+
+impl DirectionalStoredLayout {
+    fn range(self, row: u32) -> crate::core::error::RenderResult<std::ops::Range<usize>> {
+        let start = self.offset + self.padded_row_bytes * u64::from(row);
+        let end = start + self.row_bytes;
+        Ok(usize::try_from(start).map_err(crate::core::error::RenderError::render)?
+            ..usize::try_from(end).map_err(crate::core::error::RenderError::render)?)
+    }
+}
+
+struct DirectionalStoredBits {
+    buffer: TrackedBuffer,
+    layouts: [DirectionalStoredLayout; 4],
+}
+
+impl DirectionalStoredBits {
+    const NAMES: [&str; 4] = ["surface0", "surface1", "source0", "source1"];
+
+    fn capture(
+        directional: &DirectionalTransport,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        order: u32,
+    ) -> crate::core::error::RenderResult<Self> {
+        let alignment = u64::from(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        let mut layouts = [DirectionalStoredLayout::default(); 4];
+        let mut total = 0u64;
+        for (index, layout) in layouts.iter_mut().enumerate() {
+            let (row_bytes, rows) = if index < 2 {
+                (directional.buffers[index].size(), 1)
+            } else {
+                let size = directional.textures[index - 2].size();
+                (u64::from(size.width) * 8, size.height)
+            };
+            let padded_row_bytes = row_bytes.div_ceil(alignment) * alignment;
+            *layout = DirectionalStoredLayout { offset: total, row_bytes, padded_row_bytes, rows };
+            total = total.checked_add(padded_row_bytes * u64::from(rows))
+                .ok_or_else(|| crate::core::error::RenderError::render("directional snapshot size overflow"))?;
+        }
+        // MAP_READ allocations remain in the host-visible ledger until both
+        // same-parity snapshots have been compared and released.
+        let buffer = tracked_create_buffer(device, &wgpu::BufferDescriptor {
+            label: Some("nephele.media.directional.stored_bits_readback"),
+            size: total,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        })?;
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("nephele.media.directional.stored_bits_copy"),
+        });
+        for (index, layout) in layouts.iter().enumerate() {
+            if index < 2 {
+                encoder.copy_buffer_to_buffer(&directional.buffers[index], 0, &buffer, layout.offset, layout.row_bytes);
+            } else {
+                let texture = &directional.textures[index - 2];
+                encoder.copy_texture_to_buffer(
+                    wgpu::ImageCopyTexture { texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                    wgpu::ImageCopyBuffer { buffer: &buffer, layout: wgpu::ImageDataLayout {
+                        offset: layout.offset,
+                        bytes_per_row: Some(u32::try_from(layout.padded_row_bytes).map_err(crate::core::error::RenderError::render)?),
+                        rows_per_image: Some(layout.rows),
+                    } }, texture.size(),
+                );
+            }
+        }
+        queue.submit([encoder.finish()]);
+        let slice = buffer.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| { let _ = sender.send(result); });
+        eprintln!("[NEPHELE stored-bits] order={order} stage=before_wait_for_device_idle readback_bytes={total}");
+        crate::core::gpu::wait_for_device_idle(device);
+        eprintln!("[NEPHELE stored-bits] order={order} stage=after_wait_for_device_idle");
+        eprintln!("[NEPHELE stored-bits] order={order} stage=before_recv");
+        let received = receiver.recv();
+        eprintln!("[NEPHELE stored-bits] order={order} stage=after_recv");
+        received.map_err(crate::core::error::RenderError::render)?
+            .map_err(crate::core::error::RenderError::render)?;
+        let snapshot = Self { buffer, layouts };
+        if let Some(directory) = std::env::var_os("FORGE3D_NEPHELE_ARTIFACT_DIR") {
+            use std::io::Write;
+            let mapped = snapshot.buffer.slice(..).get_mapped_range();
+            for (index, layout) in snapshot.layouts.iter().enumerate() {
+                let name = Self::NAMES[index];
+                let path = std::path::PathBuf::from(&directory).join(format!("directional-stored-order-{order}-{name}.bin"));
+                let mut file = std::fs::File::create(path).map_err(crate::core::error::RenderError::render)?;
+                for row in 0..layout.rows {
+                    file.write_all(&mapped[layout.range(row)?]).map_err(crate::core::error::RenderError::render)?;
+                }
+            }
+        }
+        eprintln!("[NEPHELE stored-bits] order={order} stage=snapshot_complete readback_bytes={total}");
+        Ok(snapshot)
+    }
+
+    fn compare(&self, next: &Self, order_k: u32, order_k2: u32) -> crate::core::error::RenderResult<bool> {
+        if self.layouts != next.layouts {
+            return Err(crate::core::error::RenderError::render("directional snapshot layout changed"));
+        }
+        let previous = self.buffer.slice(..).get_mapped_range();
+        let current = next.buffer.slice(..).get_mapped_range();
+        let mut identical = true;
+        for (index, layout) in self.layouts.iter().enumerate() {
+            let mut changed_bytes = 0u64;
+            for row in 0..layout.rows {
+                let range = layout.range(row)?;
+                let count = previous[range.clone()].iter().zip(&current[range]).filter(|(a, b)| a != b).count();
+                changed_bytes += u64::try_from(count).map_err(crate::core::error::RenderError::render)?;
+            }
+            let same = changed_bytes == 0;
+            identical &= same;
+            let name = Self::NAMES[index];
+            let bytes = layout.row_bytes * u64::from(layout.rows);
+            eprintln!("[NEPHELE stored-bits] k={order_k} k2={order_k2} resource={name} bytes={bytes} changed_bytes={changed_bytes} identical={same}");
+        }
+        eprintln!("[NEPHELE stored-bits] k={order_k} k2={order_k2} all_stored_bits_identical={identical}");
+        Ok(identical)
+    }
+}
+
 struct TerminationReadback {
     values: Vec<f32>,
     allocation: ResourceHandle,
@@ -1837,8 +1963,9 @@ impl TerrainMediaResources {
             }
             let extent=wgpu::Extent3d {width,height:height as u32,depth_or_array_layers:1};
             let usage=wgpu::TextureUsages::TEXTURE_BINDING|wgpu::TextureUsages::STORAGE_BINDING;
-            let (source0,b0)=tracked_texture(device,"nephele.media.directional.source0",extent,wgpu::TextureDimension::D2,wgpu::TextureFormat::Rgba16Float,usage)?;
-            let (source1,b1)=tracked_texture(device,"nephele.media.directional.source1",extent,wgpu::TextureDimension::D2,wgpu::TextureFormat::Rgba16Float,usage)?;
+            let source_usage=usage|wgpu::TextureUsages::COPY_SRC;
+            let (source0,b0)=tracked_texture(device,"nephele.media.directional.source0",extent,wgpu::TextureDimension::D2,wgpu::TextureFormat::Rgba16Float,source_usage)?;
+            let (source1,b1)=tracked_texture(device,"nephele.media.directional.source1",extent,wgpu::TextureDimension::D2,wgpu::TextureFormat::Rgba16Float,source_usage)?;
             let (incoming,bi)=tracked_texture(device,"nephele.media.directional.incoming",extent,wgpu::TextureDimension::D2,wgpu::TextureFormat::Rgba32Uint,usage)?;
             let (active,ba)=tracked_texture(device,"nephele.media.directional.active",self.grid.extent(),wgpu::TextureDimension::D3,wgpu::TextureFormat::R32Uint,wgpu::TextureUsages::TEXTURE_BINDING|wgpu::TextureUsages::COPY_DST)?;
             queue.write_texture(wgpu::ImageCopyTexture {texture:&active,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},bytemuck::cast_slice(&nodes.active_indices),wgpu::ImageDataLayout {offset:0,bytes_per_row:Some(self.grid.width*4),rows_per_image:Some(self.grid.height)},self.grid.extent());
@@ -1963,6 +2090,9 @@ impl TerrainMediaResources {
             };
             dispatch(encoder,&directional.clear,directional.cache_workgroups);
             let mut orders=0u32;
+            let mut previous_trace_progress=None;
+            let mut stored_trace:Option<(u32,DirectionalStoredBits)>=None;
+            let mut stored_trace_done=false;
             loop {
                 trace_stage(orders,"begin");
                 encoder.clear_buffer(&directional.buffers[4],0,None);
@@ -1999,6 +2129,21 @@ impl TerrainMediaResources {
                     return Err(crate::core::error::RenderError::render("directional transport lost monotonicity or exceeded finite f16 radiance"));
                 }
                 orders=orders.checked_add(1).ok_or_else(||crate::core::error::RenderError::render("directional transport order count exceeds u32"))?;
+                if trace_enabled {
+                    if let Some((order_k,previous))=stored_trace.as_ref() {
+                        if u64::from(orders)==u64::from(*order_k)+2 {
+                            let current=DirectionalStoredBits::capture(directional,device,queue,orders)?;
+                            previous.compare(&current,*order_k,orders)?;
+                            previous.buffer.unmap();
+                            current.buffer.unmap();
+                            stored_trace=None;
+                            stored_trace_done=true;
+                        }
+                    } else if !stored_trace_done && previous_trace_progress==Some(progress) {
+                        stored_trace=Some((orders,DirectionalStoredBits::capture(directional,device,queue,orders)?));
+                    }
+                    previous_trace_progress=Some(progress);
+                }
                 if progress[0]==0 {
                     directional.solve_diagnostics.set(Some(DirectionalSolveDiagnostics {
                         orders,converged:true,maximum_source_change:f64::from(f32::from_bits(progress[1])),
