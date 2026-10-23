@@ -262,9 +262,9 @@
       {
         "path": "src/verify/ir/engine.rs",
         "old_git_bytes_sha256": "9a34e9069a82038f4b3047d25f21b7514232c8411d6541f9a15ceb27336b30b7",
-        "new_git_bytes_sha256": "cb2ac44e949584f7dd48b6a6f137ada31cef38d400fec07ad48736fce0b04102",
+        "new_git_bytes_sha256": "40507a136d6898e15087f6ca3b7bfc25632376ed41cfef8cd56e4155335109ce",
         "old_size": 121637,
-        "new_size": 124657,
+        "new_size": 121634,
         "source": "proposed combined integration",
         "applied": false,
         "category": "shader_pin"
@@ -272,9 +272,9 @@
       {
         "path": "tests/data/world_coord_f32_ledger.json",
         "old_git_bytes_sha256": "e2a2568075b405b9a5b53f68867d3cb418c73ce99810516397889c1d80ef325d",
-        "new_git_bytes_sha256": "dc30943943ea7cd752288a4bcb70676e1ae63edfb6ac6ceedb843918bc3aca0a",
+        "new_git_bytes_sha256": "cf67e64f992d60a9161ccab26d73e2f4cb030622b98ebc7bb5a03d4397c7759f",
         "old_size": 161512,
-        "new_size": 270025,
+        "new_size": 263671,
         "source": "proposed combined integration",
         "applied": false,
         "category": "f32_ledger_or_assertions"
@@ -282,9 +282,9 @@
       {
         "path": "tests/test_world_coord_f32_gate.py",
         "old_git_bytes_sha256": "27e04c85bf89792abc24d18bddb44bb43f8f9d8eb8b71c5f5d936550625fee01",
-        "new_git_bytes_sha256": "69f50feb740a300ac6ba9638d819c15a91d7abf8219cdd8d17d06d22ec387928",
+        "new_git_bytes_sha256": "1a457a49a54b94501040988b228bc15450c1b7b982aefa6186cc69b19a440234",
         "old_size": 101449,
-        "new_size": 108966,
+        "new_size": 107145,
         "source": "proposed combined integration",
         "applied": false,
         "category": "f32_ledger_or_assertions"
@@ -302,9 +302,9 @@
       {
         "path": "scripts/nephele_shader_analyzer.py",
         "old_git_bytes_sha256": "99d463ed5e0ac2ad03617ad0e28027a448491f6c8a3be744a656f8400e74c7fe",
-        "new_git_bytes_sha256": "37c273721ba5cf4e9114d20a1cedfc632ea3716ab15b70bb5ec1f70dd1e985e9",
+        "new_git_bytes_sha256": "c2b7c336205a03791509543ad9c4a7a71e6b360805fe3caf184119aa9c29a0da",
         "old_size": 34060,
-        "new_size": 35801,
+        "new_size": 35324,
         "source": "proposed combined integration",
         "applied": false,
         "category": "shader_contract_or_existing_test_contract"
@@ -842,9 +842,10 @@
     ],
     "code_patch": {
       "path": "docs/audits/nephele-main-integration-2026-10-23-protected.patch",
-      "sha256": "f2a7847422bf358dd14799dc9463c4f7eaf415d9e277e859464adb6b432bba7d"
+      "sha256": "c132d1db70832e5ac89838bfeb4038a8f5fb3e8c92bdd0d2fa3626cf6cd55e07"
     },
-    "main_products_apply": "For each certificate/pixel entry, restore the exact path from d6b9e556586cceddb9c08f16ffc35f7d71fb4d88 and verify its new SHA-256. No regeneration or signing is proposed."
+    "main_products_apply": "For each certificate/pixel entry, restore the exact path from d6b9e556586cceddb9c08f16ffc35f7d71fb4d88 and verify its new SHA-256. No regeneration or signing is proposed.",
+    "hash_convention": "Canonical Git blob bytes. Text proposals use LF; pixel/certificate product blobs from main are unchanged."
   },
   "changed_files_and_reasons": [
     {
@@ -1397,6 +1398,19 @@
       "sha256": "bcacfdfabefc7ef4e7b9a9cefe12375b491fe1769218ad3c3ddd3ae30f9d93bc",
       "duration_seconds": 1.9622732999850996,
       "scope": "download and hash only; no GPU timing"
+    },
+    "additional_final_checks": {
+      "builder_negative_checks": {
+        "passed": [
+          "known factory uses its exact executed source",
+          "same name in unrelated owner rejected",
+          "unsupported parameter rejected",
+          "unknown factory remains unresolved"
+        ],
+        "GPU_executed": false
+      },
+      "fmt_after_callers_wall_seconds": 0.5676786,
+      "camera_mode_command_wall_seconds": 1.1676882
     }
   },
   "image_metrics": {
@@ -1755,5 +1769,6 @@
     "Document how branch candidates obtain exact recipe certificates before a protected-main-only refresh can run; keep signature verification and physical review intact.",
     "Add the full-resolution DEM to the shared fixture bundle whenever a physical benchmark depends on it; do not add per-job LFS transfers.",
     "Record the actual camera-mode Rust module name in validation handoffs so filters cannot silently execute zero tests."
-  ]
+  ],
+  "preparation_first_pushed_sha": "d590df3e6be43d301519c388a32df6c67ad14386"
 }

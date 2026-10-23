@@ -11,7 +11,7 @@ Milos authorized: “Yes — prepare the main integration before capture, push i
 - Contracts: import main's three already reviewed CONCORDIA unproven records, integrate five existing test-contract files, and apply the source-builder analyzer proposal. No further NEPHELE cloudlight range change is proposed. Preserve the existing mesh-unavailable test.
 - Import 23 certificates and 24 pixel products byte-for-byte from main; every old/new hash and path is in the JSON. These are main's existing products, not refreshed attestations for this candidate. No signing or golden regeneration is proposed.
 
-The text changes are in `nephele-main-integration-2026-10-23-protected.patch` (SHA-256 `f2a7847422bf358dd14799dc9463c4f7eaf415d9e277e859464adb6b432bba7d`). The 58-file exact manifest is `nephele-main-integration-2026-10-23.json`. Neither the patch nor those protected values is applied. Product bytes are obtained by exact main commit/path and verified against the manifest, without duplicating binary goldens in the patch.
+The text changes are in `nephele-main-integration-2026-10-23-protected.patch` (SHA-256 `c132d1db70832e5ac89838bfeb4038a8f5fb3e8c92bdd0d2fa3626cf6cd55e07`). The 58-file exact manifest is `nephele-main-integration-2026-10-23.json`. Neither the patch nor those protected values is applied. Product bytes are obtained by exact main commit/path and verified against the manifest, without duplicating binary goldens in the patch.
 
 ## Implementation and evidence
 
@@ -36,3 +36,5 @@ The proposed analyzer executes the current pure Rust shader builders and both bo
 All margins, backcasts, sensitivity, G1/G2 statistics and unmeasured G5/G6 physical status are retained in the JSON. No new numerical transport change or forecast was made during this integration. The directional fields and convergence remain unchanged from ca9ad2ce: 19/19 CPU fixed-point orders, independent surface-cache dimensions, no fixed 21-order limit.
 
 After approval, release still requires exact-head installed-wheel checks, NVIDIA Vulkan physical green, the 1500² DEM timing, and full acceptance CI. Imported main certificates do not certify this combined source. The protected-main-only certificate refresh path is a concrete remaining governance gap; no candidate signature or unknown future certificate value is proposed. D3D12, Metal and WASM are ABSENT. Reference RNG overlap is reported and unchanged. Proposed steering fixes are listed in the JSON and were not applied.
+
+All old/new hashes in this batch identify canonical Git blob bytes; text proposals use LF. Windows working-copy CRLF bytes are not used as prospective Git hashes. The preparation was first pushed at d590df3e; this audit correction changes no production source or proposed behavior.
