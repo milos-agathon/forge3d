@@ -405,11 +405,18 @@ pub fn env_from_hdr_image(
     }
     upper_lum.sort_by(f32::total_cmp);
     let median = upper_lum.get(upper_lum.len() / 2).copied().unwrap_or(0.0);
-    let scale = if median.is_finite() && median > 0.0 {
-        1.0 / f64::from(median)
-    } else {
-        0.0
-    };
+    // The exposure is normalised to the median upper-hemisphere luminance, so
+    // a median of zero would scale the whole environment to black. That is a
+    // broken or night-sky HDRI, not an exposure, and rendering it silently as
+    // black would look like a scene bug.
+    if !(median.is_finite() && median > 0.0) {
+        return Err(RenderError::Render(
+            "environment map has no upper-hemisphere radiance to normalise: its median \
+             luminance is zero (an all-black or night-only HDRI cannot light the scene)"
+                .into(),
+        ));
+    }
+    let scale = 1.0 / f64::from(median);
     let clamp = f64::from(ENV_CLAMP);
     for value in &mut pixels {
         *value = (f64::from(*value) * scale).clamp(0.0, clamp) as f32;
@@ -1935,5 +1942,17 @@ mod env_map_tests {
         let uniform = image(4, 2, |_, _| [1.0, 1.0, 1.0]);
         let env = env_from_hdr_image(&uniform, 0.0).unwrap();
         assert!((luminance(&env.pixels[0..3]) - 1.0).abs() < 1e-3);
+        // An all-black upper hemisphere has no luminance to normalise
+        // against: refusing it is better than rendering the scene unlit.
+        let black_sky = image(4, 2, |_, y| {
+            if y < 1 {
+                [0.0, 0.0, 0.0]
+            } else {
+                [0.5, 0.5, 0.5]
+            }
+        });
+        let err = env_from_hdr_image(&black_sky, 0.0)
+            .expect_err("an all-black sky must be refused");
+        assert!(format!("{err}").contains("median"), "{err}");
     }
 }
