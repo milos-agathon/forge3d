@@ -29,8 +29,11 @@ class TerrainProjector:
             raise ValueError('world projection requires a terrain heightmap')
         self.heightmap, self.nodata_height_below = ms._mapscene_nodata_heightmap(self.heightmap)
         self.heightmap = np.asarray(self.heightmap, dtype=np.float32)
-        self.params = ms._build_mapscene_terrain_params(
-            recipe, self.heightmap, (max(64, recipe.output.width), max(64, recipe.output.height)))
+        size = (max(64,recipe.output.width),max(64,recipe.output.height))
+        # Only the interactive route uses the shared camera and building depth.
+        # Preserve the legacy projection/terrain-only proxy with effects off.
+        self.shared_frame = bool(ms._mapscene_native_effects(recipe))
+        self.params = ms._build_mapscene_terrain_params(recipe,self.heightmap,size)
         if self.params is None or not callable(getattr(self.params, 'project_terrain_points', None)):
             raise ValueError('native terrain camera projection is unavailable; rebuild the bindings')
         self.span = max(1.0, ms._terrain_scene_diagonal(recipe.terrain))
@@ -42,7 +45,7 @@ class TerrainProjector:
             from .alignment import _affine_from_metadata
             self._inverse = ~_affine_from_metadata(self.grid['transform'])
 
-    def uv(self, point):
+    def uv(self, point, *, allow_outside=False):
         if isinstance(point, (str, bytes)) or not hasattr(point, '__len__') or len(point) < 2:
             raise ValueError('world overlay anchors require east and north coordinates')
         east, north = float(point[0]), float(point[1])
@@ -59,7 +62,7 @@ class TerrainProjector:
             u, v = east / self.span + 0.5, 0.5 - north / self.span
         if not all(math.isfinite(value) for value in (u, v)):
             raise ValueError('world overlay coordinates must be finite')
-        if not (0.0 <= u <= 1.0 and 0.0 <= v <= 1.0):
+        if not allow_outside and not (0.0 <= u <= 1.0 and 0.0 <= v <= 1.0):
             raise ValueError('world overlay anchor is outside the terrain footprint')
         return u, v
 
@@ -72,13 +75,16 @@ class TerrainProjector:
         bottom = float(self.heightmap[y1, x0]) * (1.0 - tx) + float(self.heightmap[y1, x1]) * tx
         return top * (1.0 - ty) + bottom * ty
 
-    def project(self, point, *, viewport=None):
-        uv = self.uv(point)
-        height = self.height(uv)
+    def project(self, point, *, viewport=None, allow_outside=False):
+        uv = self.uv(point, allow_outside=allow_outside)
+        inside = 0.0 <= uv[0] <= 1.0 and 0.0 <= uv[1] <= 1.0
+        if not inside and len(point) < 3:
+            raise ValueError('points outside the terrain footprint require absolute elevation')
+        height = self.height(uv) if inside else float(np.min(self.heightmap if self.nodata_height_below is None else self.heightmap[self.heightmap >= self.nodata_height_below]))
         offset = float(point[2]) - height if len(point) > 2 else 0.0
         if not math.isfinite(offset):
             raise ValueError('world overlay elevation must be finite')
-        value = self.params.project_terrain_points([[uv[0], uv[1], height, offset]])[0]
+        value = self.params.project_terrain_points([[uv[0], uv[1], height, offset]], shared_frame=self.shared_frame)[0]
         if value is None:
             raise ValueError('world overlay anchor is behind the terrain camera')
         if not 0.0 <= value[2] <= 1.0:
@@ -136,9 +142,11 @@ class TerrainProjector:
         right = self.project([center[0]-normal[0],center[1]-normal[1],ground])
         return math.hypot(right[0]-left[0],right[1]-left[1])
 
-    def depth_image(self):
+    def depth_image(self, *, include_buildings=None):
         """Deterministic DEM-grid triangle depth proxy, compiled without a GPU frame."""
         from ._native import get_native_module
+        if include_buildings is None:
+            include_buildings = self.shared_frame
         native = get_native_module()
         reserve = getattr(native, '_reserve_label_depth_host_allocation', None)
         rasterize = getattr(self.params, 'project_terrain_depth', None)
@@ -146,10 +154,16 @@ class TerrainProjector:
             raise RuntimeError('native terrain depth projection is unavailable; rebuild the bindings')
         width, height = self.recipe.output.width, self.recipe.output.height
         # Native working memory: two rows of Option<[f64;3]> and the depth image.
-        reservation = reserve(int(width * height * 4 + self.heightmap.shape[1] * 2 * 32),
+        columns = 512 if self.shared_frame else self.heightmap.shape[1]
+        reservation = reserve(int(width * height * 4 + columns * 2 * 32),
                               'mapscene.camera_depth_proxy')
         try:
-            return rasterize(self.heightmap, (width, height), self.nodata_height_below)
+            if include_buildings:
+                from ._map_scene_native_inputs import building_world_triangles
+                occluders = building_world_triangles(self)
+                if occluders:
+                    return rasterize(self.heightmap, (width, height), self.nodata_height_below, occluders=occluders, shared_frame=self.shared_frame)
+            return rasterize(self.heightmap, (width, height), self.nodata_height_below, shared_frame=self.shared_frame)
         finally:
             reservation.close()
 
@@ -157,6 +171,10 @@ class TerrainProjector:
 
 def project_vector_recipe(recipe, *, projector=None):
     from . import map_scene as ms
+    def ground(coordinates):
+        if coordinates and hasattr(coordinates[0], '__len__'):
+            return all(ground(part) for part in coordinates)
+        return len(coordinates) == 2
     if not ms._is_3d_camera_mode(ms._mapscene_effective_camera_mode(recipe)):
         return recipe
     projected = copy.copy(recipe)
@@ -181,6 +199,8 @@ def project_vector_recipe(recipe, *, projector=None):
                     raise ValueError('world vectors require GeoJSON feature geometries')
                 geometry = feature['geometry']
                 kind, coords = geometry.get('type', ''), geometry.get('coordinates', [])
+                if ms._mapscene_native_effects(recipe):
+                    feature['_terrain_draped'] = ground(coords)
                 paths = ([coords] if kind == 'LineString' else coords if kind in ('MultiLineString','Polygon')
                          else [ring for polygon in coords for ring in polygon] if kind == 'MultiPolygon' else [])
                 minimum = 4 if 'Polygon' in kind else 2
@@ -307,7 +327,7 @@ def composite_projected_vectors(base, projected_recipe, recipe):
                 visible = np.zeros(len(xx), dtype=bool)
                 if kind in ('Polygon', 'MultiPolygon'):
                     if surface_uv is None:
-                        surface_uv = projector.params.unproject_terrain_depth(depth)
+                        surface_uv = projector.params.unproject_terrain_depth(depth, shared_frame=projector.shared_frame)
                     uv = surface_uv[yy, xx]
                     polygons = (feature.get('_terrain_polygons_uv') if kind == 'MultiPolygon'
                                 else [feature['_terrain_rings_uv']])

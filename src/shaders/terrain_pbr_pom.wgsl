@@ -2104,7 +2104,11 @@ fn vs_main(@builtin(vertex_index) vertex_id : u32) -> VertexOutput {
         vec3<f32>(0.0, 1.0, 0.0),
         camera_mode == 2u,
     );
-    out.tex_coord = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    // Preserve oversized fullscreen UVs until interpolation; fragment UVs
+    // then cover the complete tile, just as the mesh grid does.
+    // A finite bound preserves the value-safety proof without shrinking the
+    // oversized fullscreen triangle, whose vertex UVs are exactly 0 or 2.
+    out.tex_coord = clamp(uv, vec2<f32>(0.0), vec2<f32>(2.0));
     out.tile_id = 0u;
     
     if (camera_mode != 0u) {
@@ -4237,9 +4241,9 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     }
 
     var uv = input.tex_coord;
-    // Legacy screen UVs clamp the oversized triangle's vertices. For the
-    // new raster source reconstruct its full, row-zero-north grid from the
-    // interpolated XY plane; keep the historical colormap path unchanged.
+    // Raster sources use row-zero-north coordinates. Reconstruct that
+    // orientation from the fullscreen XY plane; ordinary terrain UVs now
+    // cover the complete tile after vertex interpolation.
     if (u_overlay.params6.w > 0.5 && u_terrain.camera_mode_params.x < 0.5) {
         let inv_span = det_div(1.0, u_terrain.spacing_h_exag.x);
         uv = det_barrier2(vec2<f32>(det_barrier(input.world_position.x * inv_span) + 0.5,
@@ -4798,11 +4802,9 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     if (material_layer_uniforms.map_flags.w > 0.5) {
         var drape_uv = input.tex_coord;
         if (u_terrain.camera_mode_params.x < 0.5) {
-            // Legacy fullscreen vertices clamp (0,2) UVs before interpolation,
-            // leaving the existing material/height samples in [0,0.5]. Keep
-            // those pixels unchanged; raster imagery covers the complete tile
-            // and retains the screen compositor's top-to-bottom row convention.
-            drape_uv = vec2<f32>(input.tex_coord.x * 2.0, 1.0 - det_barrier(input.tex_coord.y * 2.0));
+            // Fullscreen UVs already cover [0,1]; retain only the raster
+            // image's top-to-bottom row convention, without the old zoom.
+            drape_uv = vec2<f32>(input.tex_coord.x, 1.0 - input.tex_coord.y);
         }
         let drape = textureSample(material_drape_tex, material_map_samp, drape_uv);
         final_albedo = det_mix3(final_albedo, drape.rgb, drape.a);

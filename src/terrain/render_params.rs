@@ -43,12 +43,11 @@ pub(crate) use native_lighting::{SamplingSettingsNative, ShadowSettingsNative};
 pub(crate) use native_material::MaterialLayerSettingsNative;
 use native_material::{DetailSettingsNative, MaterialNoiseSettingsNative};
 use native_overlays::VectorOverlaySettingsNative;
-pub(crate) use native_postfx::AovSettingsNative;
+pub(crate) use native_postfx::{AovSettingsNative, VolumetricsModeNative};
 use native_postfx::{
     DenoiseMethodNative, DenoiseSettingsNative, DofMethodNative, DofQualityNative,
     DofSettingsNative, LensEffectsSettingsNative, MotionBlurSettingsNative,
-    ScreenSpaceSettingsNative, SkySettingsNative, TonemapSettingsNative, VolumetricsModeNative,
-    VolumetricsSettingsNative,
+    ScreenSpaceSettingsNative, SkySettingsNative, TonemapSettingsNative, VolumetricsSettingsNative,
 };
 pub(crate) use native_probes::{ProbeSettingsNative, ReflectionProbeSettingsNative};
 pub(crate) use native_vt::{TerrainVTSettingsNative, VTLayerFamilyNative};

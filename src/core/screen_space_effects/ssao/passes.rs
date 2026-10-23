@@ -9,6 +9,9 @@ impl SsaoRenderer {
         gbuffer: &GBuffer,
         hzb_view: &TextureView,
     ) -> RenderResult<()> {
+        if self.concordia {
+            crate::core::shader_registry::record_shader_use("concordia.gtao.shader");
+        }
         let t0 = Instant::now();
         let mut settings_shadow = self.settings;
         settings_shadow.frame_index = self.settings.frame_index.wrapping_add(1);
@@ -30,9 +33,15 @@ impl SsaoRenderer {
         );
         self.settings = settings_shadow;
 
+        let contacts = self
+            .contact_geometry
+            .as_ref()
+            .filter(|_| self.settings.technique == 1);
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("ssao_bind_group"),
-            layout: &self.ssao_bind_group_layout,
+            layout: contacts
+                .map(|(_, layout, _)| layout)
+                .unwrap_or(&self.ssao_bind_group_layout),
             entries: &[
                 BindGroupEntry {
                     binding: 0,
@@ -48,7 +57,11 @@ impl SsaoRenderer {
                 },
                 BindGroupEntry {
                     binding: 3,
-                    resource: BindingResource::TextureView(&self.noise_view),
+                    resource: BindingResource::TextureView(
+                        contacts
+                            .map(|(_, _, view)| view)
+                            .unwrap_or(&self.noise_view),
+                    ),
                 },
                 BindGroupEntry {
                     binding: 4,
@@ -73,7 +86,10 @@ impl SsaoRenderer {
             label: Some("ssao_pass"),
             timestamp_writes: None,
         });
-        let kernel = if self.settings.technique == 1 {
+        let kernel = if let Some((pipeline, _, _)) = contacts {
+            crate::core::shader_registry::record_shader_use("concordia.gtao_contacts.shader");
+            pipeline
+        } else if self.settings.technique == 1 {
             &self.gtao_pipeline
         } else {
             &self.ssao_pipeline
@@ -93,6 +109,9 @@ impl SsaoRenderer {
         encoder: &mut CommandEncoder,
         gbuffer: &GBuffer,
     ) -> RenderResult<()> {
+        if self.concordia {
+            crate::core::shader_registry::record_shader_use("concordia.ao_filter.shader");
+        }
         let t0 = Instant::now();
         let workgroup_x = (self.width + 7) / 8;
         let workgroup_y = (self.height + 7) / 8;

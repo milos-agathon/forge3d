@@ -413,7 +413,7 @@ pub struct ServiceReport {
     pub requested_pages: u32,
     /// Pages streamed into the pool by this call.
     pub loaded_pages: u32,
-    /// Requested pages that could not be made resident (pool pinned).
+    /// Requested pages deferred because slots are pinned or reserved for pending decodes.
     pub deferred_pages: u32,
 }
 
@@ -831,7 +831,18 @@ impl FusedGpu {
             // Traversal priority: the pages most rays asked for come first.
             requests.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
             report.requested_pages = requests.len() as u32;
+            let mut capacity = [PageKind::Splat, PageKind::Points]
+                .map(|kind| self.residency.request_capacity(kind, frame, &self.pending));
             for (_, page) in requests {
+                if self.policy == PagingPolicy::Progressive {
+                    let available = &mut capacity[self.residency.kind(page) as usize];
+                    if *available == 0 {
+                        report.deferred_pages += 1;
+                        self.stats.deferred_pages += 1;
+                        continue;
+                    }
+                    *available -= 1;
+                }
                 self.loader.request(page, self.addresses[page as usize]);
                 self.pending.push(page);
             }

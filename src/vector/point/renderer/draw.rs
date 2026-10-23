@@ -18,7 +18,7 @@ impl PointRenderer {
         instance_count: u32,
     ) {
         if let Some(instance_buffer) = &self.instance_buffer {
-            crate::core::shader_registry::record_shader_use("point_instanced.wgsl");
+            crate::core::shader_registry::record_shader_use(self.oit_shader_label);
             render_pass.set_pipeline(&self.oit_pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);
             render_pass.set_vertex_buffer(0, instance_buffer.slice(..));

@@ -228,7 +228,7 @@ jobs:
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' &&
        (inputs.scope == 'core' || inputs.scope == 'full' || inputs.scope == 'm06' ||
-        inputs.scope == 'helios'))
+        inputs.scope == 'helios' || inputs.scope == 'nephele'))
     runs-on: ubuntu-latest
 
     steps:
@@ -238,6 +238,8 @@ jobs:
 
       - name: Download the required LFS objects once
         shell: bash
+        env:
+          NEPHELE_DEM_REQUIRED: ${{ github.event_name == 'schedule' || inputs.scope == 'full' || inputs.scope == 'nephele' }}
         run: |
           media_base="https://media.githubusercontent.com/media/milos-agathon/forge3d/92a86baa3c8f6ba3c3a7368e4f80d4004905a433"
           selene_media_base="https://media.githubusercontent.com/media/milos-agathon/forge3d/19028116dfbe9b954eac63e0a211be0d544226aa"
@@ -245,6 +247,10 @@ jobs:
             fixture_base="$media_base"
             if [ "$fixture" = "assets/tif/moon_south_pole_lola.tif" ]; then
               fixture_base="$selene_media_base"
+            fi
+            if [ "$fixture" = "assets/tif/Gore_Range_Albers_1m.tif" ]; then
+              if [ "$NEPHELE_DEM_REQUIRED" != "true" ]; then continue; fi
+              fixture_base="https://media.githubusercontent.com/media/milos-agathon/forge3d/75051e850d11135f04f12f2c25d81be95673cf42"
             fi
             curl --fail --location --retry 3 \
               --output "$fixture" "$fixture_base/$fixture"
@@ -254,6 +260,7 @@ jobs:
           875b243474b151175f76037acd60c2149ac2e46fba9ba2bbce0c9a6998015dd3 assets/tif/dem_rainier.tif
           d09d229fa265749720a6b4bd40c440799f43286bf2d401d732ea77f89d0bd478 assets/tif/switzerland_dem.tif
           575e4b57d69d5db1bc16d5cd7edc8c83c570e280717e9e7ca225c060fd0aeb3d assets/tif/moon_south_pole_lola.tif
+          bcacfdfabefc7ef4e7b9a9cefe12375b491fe1769218ad3c3ddd3ae30f9d93bc assets/tif/Gore_Range_Albers_1m.tif
           EOF
 
           for fixture in \
@@ -278,6 +285,11 @@ jobs:
             assets/tif/moon_south_pole_lola.tif
           zip -q lfs-fixture-bundles/m06-dem.zip \
             assets/tif/switzerland_dem.tif
+
+      - name: Package the full-resolution NEPHELE DEM
+        if: github.event_name == 'schedule' || inputs.scope == 'full' || inputs.scope == 'nephele'
+        shell: bash
+        run: zip -q lfs-fixture-bundles/nephele-dem.zip assets/tif/Gore_Range_Albers_1m.tif
 
       - name: Upload shared LFS fixture bundles
         uses: actions/upload-artifact@v4
@@ -2806,7 +2818,7 @@ jobs:
   # ============================================================================
   test-nephele-gpu:
     name: NEPHELE (NVIDIA Vulkan)
-    needs: [build-wheel-windows, terrain-golden-paths]
+    needs: [build-wheel-windows, terrain-golden-paths, prepare-lfs-fixtures]
     if: >-
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' &&
@@ -2855,6 +2867,14 @@ jobs:
           $dirty = (git status --porcelain | Out-String).Trim()
           if ($LASTEXITCODE -ne 0 -or $dirty) { throw "NEPHELE source is dirty before capture: $dirty" }
           $actual | Set-Content "$artifactDir/checked-out-head.txt"
+      - name: Download the shared DEM fixture bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: lfs-fixture-bundles
+          path: ${{ runner.temp }}/nephele-lfs-fixtures
+      - name: Restore the full-resolution DEM
+        shell: pwsh
+        run: Expand-Archive "$env:RUNNER_TEMP/nephele-lfs-fixtures/nephele-dem.zip" -DestinationPath . -Force
       - uses: actions/download-artifact@v4
         with:
           name: wheels-windows

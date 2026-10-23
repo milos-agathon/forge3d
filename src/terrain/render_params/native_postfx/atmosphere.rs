@@ -1,5 +1,5 @@
 #[cfg(feature = "extension-module")]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct VolumetricsSettingsNative {
     pub enabled: bool,
     pub mode: VolumetricsModeNative,
@@ -17,7 +17,7 @@ pub struct VolumetricsSettingsNative {
 }
 
 #[cfg(feature = "extension-module")]
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VolumetricsModeNative {
     Uniform,
     Height,

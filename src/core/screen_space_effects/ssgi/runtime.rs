@@ -58,7 +58,9 @@ impl SsgiRenderer {
         }
         let t1 = Instant::now();
 
-        let prev_color_view = if self.scene_history_ready {
+        let prev_color_view = if let Some(view) = self.scene_color_override.as_ref() {
+            view
+        } else if self.scene_history_ready {
             &self.scene_history_views[self.scene_history_index]
         } else {
             &gbuffer.material_view

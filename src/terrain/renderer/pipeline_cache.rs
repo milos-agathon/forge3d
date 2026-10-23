@@ -864,3 +864,83 @@ impl TerrainScene {
         })
     }
 }
+
+impl TerrainScene {
+    pub(super) fn create_concordia_pipeline(
+        &self,
+        params: &crate::terrain::render_params::TerrainRenderParams,
+        frame_layout: &wgpu::BindGroupLayout,
+    ) -> Result<wgpu::RenderPipeline> {
+        let device = self.device.as_ref();
+        let source = super::interactive::shaders::terrain_source(
+            super::virtual_texture::bindless_bc_supported(device),
+        )?;
+        let shader = crate::core::shader_registry::create_labeled_shader_module(
+            device,
+            "concordia.geometry.shader",
+            &source,
+        );
+        let light = self
+            .light_buffer
+            .lock()
+            .map_err(|_| anyhow!("light buffer mutex poisoned"))?;
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("concordia.geometry.layout"),
+            bind_group_layouts: &[
+                &self.bind_group_layout,
+                light.bind_group_layout(),
+                &self.ibl_bind_group_layout,
+                &self.shadow_bind_group_layout,
+                &self.fog_bind_group_layout,
+                &self.water_reflection_bind_group_layout,
+                &self.material_layer_bind_group_layout,
+                frame_layout,
+            ],
+            push_constant_ranges: &[],
+        });
+        let buffers = [
+            crate::terrain::clipmap::ClipmapVertex::desc(),
+            crate::terrain::clipmap::gpu_lod::ClipmapDrawInstance::desc(),
+        ];
+        let clipmap = is_clipmap_camera_mode(&params.camera_mode);
+        Ok(crate::core::shader_registry::with_error_scope(
+            device,
+            "concordia.geometry.pipeline",
+            || {
+                crate::core::shader_registry::create_render_pipeline_scoped(
+                    device,
+                    &wgpu::RenderPipelineDescriptor {
+                        label: Some("concordia.geometry.pipeline"),
+                        layout: Some(&layout),
+                        vertex: wgpu::VertexState {
+                            module: &shader,
+                            entry_point: if clipmap {
+                                "vs_clipmap_main"
+                            } else {
+                                "vs_main"
+                            },
+                            buffers: if clipmap { &buffers } else { &[] },
+                        },
+                        fragment: Some(wgpu::FragmentState {
+                            module: &shader,
+                            entry_point: "fs_concordia",
+                            targets: &crate::core::gbuffer::GBuffer::geometry_targets(
+                                wgpu::TextureFormat::Rgba16Float,
+                            ),
+                        }),
+                        primitive: wgpu::PrimitiveState::default(),
+                        depth_stencil: Some(wgpu::DepthStencilState {
+                            format: TERRAIN_DEPTH_FORMAT,
+                            depth_write_enabled: true,
+                            depth_compare: wgpu::CompareFunction::Less,
+                            stencil: Default::default(),
+                            bias: Default::default(),
+                        }),
+                        multisample: wgpu::MultisampleState::default(),
+                        multiview: None,
+                    },
+                )
+            },
+        ))
+    }
+}

@@ -405,6 +405,7 @@ examples/**/*.py
 !examples/moon_south_pole.py
 !examples/orbis_swiss_alps_descent.py
 !examples/mapscene_thematic_rasters.py
+!examples/mapscene_water_clouds.py
 !examples/vector_line_drape.py
 !examples/terrain_water_optics.py
 !examples/prepare_scene.py

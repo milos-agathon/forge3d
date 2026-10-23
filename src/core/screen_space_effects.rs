@@ -17,7 +17,7 @@ const SSAO_SHADER_SRC: &str = concat!(
     "\n",
     include_str!("../shaders/ssao/ssao.wgsl")
 );
-const GTAO_SHADER_SRC: &str = concat!(
+pub(crate) const GTAO_SHADER_SRC: &str = concat!(
     include_str!("../shaders/ssao/common.wgsl"),
     "\n",
     include_str!("../shaders/ssao/gtao.wgsl")
@@ -35,7 +35,7 @@ pub enum ScreenSpaceEffect {
     SSR,
 }
 
-mod hzb;
+pub(crate) mod hzb;
 mod manager;
 mod settings;
 mod ssao;
@@ -50,3 +50,35 @@ pub use ssgi::SsgiRenderer;
 pub use ssr::SsrRenderer;
 
 pub(crate) use manager::PreparedScreenSpaceTargets;
+
+/// Shared-frame reconstruction supports both perspective and orthographic depth.
+/// Called only by CONCORDIA factories; authoritative WGSL and legacy pipelines stay unchanged.
+pub(crate) fn concordia_reconstruction(
+    source: &str,
+    camera: &str,
+    function: &str,
+) -> Result<String, crate::core::error::RenderError> {
+    let mut source = source.replace("\r\n", "\n");
+    let start = source.find(&format!("fn {function}(")).ok_or_else(|| {
+        crate::core::error::RenderError::Render("shared reconstruction anchor missing".into())
+    })?;
+    let end = source[start..]
+        .find("\n}")
+        .map(|end| start + end + 2)
+        .ok_or_else(|| {
+            crate::core::error::RenderError::Render("shared reconstruction end missing".into())
+        })?;
+    source.replace_range(
+        start..end,
+        &format!(
+            r#"fn {function}(uv: vec2<f32>, linear_depth: f32) -> vec3<f32> {{
+        let ndc = uv*vec2<f32>(2.0,-2.0)+vec2<f32>(-1.0,1.0);
+        let a_h = {camera}.inv_proj_matrix*vec4<f32>(ndc,0.0,1.0);
+        let b_h = {camera}.inv_proj_matrix*vec4<f32>(ndc,1.0,1.0);
+        let a = a_h.xyz/a_h.w; let b = b_h.xyz/b_h.w;
+        return mix(a,b,(linear_depth+a.z)/(a.z-b.z));
+    }}"#
+        ),
+    );
+    Ok(source)
+}

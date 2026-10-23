@@ -49,6 +49,7 @@ To red-gate a shader-sensitive recipe change, make the smallest local shader per
 | `mapscene_cloud_shadows` | cloud_shadows | `tests/golden/recipes/mapscene_cloud_shadows.png` | `pytest tests/test_recipe_goldens.py -k mapscene_cloud_shadows` |
 | `mapscene_tiles3d_points` | point_cloud_tiles | `tests/golden/recipes/mapscene_tiles3d_points.png` | `pytest tests/test_recipe_goldens.py -k mapscene_tiles3d_points` |
 | `mapscene_copc_points` | point_cloud_tiles | `tests/golden/recipes/mapscene_copc_points.png` | `pytest tests/test_recipe_goldens.py -k mapscene_copc_points` |
+| `mapscene_concordia` | native_interactive | `tests/golden/recipes/mapscene_concordia.png` | `pytest tests/test_recipe_goldens.py -k mapscene_concordia` |
 | `mapscene_png16_color` | output_color | `tests/golden/recipes/mapscene_png16_color.png` | `pytest tests/test_recipe_goldens.py -k mapscene_png16_color` |
 
 ```{toctree}

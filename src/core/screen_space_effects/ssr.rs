@@ -12,6 +12,7 @@ pub struct SsrRenderer {
     settings: SsrSettings,
     settings_buffer: TrackedBuffer,
     camera_buffer: TrackedBuffer,
+    concordia_projection: bool,
     trace_pipeline: ComputePipeline,
     trace_bind_group_layout: BindGroupLayout,
     shade_pipeline: ComputePipeline,
@@ -68,3 +69,86 @@ pub struct SsrRenderer {
 }
 
 pub(crate) use resize::PreparedSsrTargets;
+
+impl SsrRenderer {
+    pub(crate) fn configure_concordia_projection(&mut self, device: &Device) -> RenderResult<()> {
+        {
+            let source = super::concordia_reconstruction(include_str!("../../shaders/ssr/trace.wgsl"), "camera", "reconstruct_view_position")?
+                .replace("normalize(-origin_vs)", "select(normalize(-origin_vs), vec3<f32>(0.0,0.0,1.0), camera.proj_matrix[3][3] != 0.0)")
+                .replace("normalize(-view_pos)", "select(normalize(-view_pos), vec3<f32>(0.0,0.0,1.0), camera.proj_matrix[3][3] != 0.0)");
+            let module = crate::core::shader_registry::create_labeled_shader_module(
+                device,
+                "concordia.ssr.trace",
+                &source,
+            );
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("concordia.ssr.trace.layout"),
+                bind_group_layouts: &[&self.trace_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+            self.trace_pipeline = crate::core::shader_registry::try_create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("concordia.ssr.trace.pipeline"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: "cs_trace",
+                },
+            )
+            .map_err(crate::core::error::RenderError::Render)?;
+        }
+        {
+            let source = super::concordia_reconstruction(include_str!("../../shaders/ssr/shade.wgsl"), "camera", "reconstruct_view_position")?
+                .replace("normalize(-origin_vs)", "select(normalize(-origin_vs), vec3<f32>(0.0,0.0,1.0), camera.proj_matrix[3][3] != 0.0)")
+                .replace("normalize(-view_pos)", "select(normalize(-view_pos), vec3<f32>(0.0,0.0,1.0), camera.proj_matrix[3][3] != 0.0)");
+            let module = crate::core::shader_registry::create_labeled_shader_module(
+                device,
+                "concordia.ssr.shade",
+                &source,
+            );
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("concordia.ssr.shade.layout"),
+                bind_group_layouts: &[&self.shade_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+            self.shade_pipeline = crate::core::shader_registry::try_create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("concordia.ssr.shade.pipeline"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: "cs_shade",
+                },
+            )
+            .map_err(crate::core::error::RenderError::Render)?;
+        }
+        {
+            let source = super::concordia_reconstruction(include_str!("../../shaders/ssr/fallback_env.wgsl"), "camera", "reconstruct_view_position")?
+                .replace("normalize(-origin_vs)", "select(normalize(-origin_vs), vec3<f32>(0.0,0.0,1.0), camera.proj_matrix[3][3] != 0.0)")
+                .replace("normalize(-view_pos)", "select(normalize(-view_pos), vec3<f32>(0.0,0.0,1.0), camera.proj_matrix[3][3] != 0.0)");
+            let module = crate::core::shader_registry::create_labeled_shader_module(
+                device,
+                "concordia.ssr.fallback",
+                &source,
+            );
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("concordia.ssr.fallback.layout"),
+                bind_group_layouts: &[&self.fallback_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+            self.fallback_pipeline =
+                crate::core::shader_registry::try_create_compute_pipeline_scoped(
+                    device,
+                    &wgpu::ComputePipelineDescriptor {
+                        label: Some("concordia.ssr.fallback.pipeline"),
+                        layout: Some(&layout),
+                        module: &module,
+                        entry_point: "cs_fallback",
+                    },
+                )
+                .map_err(crate::core::error::RenderError::Render)?;
+        }
+        self.concordia_projection = true;
+        Ok(())
+    }
+}

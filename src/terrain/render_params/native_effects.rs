@@ -1,5 +1,5 @@
 #[cfg(feature = "extension-module")]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FogSettingsNative {
     /// Fog density coefficient (0.0 = disabled)
     pub density: f32,

@@ -12,6 +12,7 @@ mod config;
 mod draw;
 mod init;
 mod pipelines;
+mod shared;
 mod upload;
 
 #[cfg(test)]
@@ -30,6 +31,7 @@ pub struct PointRenderer {
     pick_uniform_buffer: TrackedBuffer,
     pick_bind_group: wgpu::BindGroup,
     oit_pipeline: wgpu::RenderPipeline,
+    oit_shader_label: &'static str,
     instance_capacity: usize,
     debug_flags: DebugFlags,
     texture_atlas: Option<TextureAtlas>,

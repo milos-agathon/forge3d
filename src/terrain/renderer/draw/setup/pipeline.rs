@@ -3,6 +3,8 @@ use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 use crate::terrain::renderer::core::TERRAIN_DEPTH_FORMAT;
 
 pub(in crate::terrain::renderer) struct RenderTargets {
+    pub(in crate::terrain::renderer) concordia:
+        Option<super::super::super::interactive::ConcordiaFrame>,
     pub(in crate::terrain::renderer) internal_texture: Arc<TrackedTexture>,
     pub(in crate::terrain::renderer) internal_view: wgpu::TextureView,
     pub(in crate::terrain::renderer) _msaa_texture: Option<Arc<TrackedTexture>>,
@@ -392,6 +394,7 @@ impl TerrainScene {
         assert_msaa_invariants(&invariants, color_format)?;
 
         Ok(RenderTargets {
+            concordia: None,
             internal_texture,
             internal_view,
             _msaa_texture: msaa_texture,

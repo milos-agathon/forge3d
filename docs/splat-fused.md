@@ -122,7 +122,10 @@ requested pages asynchronously and evicts least-recently-used pages.
   holds, the render fails with a budget error instead of dropping occluders.
 * `policy="progressive"`: frames are kept while pages stream in. A pixel whose
   shadow ray missed a page reuses its reservoir's last known visibility.
-  `stats["stale_frames"]` reports how many frames were affected.
+  `stats["stale_frames"]` reports how many frames were affected. Pending page
+  decodes reserve pool slots; requests beyond the unpinned capacity are
+  deferred in traversal-priority order and counted in `paging.deferred_pages`,
+  even before background decoding finishes.
 
 Every buffer is created through the memory tracker. The render peak is bounded
 by the 512 MiB budget and reported in `stats` (`peak_total_bytes`,

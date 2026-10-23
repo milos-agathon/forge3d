@@ -15,6 +15,7 @@ pub struct SsgiRenderer {
     frame_index: u32,
 
     // Pipelines
+    concordia_projection: bool,
     trace_pipeline: ComputePipeline,
     trace_bind_group_layout: BindGroupLayout,
     shade_pipeline: ComputePipeline,
@@ -57,6 +58,7 @@ pub struct SsgiRenderer {
     scene_history_views: [TextureView; 2],
     scene_history_index: usize,
     scene_history_ready: bool,
+    scene_color_override: Option<TextureView>,
     linear_sampler: Sampler,
 
     // Env
@@ -76,3 +78,37 @@ pub struct SsgiRenderer {
 }
 
 pub(crate) use resize::PreparedSsgiTargets;
+
+impl SsgiRenderer {
+    pub(crate) fn configure_concordia_projection(&mut self, device: &Device) -> RenderResult<()> {
+        {
+            let source = super::concordia_reconstruction(
+                include_str!("../../shaders/ssgi/trace.wgsl"),
+                "uCam",
+                "reconstruct_view_position",
+            )?;
+            let module = crate::core::shader_registry::create_labeled_shader_module(
+                device,
+                "concordia.ssgi.trace",
+                &source,
+            );
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("concordia.ssgi.trace.layout"),
+                bind_group_layouts: &[&self.trace_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+            self.trace_pipeline = crate::core::shader_registry::try_create_compute_pipeline_scoped(
+                device,
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("concordia.ssgi.trace.pipeline"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: "cs_trace",
+                },
+            )
+            .map_err(crate::core::error::RenderError::Render)?;
+        }
+        self.concordia_projection = true;
+        Ok(())
+    }
+}

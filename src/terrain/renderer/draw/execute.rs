@@ -293,7 +293,17 @@ impl TerrainScene {
         // Sky, atmosphere, and water must reconstruct the same rays as the
         // main terrain uniforms. ShadowSetup retains its own legacy camera for
         // cascade work and is not an authoritative view-camera source.
-        let (camera_eye, camera_view, camera_proj) = Self::build_camera_matrices(params);
+        let (camera_eye, camera_view, camera_proj) =
+            if let Some(frame) = render_targets.concordia.as_ref() {
+                let view = glam::Mat4::from_cols_array_2d(&frame.current_uniforms.view);
+                (
+                    view.inverse().w_axis.truncate(),
+                    view,
+                    glam::Mat4::from_cols_array_2d(&frame.current_uniforms.proj),
+                )
+            } else {
+                Self::build_camera_matrices(params)
+            };
         let camera_height = if is_zup_camera_mode(&params.camera_mode) {
             camera_eye.z
         } else {
@@ -454,9 +464,21 @@ impl TerrainScene {
                 decoded,
                 height_inputs.width,
                 height_inputs.height,
-                shadow_setup.view_matrix,
-                shadow_setup.proj_matrix,
-                shadow_setup.eye,
+                if render_targets.concordia.is_some() {
+                    camera_view
+                } else {
+                    shadow_setup.view_matrix
+                },
+                if render_targets.concordia.is_some() {
+                    camera_proj
+                } else {
+                    shadow_setup.proj_matrix
+                },
+                if render_targets.concordia.is_some() {
+                    camera_eye
+                } else {
+                    shadow_setup.eye
+                },
                 time_seconds,
             );
             self.render_scatter_pass(
@@ -469,6 +491,13 @@ impl TerrainScene {
         }
         #[cfg(not(feature = "enable-gpu-instancing"))]
         let _ = time_seconds;
+        if let Some(frame) = render_targets.concordia.as_ref() {
+            *frame
+                .atmosphere_group
+                .lock()
+                .map_err(|_| anyhow!("CONCORDIA atmosphere mutex poisoned"))? =
+                Some(pass_bind_groups.fog);
+        }
         Ok(())
     }
 
@@ -571,11 +600,19 @@ impl TerrainScene {
         } else {
             None
         };
-        let blit_pipeline = msaa_pipeline.as_ref().unwrap_or(if linear_hdr {
-            &self.aether_background_blit_pipeline
-        } else {
-            &self.background_blit_pipeline
-        });
+        let blit_pipeline = msaa_pipeline.as_ref().unwrap_or(
+            if let Some(frame) = render_targets.concordia.as_ref() {
+                if linear_hdr {
+                    &frame.background_hdr_pipeline
+                } else {
+                    &frame.background_pipeline
+                }
+            } else if linear_hdr {
+                &self.aether_background_blit_pipeline
+            } else {
+                &self.background_blit_pipeline
+            },
+        );
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1157,8 +1194,23 @@ impl TerrainScene {
                 store: wgpu::StoreOp::Store,
             },
         })];
-        #[cfg(feature = "enable-globe")]
         let mut color_attachments = color_attachments;
+        if let Some(frame) = render_targets.concordia.as_ref() {
+            let color_load = if preserve_color {
+                wgpu::LoadOp::Load
+            } else {
+                wgpu::LoadOp::Clear(wgpu::Color {
+                    r: 0.1,
+                    g: 0.1,
+                    b: 0.15,
+                    a: 1.0,
+                })
+            };
+            color_attachments = frame
+                .gbuffer()
+                .geometry_attachments(color_view, color_load, true, &frame.surface_kind_view)
+                .to_vec();
+        }
         #[cfg(feature = "enable-globe")]
         if orbis_capture {
             color_attachments.extend([None, None, None, None]);
@@ -1199,14 +1251,20 @@ impl TerrainScene {
                 occlusion_query_set: None,
             });
 
-            crate::core::shader_registry::record_shader_use(if visibility_resolve {
-                "terrain_visbuffer_resolve.shader"
+            crate::core::shader_registry::record_shader_use(
+                if render_targets.concordia.is_some() {
+                    "concordia.geometry.shader"
+                } else if visibility_resolve {
+                    "terrain_visbuffer_resolve.shader"
+                } else if geometry.is_clipmap() {
+                    "terrain_pbr_pom.clipmap.shader"
+                } else {
+                    "terrain_pbr_pom.shader"
+                },
+            );
+            pass.set_pipeline(if let Some(frame) = render_targets.concordia.as_ref() {
+                &frame.geometry_pipeline
             } else if geometry.is_clipmap() {
-                "terrain_pbr_pom.clipmap.shader"
-            } else {
-                "terrain_pbr_pom.shader"
-            });
-            pass.set_pipeline(if geometry.is_clipmap() {
                 #[cfg(feature = "enable-globe")]
                 if orbis_capture {
                     orbis_pipeline_guard
@@ -1243,6 +1301,9 @@ impl TerrainScene {
             pass.set_bind_group(4, fog_bind_group, &[]);
             pass.set_bind_group(5, water_reflection_bind_group, &[]);
             pass.set_bind_group(6, material_layer_bind_group, &[]);
+            if let Some(frame) = render_targets.concordia.as_ref() {
+                pass.set_bind_group(7, &frame.frame_bind_group, &[]);
+            }
             let draw_calls = match draw_source {
                 TerrainDrawSource::Direct => {
                     geometry.draw(&mut pass);

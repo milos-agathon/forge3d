@@ -7,6 +7,10 @@ use crate::core::resource_tracker::{TrackedBuffer, TrackedTexture};
 /// any PyO3 attributes so it can be reused by the interactive viewer and
 /// other Rust callers.
 pub struct TerrainScene {
+    pub(super) concordia: Option<super::interactive::ConcordiaFrame>,
+    pub(super) concordia_report: String,
+    pub(super) concordia_geometry_signature: Option<[u8; 32]>,
+    pub(super) concordia_readbacks: Option<Arc<std::sync::atomic::AtomicUsize>>,
     pub(in crate::terrain) device: Arc<wgpu::Device>,
     pub(in crate::terrain) queue: Arc<wgpu::Queue>,
     pub(in crate::terrain) adapter: Arc<wgpu::Adapter>,
@@ -174,6 +178,8 @@ pub struct TerrainScene {
     pub(super) scatter_renderer: crate::render::mesh_instanced::MeshInstancedRenderer,
     #[cfg(feature = "enable-gpu-instancing")]
     pub(super) scatter_renderer_sample_count: u32,
+    #[cfg(feature = "enable-gpu-instancing")]
+    pub(super) scatter_concordia: bool,
     #[cfg(feature = "enable-gpu-instancing")]
     pub(super) scatter_batches: Vec<crate::terrain::scatter::TerrainScatterBatch>,
     #[cfg(feature = "enable-gpu-instancing")]
@@ -525,10 +531,11 @@ impl TerrainScene {
     pub(super) fn record_render_timings(
         &self,
         timing: &mut Option<crate::core::gpu_timing::GpuTimingManager>,
-    ) {
+    ) -> bool {
         if let Some(manager) = timing.as_mut() {
             match manager.get_results_blocking() {
                 Ok(results) => {
+                    let available = !results.is_empty();
                     for result in results {
                         // Invalid timestamps are recorded as 0.0, never as a
                         // garbage delta (CENSOR audit F-04).
@@ -538,10 +545,12 @@ impl TerrainScene {
                             result.draw_calls,
                         );
                     }
+                    return available;
                 }
                 Err(e) => log::warn!("GPU timing readback failed: {e}"),
             }
         }
+        false
     }
 }
 

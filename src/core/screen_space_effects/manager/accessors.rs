@@ -328,3 +328,51 @@ impl ScreenSpaceEffectsManager {
         }
     }
 }
+
+impl ScreenSpaceEffectsManager {
+    pub(crate) fn set_ssgi_scene_color_view(&mut self, view: TextureView) {
+        if let Some(renderer) = self.ssgi_renderer.as_mut() {
+            renderer.set_scene_color_view(view);
+        }
+    }
+    pub(crate) fn clear_scene_color_overrides(&mut self) {
+        if let Some(renderer) = self.ssgi_renderer.as_mut() {
+            renderer.clear_scene_color_override();
+        }
+        if let Some(renderer) = self.ssr_renderer.as_mut() {
+            renderer.clear_scene_color_override();
+        }
+    }
+}
+
+impl ScreenSpaceEffectsManager {
+    pub(crate) fn set_ssao_contact_kind(
+        &mut self,
+        device: &Device,
+        kind: TextureView,
+    ) -> RenderResult<()> {
+        self.ssao_renderer
+            .as_mut()
+            .ok_or_else(|| {
+                crate::core::error::RenderError::Render(
+                    "GTAO must be enabled before contact-kind configuration".into(),
+                )
+            })?
+            .configure_contact_geometry(device, kind)
+    }
+}
+
+impl ScreenSpaceEffectsManager {
+    pub(crate) fn configure_concordia_gtao(&mut self, device: &Device) -> RenderResult<()> {
+        if let Some(renderer) = self.ssgi_renderer.as_mut() {
+            renderer.configure_concordia_projection(device)?;
+        }
+        if let Some(renderer) = self.ssr_renderer.as_mut() {
+            renderer.configure_concordia_projection(device)?;
+        }
+        if let Some(renderer) = self.ssao_renderer.as_mut() {
+            renderer.configure_concordia_gtao(device)?;
+        }
+        Ok(())
+    }
+}

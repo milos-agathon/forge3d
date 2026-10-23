@@ -3,6 +3,7 @@ use super::super::*;
 #[cfg(feature = "extension-module")]
 #[pyclass(module = "forge3d._forge3d", name = "Frame")]
 pub struct Frame {
+    readback_counter: Option<Arc<std::sync::atomic::AtomicUsize>>,
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
     texture: Arc<crate::core::resource_tracker::TrackedTexture>,
@@ -21,6 +22,7 @@ impl Frame {
         format: wgpu::TextureFormat,
     ) -> Self {
         Self {
+            readback_counter: None,
             device,
             queue,
             texture: texture.into(),
@@ -30,14 +32,26 @@ impl Frame {
         }
     }
 
+    pub(crate) fn with_readback_counter(
+        mut self,
+        counter: Arc<std::sync::atomic::AtomicUsize>,
+    ) -> Self {
+        self.readback_counter = Some(counter);
+        self
+    }
+
     pub(crate) fn read_tight_bytes(&self) -> anyhow::Result<Vec<u8>> {
-        read_texture_tight(
+        let result = read_texture_tight(
             &self.device,
             &self.queue,
             &self.texture,
             (self.width, self.height),
             self.format,
-        )
+        )?;
+        if let Some(counter) = &self.readback_counter {
+            counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        Ok(result)
     }
 
     pub(crate) fn read_rgb_u8(&self) -> anyhow::Result<ndarray::Array3<u8>> {
@@ -249,8 +263,8 @@ impl Frame {
         let arr =
             ndarray::Array3::from_shape_vec((self.height as usize, self.width as usize, 4), data)
                 .map_err(|_| {
-                    PyRuntimeError::new_err("failed to reshape RGBA buffer into numpy array")
-                })?;
+                PyRuntimeError::new_err("failed to reshape RGBA buffer into numpy array")
+            })?;
         Ok(arr.into_pyarray_bound(py).into_gil_ref())
     }
 

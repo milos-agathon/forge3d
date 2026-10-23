@@ -159,6 +159,7 @@ impl PointRenderer {
             pick_uniform_buffer,
             pick_bind_group,
             oit_pipeline,
+            oit_shader_label: "point_instanced.wgsl",
             instance_capacity: 0,
             debug_flags: DebugFlags::default(),
             texture_atlas: None,

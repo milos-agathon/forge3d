@@ -8,6 +8,50 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{mpsc, Arc};
 use wgpu::{Device, Extent3d, Queue, Texture, TextureAspect, TextureFormat};
 
+// Counts actual texture-to-buffer transfers on this render thread. Nested
+// captures observe the same transfers; a guard restores the scope on errors.
+thread_local! {
+    static IMAGE_TRANSFERS: std::cell::RefCell<Vec<Arc<std::sync::atomic::AtomicUsize>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+pub(crate) struct ImageTransferScope {
+    counter: Arc<std::sync::atomic::AtomicUsize>,
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+impl ImageTransferScope {
+    pub(crate) fn begin() -> Self {
+        let counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        IMAGE_TRANSFERS.with(|scopes| scopes.borrow_mut().push(counter.clone()));
+        Self {
+            counter,
+            _thread: std::marker::PhantomData,
+        }
+    }
+
+    pub(crate) fn count(&self) -> usize {
+        self.counter.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for ImageTransferScope {
+    fn drop(&mut self) {
+        IMAGE_TRANSFERS.with(|scopes| {
+            scopes
+                .borrow_mut()
+                .retain(|counter| !Arc::ptr_eq(counter, &self.counter));
+        });
+    }
+}
+
+fn record_image_transfer() {
+    IMAGE_TRANSFERS.with(|scopes| {
+        for counter in scopes.borrow().iter() {
+            counter.fetch_add(1, Ordering::Relaxed);
+        }
+    });
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct ReadbackRequest {
     pub layout: TransferLayout,
@@ -109,6 +153,7 @@ impl StagingLease {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("texture-readback-copy"),
         });
+        record_image_transfer();
         encoder.copy_texture_to_buffer(
             wgpu::ImageCopyTexture {
                 texture,

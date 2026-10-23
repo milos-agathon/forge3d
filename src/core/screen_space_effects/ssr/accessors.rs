@@ -16,7 +16,7 @@ impl SsrRenderer {
         self.scene_color_override = Some(view);
     }
 
-    pub(super) fn clear_scene_color_override(&mut self) {
+    pub(crate) fn clear_scene_color_override(&mut self) {
         self.scene_color_override = None;
     }
 
@@ -76,7 +76,7 @@ impl SsrRenderer {
     }
 
     pub fn set_environment_texture(&mut self, device: &Device, env_texture: &Texture) {
-        println!("[SSR] Updating environment texture");
+        log::debug!("[SSR] Updating environment texture");
         let view = env_texture.create_view(&TextureViewDescriptor {
             label: Some("p5.ssr.env.view"),
             format: None,

@@ -68,7 +68,9 @@ impl CloudShadowRenderer {
                 sample_count: 1,
                 dimension: TextureDimension::D2,
                 format: TextureFormat::Rgba8Unorm,
-                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                usage: TextureUsages::STORAGE_BINDING
+                    | TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_SRC,
                 view_formats: &[],
             },
         )?;
@@ -132,7 +134,7 @@ impl CloudShadowRenderer {
         });
 
         // Create compute pipeline
-        let compute_pipeline = crate::core::shader_registry::create_compute_pipeline_scoped(
+        let compute_pipeline = crate::core::shader_registry::try_create_compute_pipeline_scoped(
             device,
             &ComputePipelineDescriptor {
                 label: Some("cloud_shadow_pipeline"),
@@ -140,7 +142,8 @@ impl CloudShadowRenderer {
                 module: &shader,
                 entry_point: "cs_generate_cloud_shadows",
             },
-        );
+        )
+        .map_err(crate::core::error::RenderError::Render)?;
 
         let mut uniforms = CloudShadowUniforms::default();
         uniforms.texture_size = [texture_size as f32, texture_size as f32];
@@ -325,7 +328,9 @@ impl CloudShadowRenderer {
                 sample_count: 1,
                 dimension: TextureDimension::D2,
                 format: TextureFormat::Rgba8Unorm,
-                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                usage: TextureUsages::STORAGE_BINDING
+                    | TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_SRC,
                 view_formats: &[],
             },
         )?;

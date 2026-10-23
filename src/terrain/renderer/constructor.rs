@@ -695,6 +695,10 @@ impl TerrainScene {
         };
 
         Ok(Self {
+            concordia: None,
+            concordia_report: String::new(),
+            concordia_geometry_signature: None,
+            concordia_readbacks: None,
             device,
             queue,
             adapter,
@@ -853,6 +857,8 @@ impl TerrainScene {
             scatter_renderer,
             #[cfg(feature = "enable-gpu-instancing")]
             scatter_renderer_sample_count: 1,
+            #[cfg(feature = "enable-gpu-instancing")]
+            scatter_concordia: false,
             #[cfg(feature = "enable-gpu-instancing")]
             scatter_batches: Vec::new(),
             #[cfg(feature = "enable-gpu-instancing")]

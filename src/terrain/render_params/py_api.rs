@@ -10,8 +10,17 @@ impl TerrainRenderParams {
 
     /// Project terrain UV, raw height and an elevation offset through the exact
     /// camera and height transform used by the mesh/flat-clipmap terrain pass.
-    pub fn project_terrain_points(&self, points: Vec<[f64; 4]>) -> PyResult<Vec<Option<[f64; 3]>>> {
-        let (_, view, proj) = crate::terrain::renderer::TerrainScene::build_camera_matrices(self);
+    #[pyo3(signature = (points, shared_frame=false))]
+    pub fn project_terrain_points(
+        &self,
+        points: Vec<[f64; 4]>,
+        shared_frame: bool,
+    ) -> PyResult<Vec<Option<[f64; 3]>>> {
+        let (_, view, proj) = if shared_frame {
+            crate::terrain::renderer::interactive::camera_matrices(self)
+        } else {
+            crate::terrain::renderer::TerrainScene::build_camera_matrices(self)
+        };
         let (view, proj) = (view.as_dmat4(), proj.as_dmat4());
         points
             .into_iter()
@@ -33,13 +42,15 @@ impl TerrainRenderParams {
     }
 
     /// Rasterize the DEM triangles once without crossing Python for every cell.
-    #[pyo3(signature = (heightmap, size_px, nodata_height_below=None))]
+    #[pyo3(signature = (heightmap, size_px, nodata_height_below=None, occluders=None, shared_frame=false))]
     pub fn project_terrain_depth<'py>(
         &self,
         py: Python<'py>,
         heightmap: numpy::PyReadonlyArray2<'py, f32>,
         size_px: (usize, usize),
         nodata_height_below: Option<f32>,
+        occluders: Option<Vec<[[f64; 3]; 3]>>,
+        shared_frame: bool,
     ) -> PyResult<Bound<'py, numpy::PyArray2<f32>>> {
         let dem = heightmap.as_array();
         let (rows, cols) = dem.dim();
@@ -52,20 +63,45 @@ impl TerrainRenderParams {
         let count = width
             .checked_mul(height)
             .ok_or_else(|| PyValueError::new_err("depth viewport overflow"))?;
-        let (_, view, proj) = crate::terrain::renderer::TerrainScene::build_camera_matrices(self);
+        let (_, view, proj) = if shared_frame {
+            crate::terrain::renderer::interactive::camera_matrices(self)
+        } else {
+            crate::terrain::renderer::TerrainScene::build_camera_matrices(self)
+        };
         let (view, proj) = (view.as_dmat4(), proj.as_dmat4());
+        // The production procedural mesh samples a bilinear DEM on a 512
+        // vertex grid, with the (0,0)-(1,1) diagonal. A DEM-cell triangle
+        // approximation is not coplanar with that mesh. Use the production
+        // sampling/tessellation for shared-frame cartographic visibility.
+        let (raster_rows, raster_cols) = if shared_frame {
+            (512, 512)
+        } else {
+            (rows, cols)
+        };
+        let sample = |row: usize, col: usize| -> f64 {
+            let x = col as f64 / (raster_cols - 1) as f64 * (cols - 1) as f64;
+            let y = row as f64 / (raster_rows - 1) as f64 * (rows - 1) as f64;
+            let x0 = x.floor() as usize;
+            let y0 = y.floor() as usize;
+            let x1 = (x0 + 1).min(cols - 1);
+            let y1 = (y0 + 1).min(rows - 1);
+            let (tx, ty) = (x - x0 as f64, y - y0 as f64);
+            let top = f64::from(dem[[y0, x0]]) * (1.0 - tx) + f64::from(dem[[y0, x1]]) * tx;
+            let bottom = f64::from(dem[[y1, x0]]) * (1.0 - tx) + f64::from(dem[[y1, x1]]) * tx;
+            top * (1.0 - ty) + bottom * ty
+        };
         // Only two projected rows are live, independent of DEM size.
-        let mut previous = Vec::with_capacity(cols);
-        let mut current = Vec::with_capacity(cols);
+        let mut previous = Vec::with_capacity(raster_cols);
+        let mut current = Vec::with_capacity(raster_cols);
         let mut depth = vec![1.0f32; count];
-        for row in 0..rows {
+        for row in 0..raster_rows {
             current.clear();
-            for col in 0..cols {
+            for col in 0..raster_cols {
                 let value = self.project_point(
                     [
-                        col as f64 / (cols - 1) as f64,
-                        row as f64 / (rows - 1) as f64,
-                        f64::from(dem[[row, col]]),
+                        col as f64 / (raster_cols - 1) as f64,
+                        row as f64 / (raster_rows - 1) as f64,
+                        sample(row, col),
                         0.0,
                     ],
                     view,
@@ -80,15 +116,25 @@ impl TerrainRenderParams {
                 }));
             }
             if row > 0 {
-                for col in 0..cols - 1 {
-                    for indices in [
-                        [(row - 1, col), (row - 1, col + 1), (row, col)],
-                        [(row - 1, col + 1), (row, col + 1), (row, col)],
-                    ] {
+                for col in 0..raster_cols - 1 {
+                    let triangles = if shared_frame {
+                        [
+                            [(row - 1, col), (row - 1, col + 1), (row, col + 1)],
+                            [(row - 1, col), (row, col + 1), (row, col)],
+                        ]
+                    } else {
+                        [
+                            [(row - 1, col), (row - 1, col + 1), (row, col)],
+                            [(row - 1, col + 1), (row, col + 1), (row, col)],
+                        ]
+                    };
+                    for indices in triangles {
                         // Fully nodata triangles leave the renderer's holes empty.
-                        if nodata_height_below
-                            .is_some_and(|limit| indices.iter().all(|&(y, x)| dem[[y, x]] < limit))
-                        {
+                        if nodata_height_below.is_some_and(|limit| {
+                            indices
+                                .iter()
+                                .all(|&(y, x)| sample(y, x) < f64::from(limit))
+                        }) {
                             continue;
                         }
                         let triangle =
@@ -106,6 +152,28 @@ impl TerrainRenderParams {
             }
             std::mem::swap(&mut previous, &mut current);
         }
+        for triangle in occluders.unwrap_or_default() {
+            if !triangle.iter().flatten().all(|v| v.is_finite()) {
+                return Err(PyValueError::new_err(
+                    "occluder triangles must be finite world positions",
+                ));
+            }
+            let triangle = triangle.map(|point| {
+                let clip = proj * view * glam::DVec3::from_array(point).extend(1.0);
+                if clip.w <= 0.0 {
+                    return None;
+                }
+                let ndc = clip.truncate() / clip.w;
+                Some([
+                    (ndc.x + 1.0) * width as f64 * 0.5,
+                    (1.0 - ndc.y) * height as f64 * 0.5,
+                    ndc.z,
+                ])
+            });
+            if let [Some(a), Some(b), Some(c)] = triangle {
+                super::projection::raster_triangle(&mut depth, width, height, [a, b, c]);
+            }
+        }
         use numpy::IntoPyArray;
         let array = ndarray::Array2::from_shape_vec((height, width), depth)
             .map_err(|error| PyValueError::new_err(error.to_string()))?;
@@ -113,10 +181,12 @@ impl TerrainRenderParams {
     }
 
     /// Recover the visible terrain UV at each depth pixel using the same camera.
+    #[pyo3(signature = (depth, shared_frame=false))]
     pub fn unproject_terrain_depth<'py>(
         &self,
         py: Python<'py>,
         depth: numpy::PyReadonlyArray2<'py, f32>,
+        shared_frame: bool,
     ) -> PyResult<Bound<'py, numpy::PyArray3<f32>>> {
         let depth = depth.as_array();
         let (height, width) = depth.dim();
@@ -130,7 +200,11 @@ impl TerrainRenderParams {
                 "unprojection requires finite normalized device depth",
             ));
         }
-        let (_, view, proj) = crate::terrain::renderer::TerrainScene::build_camera_matrices(self);
+        let (_, view, proj) = if shared_frame {
+            crate::terrain::renderer::interactive::camera_matrices(self)
+        } else {
+            crate::terrain::renderer::TerrainScene::build_camera_matrices(self)
+        };
         let inverse = (proj.as_dmat4() * view.as_dmat4()).inverse();
         let mut uv = ndarray::Array3::from_elem((height, width, 2), f32::NAN);
         for row in 0..height {

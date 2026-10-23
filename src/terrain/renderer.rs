@@ -37,6 +37,7 @@ mod draw;
 mod geometry;
 mod height_ao;
 pub(crate) use super::realtime_media as media;
+pub(crate) mod interactive;
 mod msaa;
 mod offline;
 #[cfg(all(feature = "enable-globe", feature = "extension-module"))]
@@ -61,8 +62,8 @@ pub(crate) mod visibility_buffer;
 mod water_reflection;
 
 pub(crate) use self::core::is_yup_camera_mode;
-pub use self::core::{TerrainRenderer, TerrainScene, ViewerTerrainData};
 pub(crate) use self::core::is_north_up_camera_mode;
+pub use self::core::{TerrainRenderer, TerrainScene, ViewerTerrainData};
 #[cfg(feature = "enable-globe")]
 pub(crate) use self::orbis_globe_background::ORBIS_EARTH_TEXTURE_MAX_WIDTH;
 

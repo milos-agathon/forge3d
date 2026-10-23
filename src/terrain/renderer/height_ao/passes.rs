@@ -12,6 +12,31 @@ impl TerrainScene {
         params: &render_params::TerrainRenderParams,
         decoded: &render_params::DecodedTerrainSettings,
     ) -> Result<bool> {
+        self.compute_height_ao_pass_with_pipeline(
+            encoder,
+            heightmap_view,
+            internal_width,
+            internal_height,
+            width,
+            height,
+            params,
+            decoded,
+            None,
+        )
+    }
+
+    pub(in crate::terrain::renderer) fn compute_height_ao_pass_with_pipeline(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        heightmap_view: &wgpu::TextureView,
+        internal_width: u32,
+        internal_height: u32,
+        width: u32,
+        height: u32,
+        params: &render_params::TerrainRenderParams,
+        decoded: &render_params::DecodedTerrainSettings,
+        pipeline: Option<&wgpu::ComputePipeline>,
+    ) -> Result<bool> {
         if !decoded.height_ao.enabled {
             return Ok(false);
         }
@@ -89,8 +114,12 @@ impl TerrainScene {
                 label: Some("height_ao.compute_pass"),
                 timestamp_writes: None,
             });
-            crate::core::shader_registry::record_shader_use("heightfield_ao.wgsl");
-            compute_pass.set_pipeline(&self.height_ao_compute_pipeline);
+            crate::core::shader_registry::record_shader_use(if pipeline.is_some() {
+                "concordia.height_ao.shader"
+            } else {
+                "heightfield_ao.wgsl"
+            });
+            compute_pass.set_pipeline(pipeline.unwrap_or(&self.height_ao_compute_pipeline));
             compute_pass.set_bind_group(0, &ao_bind_group, &[]);
             compute_pass.dispatch_workgroups((ao_width + 7) / 8, (ao_height + 7) / 8, 1);
         }
