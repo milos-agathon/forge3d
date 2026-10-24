@@ -36,7 +36,7 @@ use forge3d::path_tracing::hybrid_compute::{
     AlbedoSampling, FusedRenderDesc, FusedRenderOutput, FusedTerrainDesc, HybridPathTracer,
     MinMaxPrecision, TerrainAlbedoMap, TerrainPtScene,
 };
-use forge3d::splat::bvh::Aabb;
+use forge3d::splat::bvh::{blas_node_bound, Aabb, FusionBvhNode};
 use forge3d::splat::fixture::{FixtureManifest, FixtureScene};
 use forge3d::splat::fusion::{
     FusedScene, FusionParams, PagingPolicy, REQUIRED_STORAGE_BUFFERS_PER_STAGE,
@@ -46,8 +46,9 @@ use forge3d::splat::kernel::{
 };
 use forge3d::splat::load_gaussian_splats;
 use forge3d::splat::stream::{
-    write_synthetic_point_field, CopcPageSource, DecodedPage, PageKind, PageSource, PageStoreFile,
-    PageStoreWriter, PointCloudFrame, SplatCloudSource, SyntheticFieldDesc,
+    write_synthetic_point_field, CopcPageSource, DecodedPage, InvCovGpu, PageKind, PageSource,
+    PageStoreFile, PageStoreWriter, PointCloudFrame, PointGpu, SplatCloudSource, SplatGpu,
+    SyntheticFieldDesc,
 };
 use forge3d::splat::surfel::{oct_decode, SURFEL_SPHERE};
 use forge3d::splat::GaussianSplatCloud;
@@ -609,6 +610,83 @@ fn test_splat_fusion_occlusion() {
     assert!(fused.peak_total_bytes <= BUDGET_BYTES);
     assert!(fused.tracker_peak_host_visible_bytes <= BUDGET_BYTES);
     assert!(fused.paging.pool_bytes <= BUDGET_BYTES / 2);
+
+    // The 512 MiB gate is a statement about the residency pool: how many
+    // slots it has, what each slot costs, and therefore what a full resident
+    // set costs. `pool_bytes` alone cannot catch that, because it is
+    // `bvh.size() + page table + the record buffers`, and those record
+    // buffers are sized from `splat_slots`/`point_slots` at construction — a
+    // slot count that quietly doubled would still leave `pool_bytes` well
+    // under any fixed ceiling until the buffers were actually allocated.
+    //
+    // So the pool's capacity is derived here, independently, from the
+    // parameters, and checked against the budget. Note that this is
+    // `slots * what a slot costs`, computed from the parameters rather than
+    // read back from an allocation — so it moves the moment the sizing
+    // formula moves, and it does not depend on the buffers being allocated
+    // at all. A splat slot costs three allocations — SoA records, inverse
+    // covariances and its slice of the BVH buffer — and a point slot costs
+    // two, its records and its BVH slice. That BVH slice is the largest of
+    // them by far: `blas_node_bound` gives 2 nodes per 4096 primitives at
+    // 16 B each, 128 KiB per slot, against 48 KiB of records.
+    let capacity = |fused: &FusedRenderOutput| {
+        // A non-empty pool's buffers: splat SoA, inverse covariances and
+        // point records, each `slots * page_capacity` entries of its own
+        // stride. (`FusedGpu::new` floors the record count at 1 for an empty
+        // pool so the buffer layout stays valid; this scene has pages of both
+        // kinds, so both counts are non-zero here.)
+        assert!(params.splat_slots > 0 && params.point_slots > 0);
+        let splat = u64::from(params.splat_slots)
+            * u64::from(params.page_capacity)
+            * (std::mem::size_of::<SplatGpu>() as u64 + std::mem::size_of::<InvCovGpu>() as u64);
+        let points = u64::from(params.point_slots)
+            * u64::from(params.page_capacity)
+            * std::mem::size_of::<PointGpu>() as u64;
+        // Every slot also reserves its own BLAS inside the BVH buffer.
+        let node_bytes = std::mem::size_of::<FusionBvhNode>() as u64;
+        let blas = u64::from(params.splat_slots + params.point_slots)
+            * blas_node_bound(params.page_capacity as usize) as u64
+            * node_bytes;
+        // The scene's own BVH, its page table and the readback staging ride
+        // along with the pool.
+        let overhead = fused.paging.pool_bytes - (splat + points + blas);
+        (splat + points + blas, overhead)
+    };
+    let (resident_if_full, overhead) = capacity(&fused);
+    eprintln!(
+        "residency pool: {} slots x {} primitives = {} B ({:.1} MiB) resident if full, plus \
+         {} B ({:.1} MiB) of TLAS/page-table overhead = {} B ({:.1} MiB) total",
+        params.splat_slots + params.point_slots,
+        params.page_capacity,
+        resident_if_full,
+        resident_if_full as f64 / 1048576.0,
+        overhead,
+        overhead as f64 / 1048576.0,
+        resident_if_full + overhead,
+        (resident_if_full + overhead) as f64 / 1048576.0
+    );
+    // A fully resident pool must fit the budget. Note where the threshold
+    // sits: at the budget itself, not at the half-budget ceiling on line 612
+    // that the allocated pool happens to sit under. A pool that reaches this
+    // number has already run the render over its own 512 MiB limit, so the
+    // two gates are not interchangeable — this one is the capacity the sizing
+    // formula would hand out, the one above is what was actually allocated.
+    assert!(
+        resident_if_full <= BUDGET_BYTES,
+        "a fully resident pool costs {} B, over the {} B budget: {} slots x {} primitives",
+        resident_if_full,
+        BUDGET_BYTES,
+        params.splat_slots + params.point_slots,
+        params.page_capacity
+    );
+    // The remainder is what the scene itself holds: TLAS, page table and
+    // readback staging. Splitting it off is an identity by construction, so
+    // it is printed above rather than asserted; what is asserted is that it
+    // is a real split and not a rounding sliver.
+    assert!(
+        overhead > 0 && overhead < resident_if_full,
+        "overhead {overhead} B does not split from the {resident_if_full} B of pool capacity"
+    );
 
     // --- Single integrator: the ReSTIR chain carried valid reservoirs ---
     assert!(fused.reservoir_valid_count > 0);
