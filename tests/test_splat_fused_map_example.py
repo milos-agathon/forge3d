@@ -66,7 +66,8 @@ def _redirect_home(monkeypatch, tmp_path):
 
     ``Path.home()`` reads ``HOME`` on POSIX but ``USERPROFILE`` on Windows, so
     setting only ``HOME`` leaves the test writing into — and deleting from —
-    the real ``~/.forge3d/datasets``. Both are set.
+    the real ``~/.forge3d/datasets``. All three are redirected: both variables
+    and the method itself.
     """
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))

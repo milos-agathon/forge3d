@@ -1173,6 +1173,15 @@ def test_splat_fused_env_map_inventory_transition_is_exact():
     assert (len(base), _inventory_digest(base)) == (
         transition["base_count"], transition["base_digest"],
     )
+    # The pair above is measured in scan order, so its digests are not
+    # numerically comparable with the chain's — and `base` holds the same 1861
+    # sites as `concordia`'s result under a different digest. Normalised the
+    # way the chain normalises, `base` must hash to that result exactly: this
+    # is what makes "bridged onto main" a check rather than a claim.
+    concordia = _ledger_data()["concordia"]
+    normalised = _undo_p1_inventory_transitions(base)
+    assert len(normalised) == concordia["result_count"]
+    assert _inventory_digest(normalised) == concordia["result_digest"]
     added = list(map(tuple, transition["added"]))
     assert len(added) == 4 and len(set(added)) == 4
     assert transition["base_count"] + len(added) == transition["result_count"]

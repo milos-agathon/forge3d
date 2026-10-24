@@ -229,7 +229,7 @@ def _resolve_dem_path(path: Path) -> Path:
     if cached.stat().st_size < 1000:
         cached.unlink(missing_ok=True)
         raise RuntimeError(f"downloaded file for {path.name} is too small (still a pointer?)")
-    if expected is not None and _sha256_file(cached) != expected:
+    if _sha256_file(cached) != expected:
         cached.unlink(missing_ok=True)
         raise RuntimeError(
             f"downloaded {path.name} does not match the SHA256 in its LFS pointer"
