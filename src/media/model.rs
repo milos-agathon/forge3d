@@ -145,7 +145,9 @@ impl Phase {
         } else {
             [1.0, 0.0, 0.0]
         };
-        let tangent = normalize(cross(helper, w)).expect("helper is not parallel");
+        let tangent = normalize(cross(helper, w)).ok_or_else(|| {
+            MediaError::InvalidTransport("phase frame must have a finite, nonzero tangent".into())
+        })?;
         let bitangent = cross(w, tangent);
         let direction = add(
             add(
@@ -263,7 +265,7 @@ impl Medium {
     /// R16 storage bits, transforms, bounds, mapping and density parameters),
     /// both coefficient spectra, and the phase. `version` is the caller-owned
     /// resource generation and is deliberately part of the returned identity.
-    pub fn identity(&self, version: u64) -> MediumIdentity {
+    pub fn identity(&self, version: u64) -> Result<MediumIdentity, MediaError> {
         medium_identity(self, version)
     }
 

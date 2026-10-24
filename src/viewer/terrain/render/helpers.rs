@@ -474,16 +474,13 @@ impl ViewerTerrainScene {
             .or(self.terrain_ibl_fallback_brdf_view.as_ref())
             .unwrap();
         let ibl_sampler = self.terrain_ibl_sampler.as_ref().unwrap();
-        let media_light_transmittance_view = self
-            .canonical_media_pass
-            .as_ref()
-            .map(crate::terrain::realtime_media::ViewerMediaPass::light_transmittance_view)
-            .unwrap_or_else(|| {
-                self.media_light_transmittance_fallback
+        let media_light_transmittance_view = match self.canonical_media_pass.as_ref() {
+            Some(pass) => pass.light_transmittance_view(),
+            None => self.media_light_transmittance_fallback
                     .as_ref()
-                    .expect("media transmittance fallback was created")
-                    .create_view(&wgpu::TextureViewDescriptor::default())
-            });
+                    .ok_or_else(|| anyhow::anyhow!("media transmittance fallback is unavailable"))?
+                    .create_view(&wgpu::TextureViewDescriptor::default()),
+        };
         let media_cloudlight_view = self.canonical_media_pass.as_ref()
             .map(crate::terrain::realtime_media::ViewerMediaPass::surface_cloudlight_view);
 

@@ -235,8 +235,8 @@ fn procedural_identity_and_bound_are_deterministic() {
         mapping: mapping(2.0),
     });
     let medium = medium(density.clone());
-    assert_eq!(density.identity(3), density.identity(3));
-    assert_ne!(density.identity(3), density.identity(4));
+    assert_eq!(density.identity(3).unwrap(), density.identity(3).unwrap());
+    assert_ne!(density.identity(3).unwrap(), density.identity(4).unwrap());
     let majorant = MajorantGrid::construct(&medium, 3).unwrap();
     let points = (0..1000).map(|pixel| {
         let id = SampleIdentity {
@@ -455,8 +455,8 @@ fn medium_identity_is_complete_public_and_versioned() {
         homogeneous(0.75),
     )
     .unwrap();
-    assert_eq!(base.identity(11), base.identity(11));
-    assert_ne!(base.identity(11), base.identity(12));
+    assert_eq!(base.identity(11).unwrap(), base.identity(11).unwrap());
+    assert_ne!(base.identity(11).unwrap(), base.identity(12).unwrap());
     for changed in [
         Medium::new(
             [0.11, 0.2, 0.3],
@@ -480,10 +480,10 @@ fn medium_identity_is_complete_public_and_versioned() {
         )
         .unwrap(),
     ] {
-        assert_ne!(base.identity(11), changed.identity(11));
+        assert_ne!(base.identity(11).unwrap(), changed.identity(11).unwrap());
     }
     let majorant = MajorantGrid::construct(&base, 11).unwrap();
-    assert_eq!(majorant.medium_identity(), base.identity(11));
+    assert_eq!(majorant.medium_identity(), base.identity(11).unwrap());
 }
 
 struct EmptyReferenceScene;

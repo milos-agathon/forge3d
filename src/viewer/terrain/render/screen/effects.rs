@@ -97,7 +97,7 @@ impl ViewerTerrainScene {
             };
             self.post_process
                 .as_mut()
-                .expect("canonical media prepares post-process pass")
+                .ok_or_else(|| anyhow::anyhow!("canonical media post-process pass is unavailable"))?
                 .apply_from_linear_hdr(
                     encoder,
                     &self.queue,
@@ -117,7 +117,7 @@ impl ViewerTerrainScene {
         self.canonical_media_pass = Some(pass);
         self.post_process
             .as_mut()
-            .expect("canonical media prepares post-process pass")
+            .ok_or_else(|| anyhow::anyhow!("canonical media post-process pass is unavailable"))?
             .intermediate_view = Some(input_view);
         result
     }

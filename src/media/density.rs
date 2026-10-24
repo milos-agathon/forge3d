@@ -291,12 +291,14 @@ impl DensityField {
         outward_mul_nonnegative(authored, self.mapping().physical_density_per_authored_unit)
     }
 
-    pub fn identity(&self, version: u64) -> DensityIdentity {
-        let bytes = serde_json::to_vec(self).expect("density serialization cannot fail");
-        DensityIdentity {
+    pub fn identity(&self, version: u64) -> Result<DensityIdentity, MediaError> {
+        let bytes = serde_json::to_vec(self).map_err(|error| {
+            MediaError::InvalidDensity(format!("density identity serialization failed: {error}"))
+        })?;
+        Ok(DensityIdentity {
             version,
             digest: Sha256::digest(bytes).into(),
-        }
+        })
     }
 
     pub(crate) fn mapping(&self) -> DensityMapping {
@@ -308,12 +310,14 @@ impl DensityField {
     }
 }
 
-pub(super) fn medium_identity(medium: &Medium, version: u64) -> MediumIdentity {
-    let bytes = serde_json::to_vec(medium).expect("validated medium serialization cannot fail");
-    MediumIdentity {
+pub(super) fn medium_identity(medium: &Medium, version: u64) -> Result<MediumIdentity, MediaError> {
+    let bytes = serde_json::to_vec(medium).map_err(|error| {
+        MediaError::InvalidTransport(format!("medium identity serialization failed: {error}"))
+    })?;
+    Ok(MediumIdentity {
         version,
         digest: Sha256::digest(bytes).into(),
-    }
+    })
 }
 
 fn validate_authored(value: f32) -> Result<(), MediaError> {
@@ -507,8 +511,8 @@ impl MajorantGrid {
     pub fn construct(medium: &Medium, version: u64) -> Result<Self, MediaError> {
         medium.validate()?;
         let sigma_t_max = medium.sigma_t().max_component();
-        let density_identity = medium.density().identity(version);
-        let extinction_identity = medium.identity(version);
+        let density_identity = medium.density().identity(version)?;
+        let extinction_identity = medium.identity(version)?;
         let (bounds, dimensions, authored, proof) = match medium.density() {
             DensityField::Homogeneous(field) => (
                 None,
@@ -584,7 +588,7 @@ impl MajorantGrid {
 
     pub fn validate_for(&self, medium: &Medium) -> Result<(), MediaError> {
         medium.validate()?;
-        if self.medium_identity != medium.identity(self.medium_identity.version) {
+        if self.medium_identity != medium.identity(self.medium_identity.version)? {
             return Err(MediaError::InvalidMajorant(
                 "majorant belongs to a different extinction model".into(),
             ));

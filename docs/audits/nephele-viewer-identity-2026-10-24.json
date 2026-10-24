@@ -1,0 +1,368 @@
+{
+  "parent_head": "3f349648bc14882d74a1205bb1f606bc77a13e1a",
+  "approval": {
+    "words": "Approved\u2014apply the exact batch",
+    "applied_patch_sha256": "4e7ac39b6d8e676acf4330eee547c8b97f4b0c81b32f5ed9aa40239e8df8e26f",
+    "previous_head": "3f349648bc14882d74a1205bb1f606bc77a13e1a"
+  },
+  "approved_public_contracts": [
+    {
+      "path": "src/media/density.rs",
+      "kind": "public Rust contract",
+      "old": "    pub fn identity(&self, version: u64) -> DensityIdentity {\n        let bytes = serde_json::to_vec(self).expect(\"density serialization cannot fail\");\n        DensityIdentity {\n            version,\n            digest: Sha256::digest(bytes).into(),\n        }\n    }",
+      "new": "    pub fn identity(&self, version: u64) -> Result<DensityIdentity, MediaError> {\n        let bytes = serde_json::to_vec(self).map_err(|error| {\n            MediaError::InvalidDensity(format!(\"density identity serialization failed: {error}\"))\n        })?;\n        Ok(DensityIdentity {\n            version,\n            digest: Sha256::digest(bytes).into(),\n        })\n    }",
+      "occurrences": 1
+    },
+    {
+      "path": "src/media/model.rs",
+      "kind": "public Rust contract",
+      "old": "pub fn identity(&self, version: u64) -> MediumIdentity",
+      "new": "pub fn identity(&self, version: u64) -> Result<MediumIdentity, MediaError>",
+      "occurrences": 1
+    }
+  ],
+  "approved_test_changes": [
+    {
+      "path": "src/terrain/renderer/media.rs",
+      "kind": "protected test setup",
+      "old": "let medium_identity = medium.identity(1);",
+      "new": "let medium_identity = medium.identity(1).unwrap();",
+      "occurrences": 1
+    },
+    {
+      "path": "src/media/tests.rs",
+      "kind": "protected existing test assertion; same identity comparison",
+      "old": "assert_eq!(density.identity(3), density.identity(3));",
+      "new": "assert_eq!(density.identity(3).unwrap(), density.identity(3).unwrap());",
+      "occurrences": 1
+    },
+    {
+      "path": "src/media/tests.rs",
+      "kind": "protected existing test assertion; same identity comparison",
+      "old": "assert_ne!(density.identity(3), density.identity(4));",
+      "new": "assert_ne!(density.identity(3).unwrap(), density.identity(4).unwrap());",
+      "occurrences": 1
+    },
+    {
+      "path": "src/media/tests.rs",
+      "kind": "protected existing test assertion; same identity comparison",
+      "old": "assert_eq!(base.identity(11), base.identity(11));",
+      "new": "assert_eq!(base.identity(11).unwrap(), base.identity(11).unwrap());",
+      "occurrences": 1
+    },
+    {
+      "path": "src/media/tests.rs",
+      "kind": "protected existing test assertion; same identity comparison",
+      "old": "assert_ne!(base.identity(11), base.identity(12));",
+      "new": "assert_ne!(base.identity(11).unwrap(), base.identity(12).unwrap());",
+      "occurrences": 1
+    },
+    {
+      "path": "src/media/tests.rs",
+      "kind": "protected existing test assertion; same identity comparison",
+      "old": "assert_ne!(base.identity(11), changed.identity(11));",
+      "new": "assert_ne!(base.identity(11).unwrap(), changed.identity(11).unwrap());",
+      "occurrences": 1
+    },
+    {
+      "path": "src/media/tests.rs",
+      "kind": "protected existing test assertion; same identity comparison",
+      "old": "assert_eq!(majorant.medium_identity(), base.identity(11));",
+      "new": "assert_eq!(majorant.medium_identity(), base.identity(11).unwrap());",
+      "occurrences": 1
+    }
+  ],
+  "changes": [
+    {
+      "path": "src/media/density.rs",
+      "reason": "Return identity serialization errors and propagate them through majorant construction/validation.",
+      "sha256": "dae5b078157b307aec72dd72ff0a6822b00be7152fa9d05537cb4a0b1851d5b4"
+    },
+    {
+      "path": "src/media/model.rs",
+      "reason": "Propagate phase-frame errors and expose fallible medium identities.",
+      "sha256": "3e3ed66c0cb47109dd179198047aac9547038eec2d454bf983311aae1d3b6334"
+    },
+    {
+      "path": "src/media/lighting.rs",
+      "reason": "Return an environment error for a missing marginal CDF entry.",
+      "sha256": "30d040cdb6906f931c830e10ff8787c7215d0eacebba057a8ef2eacdd93cfb48"
+    },
+    {
+      "path": "src/media_py.rs",
+      "reason": "Propagate identity errors to Python; successful identity/repr values remain strings.",
+      "sha256": "4a292f5e6959159d34ae7cf4e78ecd9850cfc5e639a435a320f05fbca7f9d209"
+    },
+    {
+      "path": "src/media/tests.rs",
+      "reason": "Apply exactly the six approved successful-identity assertion adaptations.",
+      "sha256": "0c4beb02699455f8143e96cd662cb5ae476b6ba32b5b4a180a3179ab1fa01d27"
+    },
+    {
+      "path": "src/terrain/renderer/media.rs",
+      "reason": "Propagate identity errors and apply the one approved test setup adaptation.",
+      "sha256": "9176dd379cfa008b8415287bb2b1c805a8e08f489d0c98db0c61e203557826bf"
+    },
+    {
+      "path": "src/py_types/aov.rs",
+      "reason": "Reject a non-UTF-8 media output path instead of unwrapping it.",
+      "sha256": "98d620115998bbfbfe6d6f17bb62aa0fb821fcb8d159939220414f7560d087a7"
+    },
+    {
+      "path": "src/viewer/terrain/render/helpers.rs",
+      "reason": "Propagate an unavailable media transmittance fallback.",
+      "sha256": "f208747d7f4506fb6f45eb2090fcd53915d060573d5f9be34aaa23b80d0288d6"
+    },
+    {
+      "path": "src/viewer/terrain/render/offscreen/effects.rs",
+      "reason": "Propagate unavailable canonical post-processing state.",
+      "sha256": "6e7025a71dc1702c726f4ca4e1790f8431cf08408855c9a31f24d49660cd79f4"
+    },
+    {
+      "path": "src/viewer/terrain/render/screen/effects.rs",
+      "reason": "Propagate unavailable canonical post-processing state.",
+      "sha256": "e8e423fe45eff7176488919fe308a4fa5c6a92fffdf7308589496f3cb7941c9f"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "reason": "Document that density-grid camera-move latency has not been measured.",
+      "sha256": "4c8c1f73f6fe235f24652ecae38f44eff1eb8df51a5925e3a45e9f9b8564af5f"
+    },
+    {
+      "path": "docs/audits/nephele-dem-frame-time-2026-10-22.py",
+      "reason": "Carry the unmeasured camera-move limitation in future benchmark evidence.",
+      "sha256": "07ae25e9d6a7dc2195e7c1965492929bec4cfd19f659ba36e8ceaa2d07299d8f"
+    }
+  ],
+  "cpu_checks": [
+    {
+      "name": "fmt",
+      "args": [
+        "cargo",
+        "fmt",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.38375030003953725,
+      "counts": null,
+      "expected_previously_observed_tests": null,
+      "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+      "TEMP": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-24\\viewer-ratchet\\identity-approved\\temp",
+      "log": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-24\\viewer-ratchet\\identity-approved\\fmt.log"
+    },
+    {
+      "name": "media-rust",
+      "args": [
+        "cargo",
+        "test",
+        "--lib",
+        "--features",
+        "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+        "media::tests::",
+        "--",
+        "--nocapture"
+      ],
+      "exit_code": 0,
+      "seconds": 254.44294690003153,
+      "counts": [
+        56,
+        0,
+        0
+      ],
+      "expected_previously_observed_tests": 56,
+      "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+      "TEMP": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-24\\viewer-ratchet\\identity-approved\\temp",
+      "log": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-24\\viewer-ratchet\\identity-approved\\media-rust.log"
+    },
+    {
+      "name": "media-graph-rust",
+      "args": [
+        "cargo",
+        "test",
+        "--lib",
+        "--features",
+        "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+        "render_graph::tests::",
+        "--",
+        "--nocapture"
+      ],
+      "exit_code": 0,
+      "seconds": 1.7887020999914967,
+      "counts": [
+        5,
+        0,
+        0
+      ],
+      "expected_previously_observed_tests": 5,
+      "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+      "TEMP": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-24\\viewer-ratchet\\identity-approved\\temp",
+      "log": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-24\\viewer-ratchet\\identity-approved\\media-graph-rust.log"
+    },
+    {
+      "name": "media-leaf-keys-corrected-rust",
+      "args": [
+        "cargo",
+        "test",
+        "--lib",
+        "--features",
+        "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+        "terrain::renderer::draw::leaf_keys::tests::",
+        "--",
+        "--nocapture"
+      ],
+      "exit_code": 0,
+      "seconds": 1.6034414999885485,
+      "counts": [
+        2,
+        0,
+        0
+      ],
+      "expected_previously_observed_tests": 2,
+      "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+      "TEMP": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-24\\viewer-ratchet\\identity-approved\\temp",
+      "log": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-24\\viewer-ratchet\\identity-approved\\media-leaf-keys-corrected-rust.log"
+    },
+    {
+      "name": "viewer-rust",
+      "args": [
+        "cargo",
+        "test",
+        "--lib",
+        "--features",
+        "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+        "viewer::terrain::render::helpers::canonical_media_clip_tests::",
+        "--",
+        "--nocapture"
+      ],
+      "exit_code": 0,
+      "seconds": 1.2457081000320613,
+      "counts": [
+        3,
+        0,
+        0
+      ],
+      "expected_previously_observed_tests": 3,
+      "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+      "TEMP": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-24\\viewer-ratchet\\identity-approved\\temp",
+      "log": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-24\\viewer-ratchet\\identity-approved\\viewer-rust.log"
+    },
+    {
+      "name": "acceptance-clippy",
+      "args": [
+        "cargo",
+        "forge3d-clippy-acceptance"
+      ],
+      "exit_code": 0,
+      "seconds": 111.88126850000117,
+      "counts": null,
+      "expected_previously_observed_tests": null,
+      "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+      "TEMP": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-24\\viewer-ratchet\\identity-approved\\temp",
+      "log": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-24\\viewer-ratchet\\identity-approved\\acceptance-clippy.log"
+    }
+  ],
+  "zero_test_filter_attempt": [
+    {
+      "name": "media-leaf-keys-rust",
+      "args": [
+        "cargo",
+        "test",
+        "--lib",
+        "--features",
+        "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+        "nephele_media_graph_keys",
+        "--",
+        "--nocapture"
+      ],
+      "exit_code": 0,
+      "seconds": 1.4100974000175484,
+      "counts": [
+        0,
+        0,
+        0
+      ],
+      "expected_previously_observed_tests": 2,
+      "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+      "TEMP": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-24\\viewer-ratchet\\identity-approved\\temp",
+      "log": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-24\\viewer-ratchet\\identity-approved\\media-leaf-keys-rust.log"
+    }
+  ],
+  "source_checks": {
+    "main_counts": {
+      "gis": {
+        "panic": 0,
+        "unwrap": 8,
+        "expect": 6
+      },
+      "vector": {
+        "panic": 0,
+        "unwrap": 8,
+        "expect": 4
+      },
+      "labels": {
+        "panic": 0,
+        "unwrap": 10,
+        "expect": 3
+      },
+      "py_functions": {
+        "panic": 0,
+        "unwrap": 3,
+        "expect": 8
+      },
+      "terrain": {
+        "panic": 1,
+        "unwrap": 30,
+        "expect": 26
+      }
+    },
+    "current_counts": {
+      "gis": {
+        "panic": 0,
+        "unwrap": 8,
+        "expect": 6
+      },
+      "vector": {
+        "panic": 0,
+        "unwrap": 8,
+        "expect": 4
+      },
+      "labels": {
+        "panic": 0,
+        "unwrap": 10,
+        "expect": 3
+      },
+      "py_functions": {
+        "panic": 0,
+        "unwrap": 3,
+        "expect": 8
+      },
+      "terrain": {
+        "panic": 1,
+        "unwrap": 30,
+        "expect": 26
+      }
+    },
+    "new_source_paths": [],
+    "new_production_sites": {},
+    "f32": {
+      "sites": 1936,
+      "sha256": "8f9f378ce8e27a98e9b99961073ae70128584485778adf1dc2c597c464c0cee7"
+    },
+    "tests_diff": [],
+    "protected_diffs": []
+  },
+  "new_production_unwrap_expect_lines": [],
+  "physical_reference": {
+    "head": "3f349648bc14882d74a1205bb1f606bc77a13e1a",
+    "run": "https://github.com/milos-agathon/forge3d/actions/runs/40121981661",
+    "first_completed_frame_ms": 69268.26380001148,
+    "unchanged_completed_frame_ms": 306.0230999835767,
+    "followup_orders": 28,
+    "camera_move_measured": false,
+    "moved_camera_latency_ms": null,
+    "moved_camera_orders": null,
+    "note": "These observations precede this change. Exact-head wheel and CI results are separate evidence."
+  },
+  "release_blocker": "Repair main full CI in a separate PR, then integrate and rerun. No merge, tag or publication is authorized.",
+  "GPU_executed_locally": false
+}

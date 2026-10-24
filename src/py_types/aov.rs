@@ -537,11 +537,14 @@ impl AovFrame {
         ] {
             if present {
                 let path = dir.join(format!("{base_name}_{name}.png"));
+                let path = path.to_str().ok_or_else(|| {
+                    PyRuntimeError::new_err("media AOV output path must be valid UTF-8")
+                })?;
                 match name {
-                    "transmittance" => self.save_transmittance(path.to_str().unwrap())?,
-                    "in_scatter" => self.save_in_scatter(path.to_str().unwrap())?,
-                    "cloud_shadow" => self.save_cloud_shadow(path.to_str().unwrap())?,
-                    _ => self.save_optical_depth(path.to_str().unwrap())?,
+                    "transmittance" => self.save_transmittance(path)?,
+                    "in_scatter" => self.save_in_scatter(path)?,
+                    "cloud_shadow" => self.save_cloud_shadow(path)?,
+                    _ => self.save_optical_depth(path)?,
                 }
             }
         }

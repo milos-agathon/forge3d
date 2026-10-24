@@ -254,13 +254,14 @@ impl PyMedium {
     }
 
     #[getter]
-    fn identity(&self) -> String {
-        let identity = self.medium.identity(self.version);
-        identity
+    fn identity(&self) -> PyResult<String> {
+        let identity = self.medium.identity(self.version)
+            .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+        Ok(identity
             .digest
             .iter()
             .map(|byte| format!("{byte:02x}"))
-            .collect()
+            .collect())
     }
 
     fn to_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
@@ -271,12 +272,12 @@ impl PyMedium {
         Ok(result.into())
     }
 
-    fn __repr__(&self) -> String {
-        format!(
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
             "Medium(identity='{}', version={})",
-            self.identity(),
+            self.identity()?,
             self.version
-        )
+        ))
     }
 }
 

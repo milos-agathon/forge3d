@@ -242,7 +242,7 @@ impl ViewerTerrainScene {
             };
             self.post_process
                 .as_mut()
-                .expect("canonical media initializes post-process pass")
+                .ok_or_else(|| anyhow::anyhow!("canonical media post-process pass is unavailable"))?
                 .apply_from_linear_hdr(
                     encoder,
                     &self.queue,

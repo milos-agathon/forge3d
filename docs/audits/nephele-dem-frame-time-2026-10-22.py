@@ -4,6 +4,8 @@ The input is the terrain demo's original 1500-square Gore Range DEM, at its
 native metre spacing, and the demo's 1920x1080 viewport. Two observations cover
 initial transport construction and reuse of an unchanged converged field;
 they are individual frame latencies, not a statistical performance estimate.
+Camera movement is not measured; it invalidates the directional transport cache
+and requires a full solve whose latency and iteration count remain unmeasured.
 --describe-only reads CPU input data and never imports the native renderer.
 """
 from __future__ import annotations
@@ -153,6 +155,7 @@ def run(heights, source, head):
         "memory": dict(capture["memory"]),
         "limitations": [
             "Individual first/unchanged frame observations; no average or percentile claim.",
+            "Camera movement is not measured; it invalidates the directional transport cache and requires a full solve with unmeasured latency and iteration count.",
             "Completed-frame wall time includes the product Frame.to_numpy readback.",
             "Cloudlight timestamp interval includes GPU idle gaps while convergence is read back.",
             "No measured before-change speedup claim; the old DEM-sized candidate was never physically captured.",

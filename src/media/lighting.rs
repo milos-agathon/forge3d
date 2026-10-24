@@ -139,7 +139,9 @@ impl EnvironmentDistribution {
             cumulative += weight / total;
             marginal_cdf.push(cumulative.min(1.0));
         }
-        *marginal_cdf.last_mut().expect("height is nonzero") = 1.0;
+        *marginal_cdf.last_mut().ok_or_else(|| {
+            MediaError::InvalidEnvironment("environment marginal CDF must be nonempty".into())
+        })? = 1.0;
         Ok(Self {
             width,
             height,

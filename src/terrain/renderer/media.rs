@@ -1540,7 +1540,7 @@ impl TerrainMediaResources {
         majorant
             .validate_for(medium)
             .map_err(crate::core::error::RenderError::render)?;
-        let identity = medium.identity(density_version);
+        let identity = medium.identity(density_version).map_err(crate::core::error::RenderError::render)?;
         if self.medium_identity != Some(identity) {
             // Legacy trace geometry is independent of the medium. Keep it when
             // the viewer uploads its first canonical frame after the terrain.
@@ -1726,7 +1726,7 @@ impl TerrainMediaResources {
         self.density_froxel_count = density_froxel_count;
         self.f16_flush = f16_flush;
         self.sun_transmittance_diagnostic = sun_transmittance_diagnostic;
-        let identity = medium.identity(density_version);
+        let identity = medium.identity(density_version).map_err(crate::core::error::RenderError::render)?;
         self.medium_identity = Some(identity);
         self.majorant_proof = Some(majorant.proof().clone());
         self.sigma_s = medium.sigma_s().components();
@@ -5340,7 +5340,7 @@ mod tests {
             }),
         )
         .unwrap();
-        let medium_identity = medium.identity(1);
+        let medium_identity = medium.identity(1).unwrap();
         let mut viewer = ViewerMediaPass::new(
             &device,
             &queue,
