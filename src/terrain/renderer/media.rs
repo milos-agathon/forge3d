@@ -10,6 +10,49 @@ use crate::core::resource_tracker::{
 };
 use bytemuck::{Pod, Zeroable};
 use std::sync::Arc;
+use crate::core::anamnesis::{leaf_key, pass_key, EngineFingerprint, InputKey, PassKey};
+
+#[derive(Clone, Copy)]
+pub(super) struct MediaGraphInputKeys {
+    pub(super) extinction: crate::core::anamnesis::PassKey,
+    pub(super) light_transmittance: crate::core::anamnesis::PassKey,
+    pub(super) world_medium: crate::core::anamnesis::PassKey,
+    pub(super) radiance_provider: crate::core::anamnesis::PassKey,
+    pub(super) history: crate::core::anamnesis::PassKey,
+    pub(super) history_depth: crate::core::anamnesis::PassKey,
+    pub(super) directional_buffers: Option<[crate::core::anamnesis::PassKey; 6]>,
+    pub(super) directional_textures: Option<[crate::core::anamnesis::PassKey; 4]>,
+}
+
+/// A content/producer identity, never a GPU allocation ID. Keeping the input
+/// keys in the derivation also identifies persistent GPU output without a readback.
+fn media_graph_key(label: &str, bytes: &[u8], inputs: &[PassKey]) -> PassKey {
+    let payload = leaf_key(bytes);
+    let inputs = inputs.iter().enumerate()
+        .map(|(index, key)| InputKey::new(index.to_string(), *key)).collect::<Vec<_>>();
+    pass_key(label, b"nephele.gpu-content", &payload.0, &inputs, &[],
+        &EngineFingerprint::current().canonical_bytes()).0
+}
+
+fn uploaded_media_graph_key(
+    label: &str, identity: crate::media::MediumIdentity, resource_version: u64,
+    dimensions: [u32; 3], contents: &[u8], sun: Option<glam::Vec3>,
+) -> PassKey {
+    let mut bytes = bytemuck::cast_slice(&[
+        identity.version, resource_version, u64::from(dimensions[0]),
+        u64::from(dimensions[1]), u64::from(dimensions[2]),
+    ]).to_vec();
+    bytes.extend_from_slice(&identity.digest);
+    if let Some(sun) = sun { bytes.extend_from_slice(bytemuck::cast_slice(&sun.to_array())); }
+    media_graph_key(label, &bytes, &[leaf_key(contents)])
+}
+
+fn zero_media_graph_key(label: &str, viewport: (u32, u32), version: u64, texel_bytes: u64) -> PassKey {
+    // wgpu initializes newly allocated resources to zero before their first read.
+    media_graph_key(label, bytemuck::cast_slice(&[
+        u64::from(viewport.0), u64::from(viewport.1), version, texel_bytes,
+    ]), &[])
+}
 
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -379,6 +422,7 @@ struct DirectionalTransport {
     solve_key: std::cell::Cell<Option<u64>>,
     solve_diagnostics: std::cell::Cell<Option<DirectionalSolveDiagnostics>>,
     executed_orders: std::cell::Cell<u32>,
+    graph_state_key: std::cell::Cell<PassKey>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -535,6 +579,10 @@ struct CompositeBindGroups {
 }
 
 pub(super) struct TerrainMediaResources {
+    uploaded_graph_keys: Option<[PassKey; 3]>,
+    radiance_provider_graph_key: std::cell::Cell<PassKey>,
+    history_graph_keys: [PassKey; 2],
+    pending_graph_key: Option<PassKey>,
     inject_bind_groups: Option<InjectBindGroups>,
     integrate_bind_groups: Option<IntegrateBindGroups>,
     integrate_bind_groups_next: Option<IntegrateBindGroups>,
@@ -1056,6 +1104,49 @@ impl RealtimeMediaPipelines {
 }
 
 impl TerrainMediaResources {
+    fn graph_frame_key(&self, uniforms: &MediaUniforms) -> crate::core::error::RenderResult<PassKey> {
+        let uploads = self.uploaded_graph_keys.ok_or_else(||
+            crate::core::error::RenderError::render("media content keys require a completed canonical upload"))?;
+        let terrain = self.terrain_trace.as_ref().ok_or_else(||
+            crate::core::error::RenderError::render("media content keys require the prepared terrain"))?;
+        let mut bytes = bytemuck::bytes_of(uniforms).to_vec();
+        bytes.extend_from_slice(&terrain.terrain_identity.to_le_bytes());
+        Ok(media_graph_key("nephele.media.frame.contents", &bytes, &[
+            uploads[0], uploads[1], uploads[2], self.radiance_provider_graph_key.get(),
+            self.history_graph_keys[0], self.history_graph_keys[1],
+        ]))
+    }
+
+    fn graph_input_keys(&self) -> crate::core::error::RenderResult<MediaGraphInputKeys> {
+        let uploads = self.uploaded_graph_keys.ok_or_else(||
+            crate::core::error::RenderError::render("media graph leaf keys require a completed canonical upload"))?;
+        let directional = self.terrain_trace.as_ref().and_then(|trace| trace.directional.as_ref());
+        let nodes = self.canonical_density_nodes.as_ref();
+        let directional_buffers = directional.map(|transport| std::array::from_fn(|index| {
+            if index == 2 {
+                leaf_key(&nodes.expect("directional transport owns canonical nodes").bytes)
+            } else {
+                media_graph_key("nephele.media.directional.buffer", bytemuck::cast_slice(&[
+                    index as u64, transport.buffers[index].size(),
+                ]), &[transport.graph_state_key.get()])
+            }
+        }));
+        let directional_textures = directional.map(|transport| std::array::from_fn(|index| {
+            if index == 3 {
+                leaf_key(bytemuck::cast_slice(&nodes.expect("directional transport owns active indices").active_indices))
+            } else {
+                media_graph_key("nephele.media.directional.texture", &(index as u64).to_le_bytes(),
+                    &[transport.graph_state_key.get()])
+            }
+        }));
+        Ok(MediaGraphInputKeys {
+            extinction: uploads[0], light_transmittance: uploads[1], world_medium: uploads[2],
+            radiance_provider: self.radiance_provider_graph_key.get(),
+            history: self.history_graph_keys[0], history_depth: self.history_graph_keys[1],
+            directional_buffers, directional_textures,
+        })
+    }
+
     fn build_history_key(
         &self,
         view_projection: glam::Mat4,
@@ -1363,6 +1454,14 @@ impl TerrainMediaResources {
                 * u64::from(grid.height)
                 * u64::from(grid.depth)
                 * 16,
+            uploaded_graph_keys: None,
+            radiance_provider_graph_key: std::cell::Cell::new(zero_media_graph_key(
+                "nephele.media.radiance_provider.zero", viewport, resource_version, 8)),
+            history_graph_keys: [
+                zero_media_graph_key("nephele.media.history.previous.in_scatter.zero", viewport, resource_version, 8),
+                zero_media_graph_key("nephele.media.history.previous.depth.zero", viewport, resource_version, 4),
+            ],
+            pending_graph_key: None,
             history_key: None,
             last_history_decision: HistoryDecision::RejectMissing,
             medium_identity: None,
@@ -1606,7 +1705,15 @@ impl TerrainMediaResources {
             },
             self.grid.extent(),
         );
-        self.upload_world_medium(queue, medium, sun_direction, &mut f16_flush)?;
+        let world_key = self.upload_world_medium(queue, medium, identity, sun_direction, &mut f16_flush)?;
+        let dimensions = [grid.width, grid.height, grid.depth];
+        self.uploaded_graph_keys = Some([
+            uploaded_media_graph_key("nephele.media.extinction", identity, self.resource_version,
+                dimensions, bytemuck::cast_slice(&texels), None),
+            uploaded_media_graph_key("nephele.media.froxel.light_transmittance", identity, self.resource_version,
+                dimensions, bytemuck::cast_slice(&light_texels), Some(sun_direction)),
+            world_key,
+        ]);
         self.density_froxel_count = density_froxel_count;
         self.f16_flush = f16_flush;
         self.sun_transmittance_diagnostic = sun_transmittance_diagnostic;
@@ -1624,9 +1731,10 @@ impl TerrainMediaResources {
         &mut self,
         queue: &wgpu::Queue,
         medium: &crate::media::Medium,
+        identity: crate::media::MediumIdentity,
         sun_direction: glam::Vec3,
         flush: &mut F16FlushDiagnostic,
-    ) -> crate::core::error::RenderResult<()> {
+    ) -> crate::core::error::RenderResult<PassKey> {
         let bounds = match medium.density() {
             crate::media::DensityField::Grid3D(field) => Some(field.transform().bounds),
             crate::media::DensityField::PerlinWorley(field) => Some(field.transform.bounds),
@@ -1680,7 +1788,8 @@ impl TerrainMediaResources {
             },
             wgpu::Extent3d { width: n, height: n, depth_or_array_layers: n },
         );
-        Ok(())
+        Ok(uploaded_media_graph_key("nephele.media.world.medium", identity, self.resource_version,
+            [n, n, n], bytemuck::cast_slice(&texels), Some(sun_direction)))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2015,7 +2124,10 @@ impl TerrainMediaResources {
             Some(DirectionalTransport { iterations, final_incoming, camera, primary, clear, buffers, textures,
                 cache_workgroups:[width.div_ceil(8),(height as u32).div_ceil(8),1],
                 surface_workgroups: [self.grid.width.div_ceil(8), self.grid.height.div_ceil(8), 1], allocation_bytes,
-                solve_key: std::cell::Cell::new(None), solve_diagnostics: std::cell::Cell::new(None), executed_orders: std::cell::Cell::new(0) })
+                solve_key: std::cell::Cell::new(None), solve_diagnostics: std::cell::Cell::new(None), executed_orders: std::cell::Cell::new(0),
+                graph_state_key: std::cell::Cell::new(media_graph_key("nephele.media.directional.zero",
+                    bytemuck::cast_slice(&[self.resource_version, u64::from(self.grid.width),
+                        u64::from(self.grid.height), u64::from(self.grid.depth), self.density_froxel_count]), &[])) })
         } else { None };
         if let Some(previous) = self.terrain_trace.take() {
             self.device_local_bytes = self
@@ -2067,6 +2179,7 @@ impl TerrainMediaResources {
             let key=stable_words_hash(bytemuck::cast_slice::<MediaUniforms,u32>(std::slice::from_ref(&uniforms)).iter()
                 .map(|word|u64::from(*word)).chain([self.radiance_provider_identity]));
             if self.radiance_provider_cacheable && directional.solve_key.get()==Some(key) { return Ok(()); }
+            let graph_key = self.graph_frame_key(&uniforms)?;
             directional.solve_key.set(None);
             directional.solve_diagnostics.set(None);
             let started=std::time::Instant::now();
@@ -2161,6 +2274,9 @@ impl TerrainMediaResources {
             queue.submit([submitted.finish()]);
             directional.solve_key.set(Some(key));
             directional.executed_orders.set(orders);
+            directional.graph_state_key.set(graph_key);
+            self.radiance_provider_graph_key.set(media_graph_key(
+                "nephele.media.radiance_provider.directional", &orders.to_le_bytes(), &[graph_key]));
             return Ok(());
         }
         let n = self.grid.depth.div_ceil(4);
@@ -2225,6 +2341,7 @@ impl TerrainMediaResources {
         self.termination_readback = None;
         let decision = history_decision(self.history_key, history_key);
         uniforms.viewport[2] = u32::from(decision == HistoryDecision::Accept);
+        self.pending_graph_key = Some(self.graph_frame_key(&uniforms)?);
         queue.write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&uniforms));
         let extinction = self
             .extinction
@@ -2650,6 +2767,8 @@ impl TerrainMediaResources {
                     "nephele.media.history.commit executed without a prepared media frame",
                 )
             })?;
+        let graph_key = self.pending_graph_key.take().ok_or_else(||
+            crate::core::error::RenderError::render("media history commit has no producing frame identity"))?;
 
         encoder.copy_texture_to_texture(
             image_copy(&self.integrated, wgpu::TextureAspect::All),
@@ -2668,6 +2787,10 @@ impl TerrainMediaResources {
             &mut self.integrate_bind_groups_next,
         );
         self.history_key = Some(history_key);
+        self.history_graph_keys = [
+            media_graph_key("nephele.media.history.previous.in_scatter", &[], &[graph_key]),
+            media_graph_key("nephele.media.history.previous.depth", &[], &[graph_key]),
+        ];
         self.last_history_decision = decision;
         self.previous_view_projection = view_projection;
         Ok(decision)
@@ -3258,6 +3381,8 @@ impl crate::terrain::renderer::TerrainScene {
             identity_words.push(u64::from(value.to_bits()));
         }
         identity_words.push(u64::from(environment_intensity.to_bits()));
+        resources.radiance_provider_graph_key.set(media_graph_key("nephele.media.radiance_provider.upload",
+            bytemuck::cast_slice(&identity_words), &[]));
         resources.radiance_provider_identity = stable_words_hash(identity_words);
         resources.diffuse_ibl = diffuse_ibl_irradiance(fallback_radiance);
         Ok(())
@@ -3293,6 +3418,14 @@ impl crate::terrain::renderer::TerrainScene {
                 resource_version: resources.resource_version,
             },
         )
+    }
+
+    pub(super) fn realtime_media_graph_input_keys(
+        &self,
+    ) -> crate::core::error::RenderResult<Option<MediaGraphInputKeys>> {
+        self.media_resources.lock().map_err(|_|
+            crate::core::error::RenderError::render("media_resources mutex poisoned"))?
+            .as_ref().map(TerrainMediaResources::graph_input_keys).transpose()
     }
 
     pub(super) fn bind_realtime_media_graph_resources(
@@ -4134,6 +4267,32 @@ fn parse_blue_noise_asset() -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_graph_upload_keys_cover_contents_versions_grid_and_sun() {
+        let identity = crate::media::MediumIdentity { version: 7, digest: [5; 32] };
+        let key = |identity, version, dimensions, contents: &[u8], sun| uploaded_media_graph_key(
+            "nephele.media.froxel.light_transmittance", identity, version, dimensions, contents, Some(sun));
+        let sun = glam::Vec3::Y;
+        let base = key(identity, 3, [10, 10, 64], &[0, 0x3c], sun);
+        assert_eq!(base, key(identity, 3, [10, 10, 64], &[0, 0x3c], sun));
+        assert_ne!(base, key(identity, 3, [10, 10, 64], &[1, 0x3c], sun));
+        assert_ne!(base, key(crate::media::MediumIdentity { digest: [6; 32], ..identity }, 3, [10, 10, 64], &[0, 0x3c], sun));
+        assert_ne!(base, key(crate::media::MediumIdentity { version: 8, ..identity }, 3, [10, 10, 64], &[0, 0x3c], sun));
+        assert_ne!(base, key(identity, 4, [10, 10, 64], &[0, 0x3c], sun));
+        assert_ne!(base, key(identity, 3, [10, 64, 10], &[0, 0x3c], sun));
+        assert_ne!(base, key(identity, 3, [10, 10, 64], &[0, 0x3c], glam::Vec3::X));
+        // Initial history describes the actual wgpu zero initialization, including
+        // its extent, format/texel size and owning resource generation.
+        let zero = zero_media_graph_key("history.depth.zero", (64, 64), 3, 4);
+        assert_eq!(zero, zero_media_graph_key("history.depth.zero", (64, 64), 3, 4));
+        assert_ne!(zero, zero_media_graph_key("history.depth.zero", (128, 64), 3, 4));
+        assert_ne!(zero, zero_media_graph_key("history.depth.zero", (64, 64), 4, 4));
+        assert_ne!(zero, zero_media_graph_key("history.depth.zero", (64, 64), 3, 8));
+        let previous = media_graph_key("history.depth", &[], &[base, zero]);
+        let next = media_graph_key("history.depth", &[], &[base, previous]);
+        assert_ne!(previous, next);
+    }
 
     #[test]
     fn ordered_history_hash_is_stable_and_position_sensitive() {

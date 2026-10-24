@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::io::Error as IoError;
 
 mod execute;
+mod leaf_keys;
 mod setup;
 
 pub(in crate::terrain::renderer) use setup::{
@@ -16,6 +17,19 @@ pub(in crate::terrain::renderer) use setup::{
 
 fn io_error(error: impl std::fmt::Display) -> IoError {
     IoError::other(error.to_string())
+}
+
+fn observe_shadow_transition(
+    label: &str,
+    barriers: &[&crate::core::framegraph_impl::ResourceBarrier],
+    shadow: ResourceHandle,
+    observed: &mut bool,
+) -> Result<()> {
+    *observed |= barriers.iter().any(|barrier| barrier.resource == shadow);
+    if !*observed {
+        return Err(anyhow!("{label} lost its compiled shadow transition"));
+    }
+    Ok(())
 }
 
 fn restore_texture(
@@ -280,8 +294,11 @@ impl TerrainScene {
         let source_key = cache
             .map(|options| leaf_key(&options.height_bytes))
             .unwrap_or_else(|| leaf_key(bytemuck::cast_slice(&height_inputs.heightmap_data)));
-        let leaf_keys = BTreeMap::from([(handles.height, source_key)]);
+        let leaf_keys = leaf_keys::terrain_graph_leaf_keys(
+            &handles, source_key, self.realtime_media_graph_input_keys()?,
+        )?;
         let mut shadow_setup = None;
+        let mut shadow_transition_observed = false;
         let mut material_vt_started = false;
         let mut hzb_frame_staged = false;
         let mut visibility_frame_staged = false;
@@ -379,11 +396,8 @@ impl TerrainScene {
                             capture_output,
                         },
                     ) => {
-                        if barriers.is_empty() {
-                            return Err(anyhow!(
-                                "terrain.forward lost its compiled shadow transition"
-                            ));
-                        }
+                        observe_shadow_transition("terrain.forward", barriers, handles.shadow,
+                            &mut shadow_transition_observed)?;
                         let setup = shadow_setup.as_ref().ok_or_else(|| {
                             anyhow!("terrain.forward has no materialized shadow state")
                         })?;
@@ -536,7 +550,9 @@ impl TerrainScene {
                         })?;
                         Ok(GraphPassOutcome::Executed(Vec::new()))
                     }
-                    ("nephele.media.inject", GraphPassAction::Execute { .. }) => {
+                    ("nephele.media.inject", GraphPassAction::Execute { barriers, .. }) => {
+                        observe_shadow_transition("nephele.media.inject", barriers, handles.shadow,
+                            &mut shadow_transition_observed)?;
                         execution.run_pass("nephele.media.inject", |context| {
                             self.encode_attached_realtime_media_inject_for_terrain(
                                 context.encoder(),
