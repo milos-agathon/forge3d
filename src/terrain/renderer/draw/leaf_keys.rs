@@ -79,6 +79,9 @@ mod tests {
                             observe_shadow_transition(&pass.name, barriers, graph.handles.shadow,
                                 &mut shadow_transition_observed).map_err(io_error)?;
                         }
+                        if pass.name == "terrain.resolve" {
+                            validate_resolve_transition(&graph.plan, &graph.handles, barriers).map_err(io_error)?;
+                        }
                     }
                     executed.push(pass.name.clone());
                     Ok(GraphPassOutcome::Executed(vec![]))
@@ -97,6 +100,33 @@ mod tests {
                 ).unwrap();
                 assert_ne!(result[&graph.handles.resolved], changed_result[&graph.handles.resolved],
                     "directional={directional}, input={:?}", graph.plan.resource(*handle).unwrap().desc.name);
+            }
+        }
+    }
+
+    #[test]
+    fn draw_resolve_validation_uses_the_compiled_input_type() {
+        for configuration in [None, Some(false), Some(true)] {
+            let media = configuration.map_or(TerrainMediaGraphConfig::disabled(64, 64), |directional|
+                TerrainMediaGraphConfig { enabled: true, directional,
+                    froxel_grid: FroxelGrid::for_viewport(64, 64), resource_version: 7 });
+            let graph = build_terrain_render_graph(
+                64, 64, 64, 64, 16, 16, 256, 4, wgpu::TextureFormat::Rgba16Float, false,
+                media, TerrainPassDeclarations {
+                    prepare: vec![], shadow: vec![], forward: vec![], resolve: vec![],
+                    prepared_output_size: 64,
+                }, false,
+            ).unwrap();
+            let barriers = graph.plan.barriers_before("terrain.resolve");
+            validate_resolve_transition(&graph.plan, &graph.handles, &barriers).unwrap();
+            if configuration.is_some() {
+                assert_eq!(graph.plan.resource(graph.handles.media.unwrap().composite).unwrap()
+                    .desc.resource_type, crate::core::framegraph_impl::ResourceType::SampledTexture);
+                validate_resolve_transition(&graph.plan, &graph.handles, &[]).unwrap();
+            } else {
+                assert!(validate_resolve_transition(&graph.plan, &graph.handles, &[]).is_err());
+                let unrelated = graph.plan.barriers_before("terrain.forward");
+                assert!(validate_resolve_transition(&graph.plan, &graph.handles, &unrelated).is_err());
             }
         }
     }

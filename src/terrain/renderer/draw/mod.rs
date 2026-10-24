@@ -32,6 +32,23 @@ fn observe_shadow_transition(
     Ok(())
 }
 
+fn validate_resolve_transition(
+    graph: &crate::core::framegraph_impl::RendererGraphPlan,
+    handles: &super::render_graph::TerrainGraphHandles,
+    barriers: &[&crate::core::framegraph_impl::ResourceBarrier],
+) -> Result<()> {
+    let source = handles.media.map_or(handles.beauty, |media| media.composite);
+    let resource = graph.resource(source).ok_or_else(|| anyhow!("terrain.resolve has no compiled input"))?;
+    // SampledTexture does not model a storage-write transition. The media
+    // composite is already ordered before resolve by its declared read edge.
+    if resource.desc.resource_type != crate::core::framegraph_impl::ResourceType::SampledTexture
+        && !barriers.iter().any(|barrier| barrier.resource == source)
+    {
+        return Err(anyhow!("terrain.resolve lost its compiled beauty transition"));
+    }
+    Ok(())
+}
+
 fn restore_texture(
     context: &RendererPassContext<'_>,
     handle: ResourceHandle,
@@ -602,11 +619,7 @@ impl TerrainScene {
                             capture_output,
                         },
                     ) => {
-                        if barriers.is_empty() {
-                            return Err(anyhow!(
-                                "terrain.resolve lost its compiled beauty transition"
-                            ));
-                        }
+                        validate_resolve_transition(&scheduler_plan, &handles, barriers)?;
                         execution.run_pass("terrain.resolve", |context| {
                             let encoder = context.encoder();
                             let scope = ts_begin(&mut timing, encoder, "terrain.resolve");
