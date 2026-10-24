@@ -29,6 +29,99 @@ position, depth, the per-pixel transmittance split
 `(T_total, T_splat, T_lidar, T_terrain)`, the hit kind, the self-shadow bias
 and paging/memory statistics.
 
+LiDAR points enter either from a file (`pointcloud=` a COPC path, a point page
+store path or a `FusedPointCloud`) or straight from memory: pass
+`point_positions` — an `(N, 3)` float32 array of world-space y-up positions —
+optionally with `point_colors`, an `(N, 3)` uint8 sRGB array. In-memory points
+are k-d paginated exactly like a file-backed cloud (same residency pool,
+traversal and unified transmittance), so no file is written and a point set
+derived in the calling script renders with the same pipeline as a streamed
+COPC scan.
+
+## Map-sheet example
+
+`examples/splat_fused_map.py` renders all three representations as one lit
+"sensor + terrain" map sheet: title, a fused-layers legend with per-layer hit
+counts, scene/atmosphere/camera/render info blocks (the atmosphere block
+records the HDRI or analytic sky, sky gain, sun and aerial-fog settings), a
+scale bar in real metres, a north arrow, optional AOV insets (hit kind, depth,
+sun transmittance) and a sidecar `report.json`. The sheet canvas is sized to
+the taller of the map and the readout panel, so the info blocks never clip.
+
+![SPLAT-FUSED Mount Fuji map sheet](assets/splat-fused-map.webp)
+
+*The `--dem fuji` hero run at 1280x896 @ 128 spp: hypsometric terrain, a violet
+splat block on the summit shoulder and a terracotta LiDAR swath in the
+foreground valley, under an HDRI sky with aerial-perspective fog.*
+
+```bash
+python examples/splat_fused_map.py                # offline fixture: ridge + 3,500 splats + COPC swath
+python examples/splat_fused_map.py --dem fuji     # real DEM fetched from the web (cached), full extent:
+                                                  # hypsometric tint + a splat scan block + a derived
+                                                  # LiDAR swath, all digitized from the same DEM
+python examples/splat_fused_map.py --dem fuji --view top --aovs   # north-up hypsometric map
+```
+
+The camera is a rig, not a hard-coded pose: `--view
+hero|canonical|oblique|high|top|low` presets (`hero` — the `--dem` default —
+is a low cinematic oblique at az 35 / el 10 / fov 55 with sky above the
+summit), `--azimuth/--elevation/--distance/--target/--fov` orbit controls
+(or raw `--origin/--look-at`), and the chosen pose is printed and echoed in
+the sheet's CAMERA block. `--dem` scenes convert elevation into the same
+world units as the grid, so terrain slopes keep their real steepness and
+path-traced relief stays crisp; the full DEM extent is used by default and
+`--crop-size N` zooms to a central square.
+
+Lighting follows the view: the hero shot is daytime (sun az 125 / el 42,
+intensity 3, near-neutral color) with a lit sky. The sky is a real HDRI by
+default on `--dem` runs — a CC0 Poly Haven "pure sky" equirect (midday,
+partly cloudy, fetched once into the dataset cache) passed through
+`splat.render_fused(env_map=...)`, which replaces the Hosek-Wilkie bake,
+normalises the HDRI's exposure on load and clamps its sun disc so it reads
+as a bright blob instead of an IBL firefly; `--hdr PATH` supplies any
+`.hdr/.rgbe/.exr`, `--hdr none` forces the analytic Hosek-Wilkie sky
+(hero: turbidity 5, ground albedo 0.35; map views: 2.5 / 0.2), and
+`--hdr-rotation DEG` places the HDRI's sun. The rotation uses the sun's
+azimuth convention (0 deg = +x, 90 deg = +z; the sheet's world north is
+-z), and the captured sky's own sun sits where the capture put it, so
+`--hdr-rotation` is how you line the visible disc up with the analytic
+sun's shadows. Map views keep the cartographic NW light (az 215 / el 45).
+Distance is rendered as aerial perspective: the same exponential height fog
+that dims sun rays also blends distant surfaces toward the sky colour
+(`--fog` density, default 4e-4, and `--fog-falloff`, default 1.5e-3), so
+far ridges recede into haze instead of ending at a hard silhouette. The fog
+is off only on the top-down plan view, where every ray points down
+through the whole camera altitude and the haze would mute the hypsometric
+edges; the fixture scene carries it like any other view. Every other knob is overridable with
+`--sun-azimuth/--sun-elevation/--sun-color/--sky-intensity/
+--sky-turbidity/--sky-ground-albedo/--exposure`. Reruns with the same seed
+reproduce the beauty and the sheet byte for byte.
+
+`--dem` runs digitize all three representations from the DEM itself, so the
+sheet shows the full fusion story with no external dataset: the hypsometric
+heightfield, a violet splat scan block on the summit's east shoulder, and —
+since no public LiDAR archive matches the DEM's coordinates — an airborne scan
+swath derived from the same grid (`_derive_lidar_swath`): flight lines with
+realistic pulse and line spacing plus deterministic jitter, returns sitting on
+the terrain, colour driven by local slope as an intensity proxy, and a
+pulse-sized sphelet radius so neighbouring returns overlap into a scan strip.
+The swath is laid as a wide, low band across the foreground valley, on
+deliberately different ground from the splat block, so the point layer and the
+splat layer read as two distinct sensors fused onto the base map rather than one
+blended region. The SCENE block states the provenance ("derived scan swath") and
+`--no-lidar` drops the layer; passing `--pointcloud FILE` replaces it with a real
+cloud.
+
+Cartography and motion: plan views (`--view top|high`) get an
+elevation-contour overlay — marching squares projected through the actual
+camera, an interval chosen for the relief, index lines every fifth contour
+(`--no-contours` disables it). Annotation is drawn on the sheet's map copy
+only; the beauty PNG stays the raw tracer output. `--animate N` additionally
+renders an N-frame orbit fly-through GIF (`--anim-size WxH`): every frame is
+its own deterministic fused render with the still's lighting, so the GIF
+reruns byte-for-byte too. Large stills render in seamless tiles
+(`--tile W H`) so e.g. 1280 x 896 at 128 spp fits the 512 MiB budget.
+
 ## Options
 
 * `tile=(w, h)`: the frame is rendered in seamless tiles. Every fused render
@@ -42,6 +135,15 @@ and paging/memory statistics.
   a `(rows, cols, 3|4)` uint8 sRGB colour map on the DEM grid, stored as
   RGBA8 sRGB (4 B per cell). With four channels, alpha 255 marks a mapped
   cell and any other alpha falls back to the uniform `albedo`.
+* `point_positions=(N, 3) float32, point_colors=(N, 3) uint8`: an in-memory
+  LiDAR point set in world space (y-up), an alternative to `pointcloud=` that
+  never touches disk. Positions must be finite; colours are sRGB bytes
+  (absent = white). The arrays are k-d paginated with the file-backed sources
+  and share one residency pool, so their pages appear in the same paging
+  stats and behave identically at render time. The only provenance
+  difference is the Rust-side source list (`FusedScene::describe()`, which
+  labels them `point-array[N points, memory]`); the Python stats dict
+  reports paging totals, not per-source labels.
 * `terrain_smooth_normals=True`: terrain is shaded with central-difference
   vertex normals interpolated across each cell, continuous across cell
   edges. A normal that would face away from the cell's bilinear patch falls
