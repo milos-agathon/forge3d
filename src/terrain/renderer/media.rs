@@ -354,7 +354,6 @@ pub(crate) struct DirectionalSolveDiagnostics {
     pub converged: bool,
     pub maximum_source_change: f64,
     pub maximum_surface_change: f64,
-    pub iteration_wall_milliseconds: f64,
     pub surface_cache_dimensions: [u32; 2],
     pub cache_reused: bool,
 }
@@ -2148,7 +2147,6 @@ impl TerrainMediaResources {
                     directional.solve_diagnostics.set(Some(DirectionalSolveDiagnostics {
                         orders,converged:true,maximum_source_change:f64::from(f32::from_bits(progress[1])),
                         maximum_surface_change:f64::from(f32::from_bits(progress[2])),
-                        iteration_wall_milliseconds:started.elapsed().as_secs_f64()*1000.0,
                         surface_cache_dimensions:[self.grid.width,self.grid.height],
                         cache_reused:false,
                     }));
