@@ -386,7 +386,6 @@ struct RealtimeTerrainTrace {
 struct CloudlightDispatch {
     pipeline: wgpu::ComputePipeline,
     groups: [wgpu::BindGroup; 4],
-    label: String,
 }
 
 const DIRECTIONAL_DIRECTIONS: u64 = 192;
@@ -2018,7 +2017,7 @@ impl TerrainMediaResources {
                 label: Some(label), layout: &pipeline.get_bind_group_layout(3), entries,
             });
             Ok::<_, crate::core::error::RenderError>(CloudlightDispatch {
-                pipeline, groups: [group0, group1, group2, group3], label: label.to_string(),
+                pipeline, groups: [group0, group1, group2, group3],
             })
         };
         let world_sun = cloud_dispatch(
@@ -2194,7 +2193,7 @@ impl TerrainMediaResources {
             }
             let workgroups = [self.grid.width.div_ceil(4), self.grid.height.div_ceil(4), self.grid.depth.div_ceil(4)];
             let dispatch = |encoder: &mut wgpu::CommandEncoder, dispatch: &CloudlightDispatch, groups: [u32; 3]| {
-                crate::core::shader_registry::record_shader_use(&dispatch.label);
+                crate::core::shader_registry::record_shader_use("nephele.media.terrain_trace.shader");
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("nephele.media.directional"), timestamp_writes: None });
                 pass.set_pipeline(&dispatch.pipeline);
                 for (index, group) in dispatch.groups.iter().enumerate() { pass.set_bind_group(index as u32, group, &[]); }
@@ -2284,7 +2283,7 @@ impl TerrainMediaResources {
             (&trace.world_sun, "nephele.media.world_sun.pipeline", [n, n, n]),
             (&trace.surface_cloudlight, "nephele.media.surface_cloudlight.pipeline", [self.viewport.0.div_ceil(8), self.viewport.1.div_ceil(8), 1]),
         ] {
-            crate::core::shader_registry::record_shader_use(label);
+            crate::core::shader_registry::record_shader_use("nephele.media.terrain_trace.shader");
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some(label), timestamp_writes: None,
             });
@@ -2392,6 +2391,7 @@ impl TerrainMediaResources {
                 label: Some("nephele.media.terrain_trace"),
                 timestamp_writes: None,
             });
+            crate::core::shader_registry::record_shader_use("nephele.media.terrain_trace.shader");
             pass.set_pipeline(&trace.pipeline);
             pass.set_bind_group(0, &trace.empty0, &[]);
             pass.set_bind_group(1, &trace.empty1, &[]);
@@ -2507,7 +2507,7 @@ impl TerrainMediaResources {
                 label: Some("nephele.media.inject.single"),
                 timestamp_writes: None,
             });
-            crate::core::shader_registry::record_shader_use("nephele.media.inject.single.pipeline");
+            crate::core::shader_registry::record_shader_use("nephele.media.froxel.shader");
             pass.set_pipeline(&self.pipelines.inject_single);
             pass.set_bind_group(0, single_group0, &[]);
             pass.set_bind_group(1, single_group1, &[]);
@@ -2524,7 +2524,7 @@ impl TerrainMediaResources {
                 label: Some("nephele.media.filter.single"),
                 timestamp_writes: None,
             });
-            crate::core::shader_registry::record_shader_use("nephele.media.filter.single.pipeline");
+            crate::core::shader_registry::record_shader_use("nephele.media.froxel.shader");
             pass.set_pipeline(&self.pipelines.filter_single);
             pass.set_bind_group(0, filter_group0, &[]);
             pass.set_bind_group(1, filter_group1, &[]);
@@ -2542,7 +2542,7 @@ impl TerrainMediaResources {
                 timestamp_writes: None,
             });
             crate::core::shader_registry::record_shader_use(
-                "nephele.media.inject.multiple.pipeline",
+                "nephele.media.froxel.shader",
             );
             pass.set_pipeline(&self.pipelines.inject_multiple);
             pass.set_bind_group(0, multiple_group0, &[]);
@@ -2659,7 +2659,7 @@ impl TerrainMediaResources {
                 label: Some("nephele.media.integrate"),
                 timestamp_writes: None,
             });
-            crate::core::shader_registry::record_shader_use("nephele.media.integrate.pipeline");
+            crate::core::shader_registry::record_shader_use("nephele.media.froxel.shader");
             pass.set_pipeline(&self.pipelines.integrate);
             pass.set_bind_group(0, integrate_group0, &[]);
             pass.set_bind_group(1, integrate_group1, &[]);
@@ -2743,7 +2743,7 @@ impl TerrainMediaResources {
                 timestamp_writes: None,
             });
             crate::core::shader_registry::record_shader_use(
-                "nephele.media.composite.linear_hdr.pipeline",
+                "nephele.media.froxel.shader",
             );
             pass.set_pipeline(&self.pipelines.composite_linear_hdr);
             pass.set_bind_group(0, composite_group0, &[]);
@@ -4267,6 +4267,38 @@ fn parse_blue_noise_asset() -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nephele_recorded_shader_labels_are_registered_modules() {
+        let media = include_str!("media.rs")
+            .split("\n#[cfg(test)]\nmod tests {")
+            .next()
+            .unwrap();
+        let pipeline_cache = include_str!("pipeline_cache.rs");
+        let draw = include_str!("draw/execute.rs");
+        let quote = "\"".chars().next().unwrap();
+        let registered: std::collections::BTreeSet<_> = [media, pipeline_cache]
+            .into_iter()
+            .flat_map(|source| source.split("create_labeled_shader_module(").skip(1))
+            .filter_map(|call| call.split(",").nth(1))
+            .map(|label| label.trim().trim_matches(quote))
+            .filter(|label| label.starts_with("nephele."))
+            .collect();
+        assert!(!registered.is_empty());
+        for source in [media, draw] {
+            for call in source.split("record_shader_use(").skip(1) {
+                let argument = call.split(")").next().unwrap().trim();
+                if std::ptr::eq(source, media) {
+                    assert!(argument.starts_with(quote), "media use must name its module: {argument}");
+                }
+                for label in argument.split(quote).skip(1).step_by(2) {
+                    if std::ptr::eq(source, media) || label.starts_with("nephele.") {
+                        assert!(registered.contains(label), "unregistered NEPHELE module: {label}");
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn media_graph_upload_keys_cover_contents_versions_grid_and_sun() {

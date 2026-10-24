@@ -30,6 +30,11 @@ def load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def require_clean_certificate(certificate, state):
+    if certificate["degradations"]:
+        raise RuntimeError(f"{state} render certificate has degradations: {certificate['degradations']}")
+
+
 def describe():
     provenance = load_json(ROOT / "tests/data/prometheus/gore_range_dem.json")
     path = ROOT / provenance["source_path"]
@@ -119,6 +124,7 @@ def run(heights, source, head):
         if rgba.shape[:2] != (DEFAULT_SIZE[1], DEFAULT_SIZE[0]):
             raise RuntimeError("Measured frame has an unexpected viewport")
         certificate = render_certificate(sign=False)
+        require_clean_certificate(certificate, state)
         observations.append({
             "state": state, "render_call_ms": (submitted-started)*1000,
             "completed_frame_wall_ms": (completed-started)*1000,

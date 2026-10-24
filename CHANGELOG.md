@@ -6,9 +6,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
-## [1.46.0] - Unreleased
-
-> Release pending. NEPHELE's Gate 3 and Gate 4 physical acceptance is NOT_PROVEN (OD-10, `docs/audits/nephele-bounded-round-2026-10-01.md`), and publishing requires a green Full Acceptance Summary on the release commit. Tag `v1.46.0` and set this date only after both gates pass on the NVIDIA Vulkan lane.
+## [1.46.0] - 2026-10-24
 
 ### Added
 - NEPHELE participating media coupled to terrain (#172). `forge3d.media.Medium` validates one canonical medium (RGB absorption and scattering, density, isotropic or Henyey-Greenstein phase) that the reference path tracer and real-time terrain rendering share; `Medium.grid3d` describes a bounded heterogeneous density grid.
@@ -18,9 +16,15 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - `ViewerHandle.set_media(...)` attaches or removes a medium in the interactive viewer, with uniform ambient sky radiance and a configurable froxel depth-slice count.
 
 ### Changed
+- NEPHELE's G4b reference now uses the open-surface full-transport estimate of 0.02187741965233074 with a ±20% tolerance, approved by Milos on 2026-10-22. The medium exists on both sides of the open terrain surface; terrain blocks light only when a ray crosses that surface, with the same medium domain in both ablation arms.
+- NEPHELE directional multiple scattering solves to an exact fixed point of the stored f16 values, with no order cap. This is expensive: on the original 1500×1500 Gore Range DEM at 1920×1080, an RTX 3070 using Vulkan took 76.151 s for the first completed frame and 328.481 ms for an unchanged frame. These are individual observations, including output readback. The full directional solve reruns whenever the camera changes, and on every frame with a live rendered sky. Milos accepted this performance limitation for integration.
 - Viewer volumetric density volumes reject unknown presets instead of silently rendering `valley_fog`; use `valley_fog`, `plume` or `localized_haze`.
 
 ### Fixed
+- NEPHELE checks convergence using the packed f16 bits actually stored, including overflow and monotonicity checks, so rounding cannot keep an already converged solve running.
+- Terrain AOV rendering follows the compiled pass order, including directional media injection before terrain shading when the graph requires it.
+- External media inputs and previous-frame history now have content and producer identities in the render cache, preventing missing-input errors and stale media reuse.
+- NEPHELE render certificates identify the registered shader modules used by each pass, rather than their pipeline labels.
 - Slow GPUs, such as software Vulkan on hosted Linux, no longer crash when one submission takes longer than 5 seconds. Waits for all GPU work in the native library now last until the device has really finished; on the GL backend they keep wgpu's own wait, because GL defers freeing objects still in use. Some waits are unchanged: waits for one specific submission in the vector code and the fence tracker (`src/core/fence_tracker.rs`), the frozen offline reference/hybrid path-tracer sources, the `policies` benchmark binary (`bench/upload_policies/policies.rs`), and three resource-tracker unit tests. Previously, wgpu 0.19's `Maintain::Wait` gave up after 5 seconds and then freed command buffers and buffers the device was still using.
 
 ## [1.45.0] - 2026-10-19

@@ -251,7 +251,7 @@ impl TerrainScene {
             timestamp_writes: None,
             occlusion_query_set: None,
         });
-        crate::core::shader_registry::record_shader_use("nephele.media.tonemap.pipeline");
+        crate::core::shader_registry::record_shader_use("nephele.media.tonemap.shader");
         pass.set_pipeline(&self.media_tonemap_pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
         pass.draw(0..3, 0..1);
