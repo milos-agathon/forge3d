@@ -1543,11 +1543,9 @@ impl TerrainMediaResources {
         let identity = medium.identity(density_version);
         if self.medium_identity != Some(identity) {
             // Legacy trace geometry is independent of the medium. Keep it when
-            // the viewer uploads its first homogeneous frame after the terrain.
+            // the viewer uploads its first canonical frame after the terrain.
             // Directional resources also own density-dependent allocations.
-            if matches!(medium.density(), crate::media::DensityField::Grid3D(_))
-                || self.terrain_trace.as_ref().is_some_and(|trace| trace.directional.is_some())
-            {
+            if self.terrain_trace.as_ref().is_some_and(|trace| trace.directional.is_some()) {
                 if let Some(previous) = self.terrain_trace.take() {
                     self.device_local_bytes = self.device_local_bytes.saturating_sub(previous.allocation_bytes);
                 }
@@ -1675,7 +1673,8 @@ impl TerrainMediaResources {
             nodes.active_indices=texels.chunks_exact(4).map(|p| {
                 if p[3]!=0 { active+=1; active } else { 0 }
             }).collect();
-            if self.density_froxel_count!=density_froxel_count {
+            if self.density_froxel_count!=density_froxel_count
+                && self.terrain_trace.as_ref().is_some_and(|trace| trace.directional.is_some()) {
                 if let Some(previous)=self.terrain_trace.take() {
                     self.device_local_bytes=self.device_local_bytes.saturating_sub(previous.allocation_bytes);
                 }
@@ -1857,7 +1856,8 @@ impl TerrainMediaResources {
         if self
             .terrain_trace
             .as_ref()
-            .is_some_and(|trace| trace.terrain_identity == terrain_identity)
+            .is_some_and(|trace| trace.terrain_identity == terrain_identity
+                && trace.directional.is_some() == self.canonical_density_nodes.is_some())
         {
             return Ok(());
         }
