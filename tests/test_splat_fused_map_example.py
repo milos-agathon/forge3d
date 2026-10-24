@@ -61,9 +61,21 @@ def test_parser_defaults():
     assert args.view is None
 
 
+def _redirect_home(monkeypatch, tmp_path):
+    """Point every home-directory lookup at ``tmp_path``.
+
+    ``Path.home()`` reads ``HOME`` on POSIX but ``USERPROFILE`` on Windows, so
+    setting only ``HOME`` leaves the test writing into — and deleting from —
+    the real ``~/.forge3d/datasets``. Both are set.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
+
+
 def test_hdr_cache_is_checksum_validated(tmp_path, monkeypatch):
     """A cached preset must be md5-checked, not trusted on size alone."""
-    monkeypatch.setenv("HOME", str(tmp_path))
+    _redirect_home(monkeypatch, tmp_path)
     mod = _load_module()
     cache = tmp_path / ".forge3d" / "datasets" / "hdri" / f"{mod.HDR_PRESET}_2k.hdr"
     cache.parent.mkdir(parents=True)
@@ -142,8 +154,7 @@ def test_the_dem_download_is_checked_against_its_pointer(tmp_path, monkeypatch):
     cache.mkdir(parents=True)
     bad = cache / "dem.tif"
     bad.write_bytes(b"corrupted" * 200)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    _redirect_home(monkeypatch, tmp_path)
 
     calls = []
 
