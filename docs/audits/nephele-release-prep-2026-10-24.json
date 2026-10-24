@@ -5,7 +5,7 @@
   "main_head": "d6b9e556586cceddb9c08f16ffc35f7d71fb4d88",
   "main_already_merged": true,
   "source_sha256_lf": {
-    "src/terrain/renderer/media.rs": "be3b015e8cdf1a1576ee88b2602d4344f3994c7bd6e753eb9c9a400038be336e",
+    "src/terrain/renderer/media.rs": "f70a99eb3e29c631bde25953a480ff0bedd3ba78e046591fd54e3605c092596e",
     "src/terrain/renderer/draw/execute.rs": "30915861158a7b05d7179fdfae1bc530693589e5f97b30c78a475695c0bb4ca9",
     "docs/audits/nephele-dem-frame-time-2026-10-22.py": "1a1dcb4471b4f65fe9e37f157aef49ec54682a6c8a2501990b265eff3be3ea09",
     "CHANGELOG.md": "b4d0b7a089669110ef99ebb8227c715f49279330c3f6304b9be1bae66cdaead1"
@@ -13,24 +13,21 @@
   "checks": {
     "fmt-final": {
       "exit_code": 0,
-      "command": "cargo fmt --check",
-      "seconds": 0.5729491
+      "seconds": 0.3759643
     },
     "clippy-final": {
-      "seconds": 36.3782303,
+      "seconds": 35.5948742,
       "TEMP": "D:/forge3d/.worktrees/nephele-146-release/.release-evidence/2026-10-24/release-prep/temp",
-      "TMP": "D:/forge3d/.worktrees/nephele-146-release/.release-evidence/2026-10-24/release-prep/temp",
-      "exit_code": 0,
       "command": "cargo forge3d-clippy-acceptance",
+      "exit_code": 0,
+      "TMP": "D:/forge3d/.worktrees/nephele-146-release/.release-evidence/2026-10-24/release-prep/temp",
       "CARGO_TARGET_DIR": "D:/forge3d/.worktrees/nephele-146-release/target"
     },
     "provenance-final": {
-      "seconds": 44.4943298,
       "features": "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
-      "TEMP": "D:/forge3d/.worktrees/nephele-146-release/.release-evidence/2026-10-24/release-prep/temp",
-      "TMP": "D:/forge3d/.worktrees/nephele-146-release/.release-evidence/2026-10-24/release-prep/temp",
       "exit_code": 0,
-      "CARGO_TARGET_DIR": "D:/forge3d/.worktrees/nephele-146-release/target"
+      "seconds": 59.0010634,
+      "source_line_endings": "CRLF"
     },
     "registry-tests": {
       "features": "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
@@ -144,5 +141,6 @@
   "Metal": "ABSENT",
   "WASM": "ABSENT",
   "merge_tag_publish_performed": false,
-  "protected_value_change": false
+  "protected_value_change": false,
+  "source_scanning_test_line_endings": "Normalizes CRLF; passed when compiled from actual CRLF source"
 }

@@ -4,7 +4,7 @@ This preparation starts at `024c7803d17814c447637208cb4535112c9ac166` on PR #172
 
 The real-DEM certificates at the base recorded nine `shader_provenance_missing` degradations on the first frame and three on the unchanged frame. NEPHELE registered modules as `nephele.media.froxel.shader`, `nephele.media.terrain_trace.shader` and `nephele.media.tonemap.shader`, but recorded pipeline labels as their identities. The execution calls now record the corresponding module labels, including the legacy terrain trace. All production NEPHELE modules already use `create_labeled_shader_module`; no shader source or new registration is needed. The unused per-dispatch pipeline-label string is removed.
 
-The new CPU Rust test compares recorded labels with module-registration labels in the production sources. The real-DEM producer now raises an error if either timed frame has any certificate degradation. A CPU check confirms that it accepts an empty degradation list and rejects a nonempty list for both frame states. This is stronger evidence collection, not a change to an acceptance gate or threshold.
+The new CPU Rust test compares recorded labels with module-registration labels in the production sources. It normalizes line endings before finding the test-module boundary, and also passed when compiled from actual CRLF source, matching a Windows checkout. The real-DEM producer now raises an error if either timed frame has any certificate degradation. A CPU check confirms that it accepts an empty degradation list and rejects a nonempty list for both frame states. This is stronger evidence collection, not a change to an acceptance gate or threshold.
 
 ## Owner decision and release notes
 

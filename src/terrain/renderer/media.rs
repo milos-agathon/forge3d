@@ -4270,7 +4270,8 @@ mod tests {
 
     #[test]
     fn nephele_recorded_shader_labels_are_registered_modules() {
-        let media = include_str!("media.rs")
+        let media_source = include_str!("media.rs").replace("\r\n", "\n");
+        let media = media_source
             .split("\n#[cfg(test)]\nmod tests {")
             .next()
             .unwrap();
