@@ -141,7 +141,7 @@ impl Viewer {
                 },
             );
             self.queue.submit(std::iter::once(enc.finish()));
-            self.device.poll(wgpu::Maintain::Wait);
+            crate::core::gpu::wait_for_device_idle(&self.device);
             let slice = staging.slice(..);
             let (tx, rx) = futures_intrusive::channel::shared::oneshot_channel();
             slice.map_async(wgpu::MapMode::Read, move |r| {

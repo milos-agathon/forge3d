@@ -1,0 +1,1711 @@
+{
+  "status": "FAILED_GATE6_DIAGNOSTIC_WALL_TIME; NOT RELEASE READY",
+  "head_sha": "bbda8eeb0f77f386126a15edd1268b74f48f537b",
+  "run_url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131",
+  "adapter": {
+    "backend": "Vulkan",
+    "device": 9348,
+    "device_type": "DiscreteGpu",
+    "driver": "NVIDIA",
+    "driver_info": "610.60",
+    "name": "NVIDIA GeForce RTX 3070",
+    "software_fallback": false,
+    "status": "ok",
+    "vendor": 4318
+  },
+  "fast_junit": {
+    "tests": 661,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "passed": 661
+  },
+  "contracts_environment_junit": {
+    "tests": 10,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "passed": 10
+  },
+  "environment_cases": [
+    {
+      "classname": "tests.test_nephele_environment_defects",
+      "name": "test_camera_visible_uniform_environment_readback",
+      "time": "4.878"
+    },
+    {
+      "classname": "tests.test_nephele_environment_defects",
+      "name": "test_shadow_scattering_component_readback",
+      "time": "9.799"
+    }
+  ],
+  "physical_junit": {
+    "tests": 6,
+    "failed": 1,
+    "errors": 0,
+    "skipped": 0,
+    "passed": 5
+  },
+  "trace_convergence": {
+    "order": 22,
+    "progress": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "elapsed_ms": 1380
+  },
+  "capture_diagnostics": {
+    "a": {
+      "adapter": "NVIDIA GeForce RTX 3070",
+      "backend": "Vulkan",
+      "density_device_local_bytes": 2148352,
+      "directional_transport": {
+        "cache_reused": false,
+        "converged": true,
+        "iteration_wall_milliseconds": 1360.0408,
+        "maximum_source_change": 0.0,
+        "maximum_surface_change": 0.0,
+        "orders": 22,
+        "surface_cache_dimensions": [
+          10,
+          10
+        ]
+      },
+      "driver": "NVIDIA 610.60",
+      "energy_accounting_residual": 2.980232238769531e-07,
+      "executed_multi_scatter": true,
+      "f16_flushed_max_value": 0.0,
+      "f16_flushed_sample_count": 0,
+      "froxel_depth_slices": 64,
+      "froxel_device_local_bytes": 7317276,
+      "host_visible_bytes": 16,
+      "majorant_device_local_bytes": 0,
+      "majorant_proof": "TrilinearConvexHull",
+      "majorant_valid": true,
+      "multiple_scatter_dispatches": 22,
+      "multiple_scatter_luminance": 0.07304514838324394,
+      "sample_count": 4096,
+      "single_scatter_dispatches": 1,
+      "single_scatter_luminance": 0.13255468824380756,
+      "source_revision": "bbda8eeb0f77f386126a15edd1268b74f48f537b",
+      "staging_readback_bytes": 102416,
+      "step_count": 341665,
+      "sun_transmittance_bias": "fine_midpoint_with_coarse_fine_abs_rgb_error",
+      "sun_transmittance_executed_steps": 36723,
+      "sun_transmittance_max_abs_error": 0.008301794528961182,
+      "sun_transmittance_max_segment_length": 68.22770690917969,
+      "sun_transmittance_method": "bounded_nested_midpoint",
+      "temporal_history_decision": "rejected",
+      "temporal_history_reason": "no prior media history exists",
+      "terrain_shading_model": "lambert_physical",
+      "terrain_trace_queries": 3608314,
+      "terrain_trace_queries_complete": true,
+      "uniform_ambient_radiance": null
+    },
+    "b": {
+      "adapter": "NVIDIA GeForce RTX 3070",
+      "backend": "Vulkan",
+      "density_device_local_bytes": 2148352,
+      "directional_transport": {
+        "cache_reused": false,
+        "converged": true,
+        "iteration_wall_milliseconds": 1348.4775,
+        "maximum_source_change": 0.0,
+        "maximum_surface_change": 0.0,
+        "orders": 22,
+        "surface_cache_dimensions": [
+          10,
+          10
+        ]
+      },
+      "driver": "NVIDIA 610.60",
+      "energy_accounting_residual": 2.980232238769531e-07,
+      "executed_multi_scatter": true,
+      "f16_flushed_max_value": 0.0,
+      "f16_flushed_sample_count": 0,
+      "froxel_depth_slices": 64,
+      "froxel_device_local_bytes": 7317276,
+      "host_visible_bytes": 16,
+      "majorant_device_local_bytes": 0,
+      "majorant_proof": "TrilinearConvexHull",
+      "majorant_valid": true,
+      "multiple_scatter_dispatches": 22,
+      "multiple_scatter_luminance": 0.07304514838324394,
+      "sample_count": 4096,
+      "single_scatter_dispatches": 1,
+      "single_scatter_luminance": 0.13255468824380756,
+      "source_revision": "bbda8eeb0f77f386126a15edd1268b74f48f537b",
+      "staging_readback_bytes": 102416,
+      "step_count": 341665,
+      "sun_transmittance_bias": "fine_midpoint_with_coarse_fine_abs_rgb_error",
+      "sun_transmittance_executed_steps": 36723,
+      "sun_transmittance_max_abs_error": 0.008301794528961182,
+      "sun_transmittance_max_segment_length": 68.22770690917969,
+      "sun_transmittance_method": "bounded_nested_midpoint",
+      "temporal_history_decision": "rejected",
+      "temporal_history_reason": "no prior media history exists",
+      "terrain_shading_model": "lambert_physical",
+      "terrain_trace_queries": 3608314,
+      "terrain_trace_queries_complete": true,
+      "uniform_ambient_radiance": null
+    }
+  },
+  "diagnostic_differences": [
+    {
+      "path": "diagnostics.directional_transport.iteration_wall_milliseconds",
+      "a": 1360.0408,
+      "b": 1348.4775
+    }
+  ],
+  "gates": {
+    "gate1": {
+      "metrics": {
+        "homogeneous": {
+          "mean": 0.605711,
+          "standard_error": 0.0004886976808870934,
+          "analytic": 0.6065306597126334,
+          "samples": 1000000
+        },
+        "heterogeneous": {
+          "mean": 0.4323316609017278,
+          "comparator": {
+            "mean": 0.43241938,
+            "samples": 100000000
+          },
+          "relative_error": 0.00020285653772550573
+        },
+        "majorant": {
+          "probe_count": 1000000,
+          "violation_count": 0,
+          "max_excess": -5.960464477539063e-08
+        },
+        "russian_roulette": {
+          "on": [
+            0.314637,
+            0.00041053407504033907
+          ],
+          "off": [
+            0.314603204687953,
+            0.0003907781260617572
+          ],
+          "analytic_oracle": 0.31477547222989327,
+          "relative_difference": 0.00010742202095659897,
+          "pairs": 1000000
+        }
+      },
+      "failures": []
+    },
+    "gate2": {
+      "metrics": {
+        "sample_count": 10000000,
+        "transmitted": 0.7216797,
+        "scattered_out": 0.2144632,
+        "absorbed": 0.0641738,
+        "relative_residual": 0.0003166999999999476,
+        "residual_standard_error": 0.00020721544651320425
+      },
+      "failures": []
+    },
+    "gate3": {
+      "metrics": {
+        "sky_cloud_delta_e_pass_fraction": 1.0,
+        "godray_roi_ssim": 0.9925840980179181
+      },
+      "failures": []
+    },
+    "gate4": {
+      "metrics": {
+        "shadow_delta_e_pass_fraction": 0.9974309569685292,
+        "medium_ablation_changed_fraction": 0.3870346598202824,
+        "terrain_occlusion_ablation_ssim": 0.9867465523727198,
+        "shadow_pixels": 1557,
+        "terrain_occlusion_mean_linear_luminance_change": 0.022053710105061672,
+        "terrain_occlusion_reference_mean_linear_luminance_change": 0.02187741965233074,
+        "terrain_occlusion_response_relative_error": 0.00805810079673406,
+        "terrain_occlusion_maximum_relative_error": 0.2
+      },
+      "failures": []
+    },
+    "gate5": {
+      "metrics": {
+        "compute_entry_texture_sample_compare_calls": 0,
+        "stale_disabled_shadow_comments": 0,
+        "naga_validated_assemblies": 356,
+        "ridgeline_within_one_slice_fraction": 1.0
+      },
+      "failures": []
+    },
+    "gate6": {
+      "metrics": {
+        "frame_hashes": [
+          "de2e1b8020ea809eddcdf37e803b2da8412c1db7d6bb5d3950fdba578ea1f3bc",
+          "de2e1b8020ea809eddcdf37e803b2da8412c1db7d6bb5d3950fdba578ea1f3bc"
+        ],
+        "process_ids": [
+          43816,
+          44628
+        ],
+        "memory": {
+          "density_majorant_device_local_bytes": 2148352,
+          "froxel_depth": 64,
+          "froxel_device_local_bytes": 7317276,
+          "output_dimensions": [
+            64,
+            64
+          ],
+          "peak_host_visible_bytes": 2242684,
+          "readback_bytes": 262144,
+          "staging_bytes": 102400
+        },
+        "termination_integration_steps": 217682,
+        "sun_transmittance": {
+          "method": "bounded_nested_midpoint",
+          "bias": "fine_midpoint_with_coarse_fine_abs_rgb_error",
+          "max_segment_length": 68.22770690917969,
+          "executed_steps": 36723,
+          "max_abs_error": 0.008301794528961182
+        }
+      },
+      "failures": [
+        "diagnostics identical across runs"
+      ]
+    }
+  },
+  "measured_image_metrics": {
+    "b1_fraction": 1.0,
+    "shaft_ssim": 0.9925840980179181,
+    "g4a_fraction": 0.9974309569685292,
+    "medium_changed_fraction": 0.3870346598202824,
+    "g4b_response": 0.022053710105061672,
+    "g4b_relative_error": 0.00805810079673406
+  },
+  "forecast": {
+    "b1_fraction": 1.0,
+    "shaft_ssim": 0.992349393985953,
+    "g4a_fraction": 0.9961464354527938,
+    "medium_changed_fraction": 0.37997432605905007,
+    "g4b_response": 0.022044067152454556,
+    "g4b_relative_error": 0.007617328861087248,
+    "margins": {
+      "b1_fraction": 0.050000000000000044,
+      "shaft_ssim": 0.042349393985953054,
+      "g4a_fraction": 0.046146435452793844,
+      "medium_changed_fraction": 0.27997432605905004,
+      "g4b_relative_error": 0.19238267113891278
+    },
+    "all_five_pass": true
+  },
+  "measured_minus_forecast": {
+    "b1_fraction": 0.0,
+    "shaft_ssim": 0.00023470403196512724,
+    "g4a_fraction": 0.0012845215157354373,
+    "medium_changed_fraction": 0.007060333761232329,
+    "g4b_response": 9.642952607115396e-06,
+    "g4b_relative_error": 0.0004407719356468113
+  },
+  "prior_physical": {
+    "run": 39580065706,
+    "run_url": "https://github.com/milos-agathon/forge3d/actions/runs/39580065706",
+    "metrics": {
+      "b1_fraction": 0.7127659574468085,
+      "shaft_ssim": 0.9916001251541653,
+      "g4a_fraction": 0.7109826589595376,
+      "medium_changed_fraction": 0.3215661103979461,
+      "g4b_response": 0.019629758417801648,
+      "g4b_relative_error": 0.1027388636433472,
+      "margins": {
+        "b1_fraction": -0.23723404255319147,
+        "shaft_ssim": 0.041600125154165335,
+        "g4a_fraction": -0.23901734104046235,
+        "medium_changed_fraction": 0.22156611039794608,
+        "g4b_relative_error": 0.09726113635665282
+      },
+      "all_five_pass": false
+    },
+    "mean_absolute_in_scatter_rgb_error": {
+      "sky": [
+        0.0003656217595562339,
+        0.0003432325611356646,
+        0.00030062461155466735
+      ],
+      "terrain": [
+        0.0001812250557122752,
+        0.00016276123642455786,
+        0.00013771925296168774
+      ],
+      "shadow": [
+        0.00018122384790331125,
+        0.000162787371664308,
+        0.00013772929378319532
+      ]
+    },
+    "mean_absolute_transmittance_rgb_error": {
+      "sky": [
+        0.00012404228618834168,
+        0.00012421063729561865,
+        0.00012947725190315396
+      ],
+      "terrain": [
+        0.0002462560951244086,
+        0.0002538560947868973,
+        0.00024037979892455041
+      ],
+      "shadow": [
+        0.0002464142453391105,
+        0.0002538623521104455,
+        0.00024053418019320816
+      ]
+    }
+  },
+  "dem_1500_frame_time": "ABSENT: CI benchmark step skipped after Gate 6 failed",
+  "evidence_sha256": {
+    "checked-out-head.txt": "1cd7d2ff698002f79ffd3c2978fa10ce4c39bb7bd3fa724ae84c1a53cdd872a1",
+    "fast-junit.xml": "a6a3b88d31712596af0eee8f03d38adfead31d743e9117274a14a8dc52d53a92",
+    "contracts-environment-junit.xml": "651a5211ee21f1a9e9e9b6024d5644c9b4b86f7797edd1418f25beb16c766bfd",
+    "junit.xml": "e3b3428f9538244dea87c1c22b73a8798f8d2f676a518da94c83b8681e72913a",
+    "directional-trace.log": "9599d4c8c65c643ed365e87d63a239bd26b389aa9eb9cbf5e6b6c5b73e9651c9",
+    "run-a.json": "4fe0a8e3f35c812d037963bf6a72e49f1c8fe5f6a0f73e43e41977c61e06e599",
+    "run-b.json": "b10fec52004657ed4bfab840947a303902d36837b351c959cad710af325fc98b"
+  },
+  "date": "2026-10-24",
+  "authorization_words": "Two fixes, one commit, then dispatch scope=nephele with the trace on.",
+  "commit": {
+    "base_sha": "95b66c50566e38006aa2e7ac5ecb2065e9253731",
+    "authorization": "Two fixes, one commit, then dispatch scope=nephele with the trace on.",
+    "files": [
+      {
+        "path": "src/shaders/nephele_realtime_terrain_trace.wgsl",
+        "old_sha256": "a69d7b849d8655ecc88a490b96d969c54632056e05de76525ea35c39a84d3ca3",
+        "new_sha256": "3a79dd45cb71fd3ec32c8e311570a4cda97ef2a10830842b49c94191be6f0590"
+      },
+      {
+        "path": "src/terrain/renderer/aov.rs",
+        "old_sha256": "8305be1c3a618e27cd237ba07ca02c35d21d553836fe7924084db60664b4829e",
+        "new_sha256": "01b134b65d215c48fc4acd6f631bd7fc27a7700214eee8da100fb21cd356a062"
+      },
+      {
+        "path": "src/terrain/renderer/render_graph.rs",
+        "old_sha256": "58d4ecd1f873459d3f3e5f2629d1d37f1780d617a1791a8075636106a401f0e2",
+        "new_sha256": "d55407189c54591ea22d8a7acd02ddc965c3bb5b957c8caa7cfa92273a03f8e8"
+      }
+    ],
+    "PINNED_TERRAIN_SOURCE_HASH": {
+      "old": "0x17ad_c1fb_40ed_8189",
+      "new": "0x17ad_c1fb_40ed_8189"
+    },
+    "PINNED_HYBRID_KERNEL_SOURCE_HASH": {
+      "old": "0x32c0_583b_cf1a_f865",
+      "new": "0x32c0_583b_cf1a_f865"
+    },
+    "f32_inventory": {
+      "old_count": 1936,
+      "new_count": 1936,
+      "old_digest": "8f9f378ce8e27a98e9b99961073ae70128584485778adf1dc2c597c464c0cee7",
+      "new_digest": "8f9f378ce8e27a98e9b99961073ae70128584485778adf1dc2c597c464c0cee7"
+    },
+    "shader_contract_changes": [],
+    "ledger_changes": [],
+    "certificate_changes": [],
+    "existing_test_assertion_changes": [],
+    "new_tests": [
+      "directional_aov_execution_follows_the_compiled_plan"
+    ],
+    "unconfigured_trace_assembly_fnv64": {
+      "old": "0x3e9a8b6bee37c914",
+      "new": "0xcf62804a9054a070"
+    },
+    "new_resources": 0,
+    "stopping_rule": "unchanged: no stored bit changes, no cap",
+    "head_sha": "bbda8eeb0f77f386126a15edd1268b74f48f537b",
+    "committed_bytes_exact": true,
+    "source_clean": true
+  },
+  "artifact": {
+    "id": 12536620801,
+    "name": "nephele-physical-gpu-evidence-40031822131-1",
+    "size_bytes": 42013486
+  },
+  "workflow": {
+    "conclusion": "failure",
+    "headSha": "bbda8eeb0f77f386126a15edd1268b74f48f537b",
+    "jobs": [
+      {
+        "completedAt": "2026-10-23T22:10:26Z",
+        "conclusion": "success",
+        "databaseId": 120681663269,
+        "name": "CI Preflight",
+        "startedAt": "2026-10-23T22:10:04Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-23T22:10:05Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-23T22:10:05Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:13Z",
+            "conclusion": "success",
+            "name": "Checkout live policy base",
+            "number": 2,
+            "startedAt": "2026-10-23T22:10:05Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:14Z",
+            "conclusion": "success",
+            "name": "Resolve protected policy base for manual acceptance",
+            "number": 3,
+            "startedAt": "2026-10-23T22:10:13Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:14Z",
+            "conclusion": "success",
+            "name": "Snapshot live policy base",
+            "number": 4,
+            "startedAt": "2026-10-23T22:10:14Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:18Z",
+            "conclusion": "success",
+            "name": "Checkout trusted CI contracts",
+            "number": 5,
+            "startedAt": "2026-10-23T22:10:14Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:18Z",
+            "conclusion": "skipped",
+            "name": "Materialize current-base candidate tree",
+            "number": 6,
+            "startedAt": "2026-10-23T22:10:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:18Z",
+            "conclusion": "success",
+            "name": "Materialize manual-dispatch candidate tree",
+            "number": 7,
+            "startedAt": "2026-10-23T22:10:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:18Z",
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v5",
+            "number": 8,
+            "startedAt": "2026-10-23T22:10:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:24Z",
+            "conclusion": "success",
+            "name": "Validate workflow and cost-control contracts",
+            "number": 9,
+            "startedAt": "2026-10-23T22:10:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:24Z",
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v5",
+            "number": 16,
+            "startedAt": "2026-10-23T22:10:24Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:24Z",
+            "conclusion": "success",
+            "name": "Post Checkout trusted CI contracts",
+            "number": 17,
+            "startedAt": "2026-10-23T22:10:24Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:24Z",
+            "conclusion": "success",
+            "name": "Post Checkout live policy base",
+            "number": 18,
+            "startedAt": "2026-10-23T22:10:24Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:24Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 19,
+            "startedAt": "2026-10-23T22:10:24Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681663269"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:40Z",
+        "conclusion": "success",
+        "databaseId": 120681814342,
+        "name": "Visual Golden Paths",
+        "startedAt": "2026-10-23T22:10:28Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-23T22:10:30Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-23T22:10:29Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:37Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@v4",
+            "number": 2,
+            "startedAt": "2026-10-23T22:10:30Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:38Z",
+            "conclusion": "success",
+            "name": "Detect visual golden changes",
+            "number": 3,
+            "startedAt": "2026-10-23T22:10:37Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:38Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v4",
+            "number": 6,
+            "startedAt": "2026-10-23T22:10:38Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:38Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 7,
+            "startedAt": "2026-10-23T22:10:38Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681814342"
+      },
+      {
+        "completedAt": "2026-10-23T22:16:37Z",
+        "conclusion": "success",
+        "databaseId": 120681814358,
+        "name": "Fast Contract",
+        "startedAt": "2026-10-23T22:10:28Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-23T22:10:30Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-23T22:10:29Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:35Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@v4",
+            "number": 2,
+            "startedAt": "2026-10-23T22:10:30Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:35Z",
+            "conclusion": "success",
+            "name": "Run actions/setup-python@v5",
+            "number": 3,
+            "startedAt": "2026-10-23T22:10:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:45Z",
+            "conclusion": "success",
+            "name": "Run dtolnay/rust-toolchain@1.97.1",
+            "number": 4,
+            "startedAt": "2026-10-23T22:10:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:11:06Z",
+            "conclusion": "success",
+            "name": "Install focused build and test dependencies",
+            "number": 5,
+            "startedAt": "2026-10-23T22:10:45Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:12:44Z",
+            "conclusion": "success",
+            "name": "Check formatting and routine Rust contracts",
+            "number": 6,
+            "startedAt": "2026-10-23T22:11:06Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:14:57Z",
+            "conclusion": "success",
+            "name": "Build the development extension once",
+            "number": 7,
+            "startedAt": "2026-10-23T22:12:44Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:16:35Z",
+            "conclusion": "success",
+            "name": "Run focused CENSOR truth contracts",
+            "number": 8,
+            "startedAt": "2026-10-23T22:14:57Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:16:35Z",
+            "conclusion": "success",
+            "name": "Post Run actions/setup-python@v5",
+            "number": 15,
+            "startedAt": "2026-10-23T22:16:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:16:35Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v4",
+            "number": 16,
+            "startedAt": "2026-10-23T22:16:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:16:35Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "startedAt": "2026-10-23T22:16:35Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681814358"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:45Z",
+        "conclusion": "success",
+        "databaseId": 120681814511,
+        "name": "Prepare LFS Fixtures",
+        "startedAt": "2026-10-23T22:10:28Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-23T22:10:29Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-23T22:10:29Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:34Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@v4",
+            "number": 2,
+            "startedAt": "2026-10-23T22:10:29Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:36Z",
+            "conclusion": "success",
+            "name": "Download the required LFS objects once",
+            "number": 3,
+            "startedAt": "2026-10-23T22:10:34Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:40Z",
+            "conclusion": "success",
+            "name": "Package lane-specific fixture subsets",
+            "number": 4,
+            "startedAt": "2026-10-23T22:10:36Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:40Z",
+            "conclusion": "success",
+            "name": "Package the full-resolution NEPHELE DEM",
+            "number": 5,
+            "startedAt": "2026-10-23T22:10:40Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:44Z",
+            "conclusion": "success",
+            "name": "Upload shared LFS fixture bundles",
+            "number": 6,
+            "startedAt": "2026-10-23T22:10:40Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:44Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v4",
+            "number": 12,
+            "startedAt": "2026-10-23T22:10:44Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:44Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 13,
+            "startedAt": "2026-10-23T22:10:44Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681814511"
+      },
+      {
+        "completedAt": "2026-10-23T22:24:09Z",
+        "conclusion": "success",
+        "databaseId": 120681814572,
+        "name": "Build Wheel (Windows) / Build wheels-windows",
+        "startedAt": "2026-10-23T22:10:28Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-23T22:10:30Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-23T22:10:29Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:45Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@v4",
+            "number": 2,
+            "startedAt": "2026-10-23T22:10:30Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:10:45Z",
+            "conclusion": "success",
+            "name": "Prove exact-head checkout",
+            "number": 3,
+            "startedAt": "2026-10-23T22:10:45Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:24:04Z",
+            "conclusion": "success",
+            "name": "Build wheel",
+            "number": 4,
+            "startedAt": "2026-10-23T22:10:45Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:24:06Z",
+            "conclusion": "success",
+            "name": "Upload wheel artifact",
+            "number": 5,
+            "startedAt": "2026-10-23T22:24:04Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:24:08Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v4",
+            "number": 10,
+            "startedAt": "2026-10-23T22:24:06Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:24:09Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 11,
+            "startedAt": "2026-10-23T22:24:08Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681814572"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:26Z",
+        "conclusion": "skipped",
+        "databaseId": 120681815909,
+        "name": "ORBIS Wasm Artifact",
+        "startedAt": "2026-10-23T22:10:27Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681815909"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:26Z",
+        "conclusion": "skipped",
+        "databaseId": 120681816234,
+        "name": "Build Wheel (Linux aarch64)",
+        "startedAt": "2026-10-23T22:10:27Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681816234"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:27Z",
+        "conclusion": "skipped",
+        "databaseId": 120681816401,
+        "name": "Python Compatibility (macOS)",
+        "startedAt": "2026-10-23T22:10:27Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681816401"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:27Z",
+        "conclusion": "skipped",
+        "databaseId": 120681816577,
+        "name": "Install Smoke (linux-arm)",
+        "startedAt": "2026-10-23T22:10:27Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681816577"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:26Z",
+        "conclusion": "skipped",
+        "databaseId": 120681816597,
+        "name": "Build Documentation",
+        "startedAt": "2026-10-23T22:10:27Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681816597"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:27Z",
+        "conclusion": "skipped",
+        "databaseId": 120681816855,
+        "name": "Python Compatibility (Linux boundaries)",
+        "startedAt": "2026-10-23T22:10:27Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681816855"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:27Z",
+        "conclusion": "skipped",
+        "databaseId": 120681816914,
+        "name": "Interactive Viewer (macOS)",
+        "startedAt": "2026-10-23T22:10:27Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681816914"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:26Z",
+        "conclusion": "skipped",
+        "databaseId": 120681816960,
+        "name": "Build Wheel (macOS)",
+        "startedAt": "2026-10-23T22:10:27Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681816960"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:26Z",
+        "conclusion": "skipped",
+        "databaseId": 120681817030,
+        "name": "Build Wheel (Linux)",
+        "startedAt": "2026-10-23T22:10:27Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681817030"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:27Z",
+        "conclusion": "skipped",
+        "databaseId": 120681817091,
+        "name": "TERMINUS 10k Deterministic Fuzzer (CPU)",
+        "startedAt": "2026-10-23T22:10:27Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681817091"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:26Z",
+        "conclusion": "skipped",
+        "databaseId": 120681817097,
+        "name": "Test Rust (${{ matrix.os }})",
+        "startedAt": "2026-10-23T22:10:27Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681817097"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:40Z",
+        "conclusion": "skipped",
+        "databaseId": 120681899040,
+        "name": "Visual Goldens (optional Metal diagnostic)",
+        "startedAt": "2026-10-23T22:10:40Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681899040"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:40Z",
+        "conclusion": "skipped",
+        "databaseId": 120681899567,
+        "name": "HELIOS Conservative Descent (Rust)",
+        "startedAt": "2026-10-23T22:10:40Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681899567"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:40Z",
+        "conclusion": "skipped",
+        "databaseId": 120681900335,
+        "name": "SUBSTRATIA Physical GPU (optional Metal diagnostic)",
+        "startedAt": "2026-10-23T22:10:41Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681900335"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:46Z",
+        "conclusion": "skipped",
+        "databaseId": 120681932827,
+        "name": "Python Full Matrix (Linux)",
+        "startedAt": "2026-10-23T22:10:46Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681932827"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:46Z",
+        "conclusion": "skipped",
+        "databaseId": 120681933340,
+        "name": "Python Core (Linux 3.11 full)",
+        "startedAt": "2026-10-23T22:10:46Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681933340"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:46Z",
+        "conclusion": "skipped",
+        "databaseId": 120681933489,
+        "name": "Python Full Matrix (macOS)",
+        "startedAt": "2026-10-23T22:10:46Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681933489"
+      },
+      {
+        "completedAt": "2026-10-23T22:10:46Z",
+        "conclusion": "skipped",
+        "databaseId": 120681933555,
+        "name": "Test Python Slow (ubuntu, 3.11)",
+        "startedAt": "2026-10-23T22:10:46Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120681933555"
+      },
+      {
+        "completedAt": "2026-10-23T22:16:43Z",
+        "conclusion": "success",
+        "databaseId": 120684072111,
+        "name": "PR Core Success",
+        "startedAt": "2026-10-23T22:16:39Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-23T22:16:40Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-23T22:16:40Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:16:40Z",
+            "conclusion": "success",
+            "name": "Enforce the hosted core contract",
+            "number": 2,
+            "startedAt": "2026-10-23T22:16:40Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:16:41Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 3,
+            "startedAt": "2026-10-23T22:16:40Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120684072111"
+      },
+      {
+        "completedAt": "2026-10-23T22:33:06Z",
+        "conclusion": "failure",
+        "databaseId": 120686814737,
+        "name": "NEPHELE (NVIDIA Vulkan)",
+        "startedAt": "2026-10-23T22:24:11Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-23T22:24:15Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-23T22:24:12Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:24:22Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@v4",
+            "number": 2,
+            "startedAt": "2026-10-23T22:24:15Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:24:26Z",
+            "conclusion": "success",
+            "name": "Restore committed LF bytes in the reused workspace",
+            "number": 3,
+            "startedAt": "2026-10-23T22:24:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:24:26Z",
+            "conclusion": "success",
+            "name": "Initialize exact-head NEPHELE evidence",
+            "number": 4,
+            "startedAt": "2026-10-23T22:24:26Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:24:59Z",
+            "conclusion": "success",
+            "name": "Download the shared DEM fixture bundle",
+            "number": 5,
+            "startedAt": "2026-10-23T22:24:26Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:25:00Z",
+            "conclusion": "success",
+            "name": "Restore the full-resolution DEM",
+            "number": 6,
+            "startedAt": "2026-10-23T22:24:59Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:25:05Z",
+            "conclusion": "success",
+            "name": "Run actions/download-artifact@v4",
+            "number": 7,
+            "startedAt": "2026-10-23T22:25:00Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:25:10Z",
+            "conclusion": "success",
+            "name": "Install exact-head wheel and acceptance dependencies",
+            "number": 8,
+            "startedAt": "2026-10-23T22:25:05Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:25:12Z",
+            "conclusion": "success",
+            "name": "Require literal physical NVIDIA Vulkan adapter",
+            "number": 9,
+            "startedAt": "2026-10-23T22:25:10Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:27:57Z",
+            "conclusion": "success",
+            "name": "Execute exhaustive statistical and shader producers",
+            "number": 10,
+            "startedAt": "2026-10-23T22:25:12Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:30:41Z",
+            "conclusion": "success",
+            "name": "Run installed-wheel fast validation without skips",
+            "number": 11,
+            "startedAt": "2026-10-23T22:27:57Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:30:46Z",
+            "conclusion": "success",
+            "name": "Trace one directional transport capture before environment cases",
+            "number": 12,
+            "startedAt": "2026-10-23T22:30:41Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:32:23Z",
+            "conclusion": "success",
+            "name": "Run shader contracts and both NEPHELE environment cases on the physical GPU",
+            "number": 13,
+            "startedAt": "2026-10-23T22:30:46Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:32:31Z",
+            "conclusion": "success",
+            "name": "Capture two independent clean physical runs and ablations",
+            "number": 14,
+            "startedAt": "2026-10-23T22:32:23Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:32:36Z",
+            "conclusion": "failure",
+            "name": "Run exactly six zero-skip NEPHELE physical cases",
+            "number": 15,
+            "startedAt": "2026-10-23T22:32:31Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:32:36Z",
+            "conclusion": "skipped",
+            "name": "Evaluate all six physical acceptance gates",
+            "number": 16,
+            "startedAt": "2026-10-23T22:32:36Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:32:36Z",
+            "conclusion": "skipped",
+            "name": "Measure NEPHELE frame latency on the original 1500-square Gore Range DEM",
+            "number": 17,
+            "startedAt": "2026-10-23T22:32:36Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:32:36Z",
+            "conclusion": "skipped",
+            "name": "Record physical lane RAN and verifier PASS",
+            "number": 18,
+            "startedAt": "2026-10-23T22:32:36Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:33:00Z",
+            "conclusion": "success",
+            "name": "Upload scoped NEPHELE physical evidence",
+            "number": 19,
+            "startedAt": "2026-10-23T22:32:36Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:33:02Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v4",
+            "number": 38,
+            "startedAt": "2026-10-23T22:33:00Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:33:02Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 39,
+            "startedAt": "2026-10-23T22:33:02Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120686814737"
+      },
+      {
+        "completedAt": "2026-10-23T22:24:10Z",
+        "conclusion": "skipped",
+        "databaseId": 120686815984,
+        "name": "Python Full Matrix (Windows)",
+        "startedAt": "2026-10-23T22:24:10Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120686815984"
+      },
+      {
+        "completedAt": "2026-10-23T22:24:10Z",
+        "conclusion": "skipped",
+        "databaseId": 120686816091,
+        "name": "M-06 Full Geospatial Viewer (NVIDIA Vulkan)",
+        "startedAt": "2026-10-23T22:24:10Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120686816091"
+      },
+      {
+        "completedAt": "2026-10-23T22:24:10Z",
+        "conclusion": "skipped",
+        "databaseId": 120686816146,
+        "name": "Visual Goldens (NVIDIA Vulkan)",
+        "startedAt": "2026-10-23T22:24:10Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120686816146"
+      },
+      {
+        "completedAt": "2026-10-23T22:24:10Z",
+        "conclusion": "skipped",
+        "databaseId": 120686816202,
+        "name": "TESSELLA Out-of-Core Terrain (NVIDIA Vulkan)",
+        "startedAt": "2026-10-23T22:24:10Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120686816202"
+      },
+      {
+        "completedAt": "2026-10-23T22:24:10Z",
+        "conclusion": "skipped",
+        "databaseId": 120686816252,
+        "name": "ANAMNESIS Physical Seed (Windows Vulkan)",
+        "startedAt": "2026-10-23T22:24:10Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120686816252"
+      },
+      {
+        "completedAt": "2026-10-23T22:24:10Z",
+        "conclusion": "skipped",
+        "databaseId": 120686816321,
+        "name": "Hosted ANAMNESIS Determinism",
+        "startedAt": "2026-10-23T22:24:10Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120686816321"
+      },
+      {
+        "completedAt": "2026-10-23T22:24:10Z",
+        "conclusion": "skipped",
+        "databaseId": 120686816396,
+        "name": "SUBSTRATIA Physical GPU (NVIDIA Vulkan)",
+        "startedAt": "2026-10-23T22:24:10Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120686816396"
+      },
+      {
+        "completedAt": "2026-10-23T22:24:10Z",
+        "conclusion": "skipped",
+        "databaseId": 120686816406,
+        "name": "ANAMNESIS 600-frame Production (NVIDIA Vulkan)",
+        "startedAt": "2026-10-23T22:24:10Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120686816406"
+      },
+      {
+        "completedAt": "2026-10-23T22:24:10Z",
+        "conclusion": "skipped",
+        "databaseId": 120686816435,
+        "name": "Python Compatibility (Windows)",
+        "startedAt": "2026-10-23T22:24:10Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120686816435"
+      },
+      {
+        "completedAt": "2026-10-23T22:24:10Z",
+        "conclusion": "skipped",
+        "databaseId": 120686816445,
+        "name": "Hosted F3DZ Determinism",
+        "startedAt": "2026-10-23T22:24:10Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120686816445"
+      },
+      {
+        "completedAt": "2026-10-23T22:24:10Z",
+        "conclusion": "skipped",
+        "databaseId": 120686817133,
+        "name": "F3DZ Codec (NVIDIA Vulkan)",
+        "startedAt": "2026-10-23T22:24:10Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120686817133"
+      },
+      {
+        "completedAt": "2026-10-23T22:24:10Z",
+        "conclusion": "skipped",
+        "databaseId": 120686817440,
+        "name": "HELIOS (NVIDIA DX12 + Vulkan)",
+        "startedAt": "2026-10-23T22:24:10Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120686817440"
+      },
+      {
+        "completedAt": "2026-10-23T22:24:10Z",
+        "conclusion": "skipped",
+        "databaseId": 120686817482,
+        "name": "Hosted Render Determinism",
+        "startedAt": "2026-10-23T22:24:10Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120686817482"
+      },
+      {
+        "completedAt": "2026-10-23T22:24:10Z",
+        "conclusion": "skipped",
+        "databaseId": 120686818255,
+        "name": "ANAMNESIS Physical Consume (Windows DX12)",
+        "startedAt": "2026-10-23T22:24:10Z",
+        "status": "completed",
+        "steps": [],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120686818255"
+      },
+      {
+        "completedAt": "2026-10-23T22:33:12Z",
+        "conclusion": "failure",
+        "databaseId": 120689997737,
+        "name": "Full Acceptance Summary",
+        "startedAt": "2026-10-23T22:33:08Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-10-23T22:33:09Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-10-23T22:33:09Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:33:09Z",
+            "conclusion": "success",
+            "name": "Record acceptance scope: nephele",
+            "number": 2,
+            "startedAt": "2026-10-23T22:33:09Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:33:09Z",
+            "conclusion": "failure",
+            "name": "Enforce every selected acceptance family",
+            "number": 3,
+            "startedAt": "2026-10-23T22:33:09Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-10-23T22:33:09Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 4,
+            "startedAt": "2026-10-23T22:33:09Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131/job/120689997737"
+      }
+    ],
+    "status": "completed",
+    "url": "https://github.com/milos-agathon/forge3d/actions/runs/40031822131"
+  },
+  "source_clean": true,
+  "protected_diffs_empty": true,
+  "tests_no_silent_degradation_sha256": "a1486925d016bec941303efabc94362a6331a986f568d9dee0893060759dffca",
+  "checks": {
+    "rust": {
+      "env": {
+        "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target"
+      },
+      "checks": [
+        {
+          "name": "fmt",
+          "command": [
+            "cargo",
+            "fmt",
+            "--check"
+          ],
+          "exit_code": 0,
+          "seconds": 0.5424492999445647
+        },
+        {
+          "name": "clippy-acceptance",
+          "command": [
+            "cargo",
+            "forge3d-clippy-acceptance"
+          ],
+          "exit_code": 0,
+          "seconds": 83.45446819998324
+        },
+        {
+          "name": "terrain-media-graph",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "terrain::renderer::render_graph::tests::"
+          ],
+          "exit_code": 0,
+          "seconds": 166.47683509998024
+        },
+        {
+          "name": "media-shader",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "terrain::realtime_media::tests::shaders_validate_and_compute_call_graphs_use_manual_shadows",
+            "--",
+            "--exact"
+          ],
+          "exit_code": 0,
+          "seconds": 2.593190199986566
+        }
+      ]
+    },
+    "f32_final": {
+      "final_source_f32_count": 1936,
+      "final_source_f32_digest": "8f9f378ce8e27a98e9b99961073ae70128584485778adf1dc2c597c464c0cee7",
+      "freeze_pass": true,
+      "existing_assertion_lines_unchanged": {
+        "src/terrain/renderer/aov.rs": true,
+        "src/terrain/renderer/render_graph.rs": true
+      },
+      "seconds": 3.3249412999721244
+    },
+    "naga": {
+      "assemblies": 356,
+      "unresolved": [],
+      "compute_comparison_calls": 0,
+      "pins": {
+        "PINNED_DETERMINISM_SOURCE_HASH": {
+          "configured": "0xd90456ee98b56d96",
+          "matching_assemblies": []
+        },
+        "PINNED_HYBRID_KERNEL_SOURCE_HASH": {
+          "configured": "0x32c0583bcf1af865",
+          "matching_assemblies": [
+            "src/path_tracing/hybrid_compute/setup.rs:13:new_with_source_and_scene<-src/path_tracing/hybrid_compute/setup.rs:5:new_with_source",
+            "src/path_tracing/hybrid_compute/setup.rs:25:create_labeled_shader_module<-src/path_tracing/hybrid_compute/setup.rs:13:new_with_source_and_scene<-src/path_tracing/hybrid_compute/setup.rs:5:new_with_source",
+            "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/hybrid_compute/setup.rs:25:create_labeled_shader_module<-src/path_tracing/hybrid_compute/setup.rs:13:new_with_source_and_scene<-src/path_tracing/hybrid_compute/setup.rs:5:new_with_source"
+          ]
+        },
+        "PINNED_TERRAIN_SOURCE_HASH": {
+          "configured": "0x17adc1fb40ed8189",
+          "matching_assemblies": [
+            "src/terrain/renderer/orbis_capture.rs:353:create_shader_module",
+            "src/terrain/renderer/pipeline_cache.rs:161:create_labeled_shader_module",
+            "src/terrain/renderer/pipeline_cache.rs:235:create_labeled_shader_module",
+            "src/terrain/renderer/pipeline_cache.rs:314:create_labeled_shader_module",
+            "src/terrain/renderer/pipeline_cache.rs:757:create_labeled_shader_module",
+            "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:161:create_labeled_shader_module",
+            "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:235:create_labeled_shader_module",
+            "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:314:create_labeled_shader_module",
+            "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:757:create_labeled_shader_module"
+          ]
+        }
+      },
+      "trace_assemblies": [
+        {
+          "assembly": "src/terrain/renderer/media.rs:1821:create_labeled_shader_module",
+          "fnv64": "0xcf62804a9054a070",
+          "sha256": "e381395ec6f91cacbbad9ff193aece9c6c698fb1d8bbbdbeebd6d6bbfd7c7025"
+        },
+        {
+          "assembly": "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/media.rs:1821:create_labeled_shader_module",
+          "fnv64": "0xcf62804a9054a070",
+          "sha256": "e381395ec6f91cacbbad9ff193aece9c6c698fb1d8bbbdbeebd6d6bbfd7c7025"
+        }
+      ],
+      "seconds": 194.75059810001403
+    },
+    "integer_delta": {
+      "valid_field_delta_cases": 126976,
+      "all_65536_field_validity_checks": true,
+      "all_finite_decreases_rejected": true,
+      "signed_zero_normalized": true,
+      "exact_ieee_f32_difference_bits": true,
+      "seconds": 0.24922800000058487,
+      "shader_sha256": "3a79dd45cb71fd3ec32c8e311570a4cda97ef2a10830842b49c94191be6f0590"
+    },
+    "wheel": {
+      "head_sha": "bbda8eeb0f77f386126a15edd1268b74f48f537b",
+      "env": {
+        "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+        "GITHUB_SHA": "bbda8eeb0f77f386126a15edd1268b74f48f537b",
+        "PYTHONPATH": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\two-fixes\\installed-wheel",
+        "FORGE3D_NO_BOOTSTRAP": "1",
+        "FORGE3D_TEST_INSTALLED_WHEEL": "1",
+        "TEMP": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\two-fixes\\temp",
+        "TMP": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\two-fixes\\temp"
+      },
+      "checks": [
+        {
+          "name": "wheel-build",
+          "command": [
+            "C:/Users/milos/AppData/Local/Programs/Python/Python313/Scripts/maturin.exe",
+            "build",
+            "--release",
+            "--locked",
+            "--interpreter",
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-22\\analysis-venv\\Scripts\\python.exe",
+            "--out",
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\two-fixes\\wheels"
+          ],
+          "exit_code": 0,
+          "seconds": 571.520288700005
+        },
+        {
+          "name": "wheel-install",
+          "command": [
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-22\\analysis-venv\\Scripts\\python.exe",
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            "--no-deps",
+            "--ignore-installed",
+            "--target",
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\two-fixes\\installed-wheel",
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\two-fixes\\wheels\\forge3d-1.46.0-cp310-abi3-win_amd64.whl"
+          ],
+          "exit_code": 0,
+          "seconds": 7.893039999995381
+        },
+        {
+          "name": "native-identity",
+          "command": [
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-22\\analysis-venv\\Scripts\\python.exe",
+            "-c",
+            "import forge3d._forge3d as n,hashlib,json; from pathlib import Path; p=Path(n.__file__); actual=hashlib.sha256(p.read_bytes()).hexdigest(); assert actual=='b0cbe035719d868c89df9300ec51fc1637eb4d2eaf36e1fedf6a4e9c493eb035'; assert str(p).startswith('D:\\\\forge3d\\\\.worktrees\\\\nephele-146-release\\\\.release-evidence\\\\2026-10-23\\\\two-fixes\\\\installed-wheel'); print(json.dumps(dict(native=str(p),sha256=actual)))"
+          ],
+          "exit_code": 0,
+          "seconds": 3.035923100018408
+        },
+        {
+          "name": "cpu-pytest",
+          "command": [
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-22\\analysis-venv\\Scripts\\python.exe",
+            "-m",
+            "pytest",
+            "tests/test_world_coord_f32_gate.py",
+            "tests/test_nephele_acceptance.py",
+            "tests/test_nephele_fixture_contracts.py",
+            "tests/test_nephele_public_api.py",
+            "--basetemp=D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\two-fixes\\pytest-cpu",
+            "--junitxml=D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\two-fixes\\cpu-junit.xml",
+            "-q",
+            "--tb=short"
+          ],
+          "exit_code": 0,
+          "seconds": 82.76351769996108
+        }
+      ]
+    },
+    "wheel_provenance": {
+      "head_sha": "bbda8eeb0f77f386126a15edd1268b74f48f537b",
+      "wheel": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\two-fixes\\wheels\\forge3d-1.46.0-cp310-abi3-win_amd64.whl",
+      "wheel_sha256": "8d26e0e59bba751380f4d95b3e8c3c8802add08e6a120d66f2d9f90c664a899a",
+      "native_sha256": "b0cbe035719d868c89df9300ec51fc1637eb4d2eaf36e1fedf6a4e9c493eb035",
+      "embedded_head_verified": true
+    },
+    "commit_hook": {
+      "seconds": 41.6686605,
+      "exit_code": 0
+    }
+  },
+  "environment": {
+    "python": "3.13.14 (tags/v3.13.14:fd17997, Jun 10 2026, 13:03:48) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target"
+  },
+  "features": {
+    "cargo_aliases": {
+      "forge3d-clippy": "clippy --workspace --all-targets --features extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion -- -D warnings",
+      "forge3d-clippy-acceptance": "clippy --workspace --all-targets --features extension-module,default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,atmosphere-bake,enable-globe,splat-fusion -- -D warnings"
+    },
+    "wheel": [
+      "extension-module",
+      "weighted-oit",
+      "enable-pbr",
+      "enable-tbn",
+      "enable-gpu-instancing",
+      "enable-staging-rings",
+      "enable-inverse-pt",
+      "copc_laz",
+      "cog_streaming",
+      "gis-remote",
+      "geos-topology",
+      "atmosphere-bake",
+      "shader-contract-asserts",
+      "enable-globe",
+      "splat-fusion"
+    ],
+    "rust_unit_features": "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion"
+  },
+  "margins": {
+    "b1_fraction": 0.050000000000000044,
+    "shaft_ssim": 0.04258409801791818,
+    "g4a_fraction": 0.04743095696852928,
+    "medium_changed_fraction": 0.2870346598202824,
+    "g4b_relative_error": 0.19194189920326596
+  },
+  "forecast_assessment": "All five forecast image criteria pass physically. Measured-minus-forecast errors are recorded; there is no failing image criterion to explain. Gate 6 exposes a separate diagnostic-contract issue: real wall-clock duration is included in an exact-equality comparison. No adjustment, refit or additional dispatch followed.",
+  "remaining_blocker": {
+    "field": "diagnostics.directional_transport.iteration_wall_milliseconds",
+    "definition": "src/terrain/renderer/media.rs:357",
+    "population": "src/terrain/renderer/media.rs:2151",
+    "values": [
+      1360.0408,
+      1348.4775
+    ],
+    "proposal_not_applied": "Keep actual wall-clock telemetry outside deterministic execution diagnostics. This needs a separate diagnostic-contract decision; do not zero, round, cap or exclude it in the frozen acceptance gate.",
+    "no_production_followup_applied": true
+  },
+  "not_run": [
+    "1500x1500 DEM benchmark: skipped by CI after G6 failure",
+    "Full Acceptance Summary / scope=full on this head",
+    "D3D12 ABSENT",
+    "Metal ABSENT",
+    "WASM ABSENT",
+    "Release preparation, merge, publish dry run, tag or publication"
+  ],
+  "residual_risk": [
+    "Physical six-case requirement remains unmet (5 passed, 1 failed, 0 skipped).",
+    "Realistic-DEM frame time, convergence and memory remain unmeasured.",
+    "The known reference sampler RNG-dimension overlap remains unchanged."
+  ],
+  "steering_gaps_proposed_not_applied": [
+    "Execution diagnostics compared by G6 must keep volatile timing measurements in a separate telemetry contract; approve an exact diagnostic-contract change before applying it.",
+    "Windows source/evidence readers need explicit UTF-8 and worktree-owned temporary/install directories."
+  ],
+  "ci_zero_skip_env": {
+    "FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN": "1",
+    "FORGE3D_NO_BOOTSTRAP": "1",
+    "FORGE3D_TEST_INSTALLED_WHEEL": "1",
+    "WGPU_BACKEND": "vulkan",
+    "WGPU_BACKENDS": "vulkan",
+    "FORGE3D_NEPHELE_LANE": "windows-nvidia-vulkan",
+    "FORGE3D_NEPHELE_CANDIDATE_SHA": "bbda8eeb0f77f386126a15edd1268b74f48f537b"
+  },
+  "trace_env": {
+    "FORGE3D_NEPHELE_TRACE": "1",
+    "scope": "existing direct capture step before environment cases"
+  },
+  "audit_files_committed": false
+}

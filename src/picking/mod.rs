@@ -321,7 +321,7 @@ impl PickingManager {
             let _ = tx.send(result);
         });
 
-        self.device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&self.device);
 
         if rx.recv().ok()?.is_ok() {
             let data = slice.get_mapped_range();

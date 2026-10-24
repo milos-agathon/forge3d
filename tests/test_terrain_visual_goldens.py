@@ -10,6 +10,7 @@ import pytest
 
 import forge3d as f3d
 from forge3d.terrain_params import (
+    AovSettings,
     PomSettings,
     ReflectionSettings,
     SkySettings,
@@ -363,3 +364,36 @@ def test_terrain_visual_goldens(terrain_golden_env, scene_name: str, scene_kwarg
     actual = _render_scene(renderer, material_set, ibl, heightmap, overlay, **kwargs)
     _assert_sky_scene_is_meaningful(scene_name, actual)
     _assert_matches_golden(scene_name, actual)
+
+
+def test_physical_constant_albedo_preserves_linear_units_and_isolates_cache(terrain_golden_env):
+    renderer, _, ibl, heightmap, _, _ = terrain_golden_env
+    authored = np.array([0.6, 0.4, 0.2], dtype=np.float64)
+    material = f3d.MaterialSet.custom(tuple(authored), 0.0, 1.0)
+
+    def decode_srgb(value):
+        return np.where(value <= 0.04045, value / 12.92, ((value + 0.055) / 1.055) ** 2.4)
+
+    expected = {
+        "stylized": decode_srgb(np.round(authored * 255.0) / 255.0),
+        "lambert_physical": authored,
+    }
+    observations = []
+    for model in ("stylized", "lambert_physical", "stylized"):
+        config = make_terrain_params_config(
+            size_px=(64, 64), render_scale=1.0, terrain_span=2.8,
+            msaa_samples=1, z_scale=1.45, exposure=1.0, domain=(0.0, 1.0),
+            camera_mode="screen", albedo_mode="material", colormap_strength=0.0,
+            hue_variation_strength=0.0, terrain_shading_model=model,
+            aov=AovSettings(enabled=True),
+        )
+        _, aov = renderer.render_with_aov(material, ibl, f3d.TerrainRenderParams(config), heightmap)
+        albedo = np.asarray(aov.albedo(), dtype=np.float64)
+        pixels = albedo[np.any(albedo > 0.0, axis=-1)]
+        assert len(pixels) > 0, "the albedo assertion must cover rendered terrain"
+        # The physical uniform preserves authored float reflectance. Allow
+        # the AOV's UNORM8 rounding plus one binary16 ULP at readback.
+        tolerance = 0.5 / 255.0 + np.spacing(expected[model].astype(np.float16)).astype(np.float64)
+        assert np.all(np.abs(pixels - expected[model]) <= tolerance), (model, pixels.min(0), pixels.max(0))
+        observations.append(albedo)
+    np.testing.assert_array_equal(observations[0], observations[2])

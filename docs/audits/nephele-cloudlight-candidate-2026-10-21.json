@@ -1,0 +1,102 @@
+{
+  "old_pin": "0xffa4448a20d6e60a",
+  "proposed_pin": "0x895bb1d3845497e1",
+  "new_texture_contract": "texture:nephele_surface_cloudlight_tex:0:65504:2:nephele_surface_cloudlight_tex.width:nephele_surface_cloudlight_tex.height",
+  "new_graph_pass_count": 9,
+  "new_adapter_terrain_trace_call_count": 5,
+  "f32": {
+    "added": [
+      [
+        "src/terrain/renderer/media.rs",
+        "upload_world_medium",
+        "as_f32",
+        1,
+        "let unit = glam::Vec3::from_array([x, y, z].map(|v| v as f32 + 0.5)) / n as f32"
+      ],
+      [
+        "src/terrain/renderer/media.rs",
+        "upload_world_medium",
+        "as_f32",
+        2,
+        "let unit = glam::Vec3::from_array([x, y, z].map(|v| v as f32 + 0.5)) / n as f32"
+      ]
+    ],
+    "removed": [],
+    "count": 1931,
+    "digest": "3d7e2b08e7e456a558dbed3817c47effd05804eac820df704a3b84f0cf504dee"
+  },
+  "base_commit": "38a30db0f0ff829225a28064253862ad6db3db4e",
+  "status": "NVIDIA_PHYSICAL_ACCEPTANCE_FAILED_NOT_RELEASE_READY",
+  "source_sha256": {
+    "src/shaders/nephele_froxel.wgsl": "368cefd80f1808c832c8cc39cab1a03aeeab909643871575bd10b50291a5a7a8",
+    "src/shaders/nephele_realtime_terrain_trace.wgsl": "d4a6ea45f49120979d7c449c490d308f64f0dd87158bd05ca9b6e323fd3551c4",
+    "src/shaders/terrain_pbr_pom.wgsl": "4e24ab47032255dab908c7a42a2670a83ec8e8907f7a84e3d2a696829a30ae92",
+    "src/terrain/renderer/aov.rs": "bcd5f210d259ca6b432cf6c934c6742db52dc2f28432437437dd087508a62e18",
+    "src/terrain/renderer/bind_groups/layouts.rs": "2df4067687c0d4327a37925206a3afb2218fd83200a468f3792a320184d4505d",
+    "src/terrain/renderer/bind_groups/terrain_pass.rs": "52341bad41a06055cf18e91581a630e03e32340d61c26fced6b2af05a229d66a",
+    "src/terrain/renderer/draw/mod.rs": "c03ca55b4b18ed286be92f949032b1cfa548ece6422f1ddea3970b77b1fd1a01",
+    "src/terrain/renderer/media.rs": "543bf2078c10ecfa7561fca760be3e80211bb2ec435a7ddd2e75bf7887656e0a",
+    "src/terrain/renderer/render_graph.rs": "93ed40469b807ea14b670ef682c865f68a1e0ec304d5db70333cab4d16f66535",
+    "src/viewer/terrain/render/helpers.rs": "800a5f62bf0e1ee34c5a650877f7f907984655711ef14b1d045da48ed61256e1",
+    "src/viewer/terrain/scene/pbr_compute.rs": "767e602cb28c9d8939f9ac4c18262b88cacbd9ac26d130e56e2ca2744102c0a8",
+    "src/viewer/terrain/shader_pbr/terrain_pbr.wgsl": "ed5435753f34ad3767544e3bc5d4657f8b901c01f1aa137cdfb80dd56e832a50"
+  },
+  "owner_approval": "Milos, 2026-10-21, second All approved: exact pin, contract, f32 ledger, existing test assertions, commit/push, and NVIDIA NEPHELE dispatch. G4b numeric tolerance remains unspecified.",
+  "gate4b_reference": {
+    "delta_mean_linear_luminance": 0.03731673831968643,
+    "kind": "first-order estimate added to decoded frozen reference",
+    "owner_approval": "Milos, 2026-10-21: Accept proposed reference",
+    "relative_error_tolerance": null
+  },
+  "source_hash_encoding": "SHA-256 of staged Git blob bytes (LF-normalized by repository Git attributes)",
+  "validation": {
+    "cargo_fmt_check": "PASS",
+    "cargo_forge3d_clippy_acceptance": "PASS after approved integration updates",
+    "verify_lib": {
+      "passed": 108,
+      "failed": 0,
+      "ignored": 1,
+      "ignored_test": "verify::ir::tests::inspect_deterministic_kernel_ir_shape",
+      "seconds": 685.85,
+      "features": "extension-module,default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe,splat-fusion"
+    },
+    "shader_call_graph_test": {
+      "passed": 1
+    },
+    "render_graph_tests": {
+      "passed": 3
+    },
+    "head_wheel": "PASS: clean exact-head checkout, dev profile, embedded full source revision verified",
+    "python_fast_lane": "Hosted complete Fast Contract PASS; local entire lane NOT_RUN pending GPU-device-test decision",
+    "nvidia_physical": {
+      "run_id": 39545456967,
+      "status": "FAIL at Gate 3; six setup errors, zero skips",
+      "measurement": "nephele-cloudlight-capture-2026-10-21.json"
+    },
+    "focused_python": {
+      "passed": 33,
+      "skipped": 0,
+      "environment": {
+        "FORGE3D_NO_BOOTSTRAP": "1",
+        "FORGE3D_TEST_INSTALLED_WHEEL": "1"
+      },
+      "files": [
+        "tests/test_world_coord_f32_gate.py",
+        "tests/test_pipeline_validation_gate.py"
+      ]
+    },
+    "pr_core_success": "PASS on implementation commit"
+  },
+  "implementation_commit": "d5507249a2327d183edf0bb3ff11dcb83a773333",
+  "wheel_provenance": {
+    "head_sha": "d5507249a2327d183edf0bb3ff11dcb83a773333",
+    "cargo_embedded_source_revision": "d5507249a2327d183edf0bb3ff11dcb83a773333",
+    "wheel_sha256": "aea619f97cbc54cbc323889b946c19e5b91d1c390e1a831e2e90c907d6a4a1d0",
+    "native_sha256": "3d3b938c7342249b82a91361ddaf44b1ef3273e4ee80834c6f5ddb5641640b5a",
+    "profile": "dev",
+    "cargo_target_dir": "D:\\forge3d\\.worktrees\\pr172-release-verify\\target",
+    "python_version": "Python 3.13.14",
+    "package_version": "1.46.0",
+    "local_gpu_tests": "NOT_RUN"
+  }
+}

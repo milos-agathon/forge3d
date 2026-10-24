@@ -1028,7 +1028,7 @@ impl TerrainVisibilityBuffer {
         slice.map_async(wgpu::MapMode::Read, move |result| {
             sender.send(result).ok();
         });
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         pollster::block_on(receiver.receive())
             .ok_or_else(|| RenderError::render("visibility stats callback dropped"))?
             .map_err(|error| {

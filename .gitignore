@@ -466,3 +466,4 @@ landuse/landuse/glad_cropland_2019.tif
 
 # Understand-Anything knowledge graph (generated, ~1.4 MB, not source)
 .ua/
+!scripts/nephele_acceptance.py

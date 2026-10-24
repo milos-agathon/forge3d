@@ -87,7 +87,7 @@ pub fn extrude_polygon_gpu_py<'py>(
         uv_sender.send(result).ok();
     });
 
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
 
     pollster::block_on(pos_receiver.receive())
         .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Vertex map cancelled"))?

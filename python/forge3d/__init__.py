@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.45.0"
+__version__ = "1.46.0"
 version = __version__
 
 import numpy as np
@@ -502,6 +502,7 @@ def dem_stats(heightmap: np.ndarray) -> dict:
 # -----------------------------------------------------------------------------
 from . import geometry
 from . import io
+from . import media
 
 # -----------------------------------------------------------------------------
 # P4: Map Plate / Creator Workflow
@@ -946,6 +947,7 @@ __all__ = [
     "widgets",
     "astro",
     "sky",
+    "media",
     # Interactive viewer
     "open_viewer",
     "open_viewer_async",

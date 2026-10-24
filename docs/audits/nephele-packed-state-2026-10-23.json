@@ -1,0 +1,566 @@
+{
+  "head_sha": "95b66c50566e38006aa2e7ac5ecb2065e9253731",
+  "run_url": "https://github.com/milos-agathon/forge3d/actions/runs/40023229060",
+  "adapter": {
+    "backend": "Vulkan",
+    "device": 9348,
+    "device_type": "DiscreteGpu",
+    "driver": "NVIDIA",
+    "driver_info": "610.60",
+    "name": "NVIDIA GeForce RTX 3070",
+    "software_fallback": false,
+    "status": "ok",
+    "vendor": 4318
+  },
+  "fast_junit": {
+    "tests": 661,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "budget_test": {
+    "status": "passed",
+    "classname": "tests.test_budget_enforce",
+    "seconds": 0.001
+  },
+  "convergence": {
+    "orders": 22,
+    "elapsed_ms": 1380,
+    "final_progress": [
+      0,
+      931111685,
+      956246357,
+      0
+    ],
+    "reported_residual_floats": [
+      1.5237140360113699e-05,
+      0.00012167046224931255
+    ],
+    "wait_ms": {
+      "min": 56,
+      "max": 64
+    },
+    "recv_ms": {
+      "min": 0,
+      "max": 0
+    },
+    "all_waits_and_receives_returned": true,
+    "order_cap_added": false,
+    "limitation": "Loop elapsed time is not a complete-frame or realistic-DEM timing. Nonzero float residual fields are not the approved packed-bit stopping predicate."
+  },
+  "capture_error": "renderer pass order mismatch: expected \"nephele.media.inject\", got \"terrain.forward_aov\"",
+  "unavailable_outputs": [
+    "contracts-environment-junit.xml",
+    "junit.xml",
+    "run-a.json",
+    "run-b.json",
+    "realistic-dem-frame-time.json"
+  ],
+  "cpu_gates": {
+    "gate1": {
+      "metrics": {
+        "homogeneous": {
+          "mean": 0.605711,
+          "standard_error": 0.0004886976808870934,
+          "analytic": 0.6065306597126334,
+          "samples": 1000000
+        },
+        "heterogeneous": {
+          "mean": 0.4323316609017278,
+          "comparator": {
+            "mean": 0.43241938,
+            "samples": 100000000
+          },
+          "relative_error": 0.00020285653772550573
+        },
+        "majorant": {
+          "probe_count": 1000000,
+          "violation_count": 0,
+          "max_excess": -5.960464477539063e-08
+        },
+        "russian_roulette": {
+          "on": [
+            0.314637,
+            0.00041053407504033907
+          ],
+          "off": [
+            0.314603204687953,
+            0.0003907781260617572
+          ],
+          "analytic_oracle": 0.31477547222989327,
+          "relative_difference": 0.00010742202095659897,
+          "pairs": 1000000
+        }
+      },
+      "failures": []
+    },
+    "gate2": {
+      "metrics": {
+        "sample_count": 10000000,
+        "transmitted": 0.7216797,
+        "scattered_out": 0.2144632,
+        "absorbed": 0.0641738,
+        "relative_residual": 0.0003166999999999476,
+        "residual_standard_error": 0.00020721544651320425
+      },
+      "failures": []
+    }
+  },
+  "shader_static": {
+    "naga_validated_assemblies": 356,
+    "compute_entry_texture_sample_compare_calls": 0,
+    "unresolved_source_expressions": [],
+    "violating_compute_entries": []
+  },
+  "complete_gate5_result": "ABSENT: realtime-termination-slice.npy was not captured",
+  "unchanged_nominal_forecast": {
+    "b1_fraction": 1.0,
+    "shaft_ssim": 0.992349393985953,
+    "g4a_fraction": 0.9961464354527938,
+    "medium_changed_fraction": 0.37997432605905007,
+    "g4b_response": 0.022044067152454556,
+    "g4b_relative_error": 0.007617328861087248,
+    "margins": {
+      "b1_fraction": 0.050000000000000044,
+      "shaft_ssim": 0.042349393985953054,
+      "g4a_fraction": 0.046146435452793844,
+      "medium_changed_fraction": 0.27997432605905004,
+      "g4b_relative_error": 0.19238267113891278
+    },
+    "all_five_pass": true
+  },
+  "physical_gate_result": "ABSENT: render rejected by frame-graph order check before capture",
+  "dem_1500_frame_time": "ABSENT: benchmark step not executed after trace failure",
+  "evidence_sha256": {
+    "checked-out-head.txt": "43a5341ea76344025e028f6d348067eaaea3ff7bfffa0ff52daea833d298edb5",
+    "adapter-probe-raw.json": "b7f42787858f5e0438d9c4e80a326bf962e2e054c3fd8c42a5df200b90546f5e",
+    "fast-junit.xml": "091217b8e56809aa6499a3a3ddcc776fe60a9c7961edecf3360df0f150551b86",
+    "fast-zero-skip.log": "a0224d7685d43a34f018cd89440d7041ef20e217dceb7b5f84ebe9381131a962",
+    "directional-trace.log": "71eb4c0c6908caf8f472856be0855562f09ee234866ab7dc8092f67c1be6e270",
+    "gate5-static.json": "f0851301c4d8e4e261ebce8092f5a11de189c22c318b5b2951744b993d56586f"
+  },
+  "date": "2026-10-23",
+  "status": "PACKED-BIT STOP PROVEN; CAPTURE BLOCKED BY EXISTING AOV GRAPH ORDER",
+  "approval_words": "Approved",
+  "parent_sha": "4c6b59a4c45273a77022d84ffaca8944180db9ff",
+  "patch_sha256": "166062a22b8a30c8e08998a8fa4d4d963d03b4d51be7a49e892a7bb49f516863",
+  "changed_production_files": [
+    {
+      "path": "src/shaders/nephele_realtime_terrain_trace.wgsl",
+      "old_git_sha256": "f9ce211e130509743d10a5c2eec0054344719111bd7e23326f18c926ae055957",
+      "new_git_sha256": "a69d7b849d8655ecc88a490b96d969c54632056e05de76525ea35c39a84d3ca3"
+    },
+    {
+      "path": "src/terrain/renderer/media.rs",
+      "old_git_sha256": "2f33d10eb104c66b27cbb12abd779fe577c4a35923594011397089b8e8a4ebc5",
+      "new_git_sha256": "14177ca41be3a69084f8b576353d4f9c383273b6f390b33ff72bfe82d50ac459"
+    }
+  ],
+  "protected_values": {
+    "PINNED_TERRAIN_SOURCE_HASH": {
+      "old": "0x17ad_c1fb_40ed_8189",
+      "new": "0x17ad_c1fb_40ed_8189"
+    },
+    "PINNED_HYBRID_KERNEL_SOURCE_HASH": {
+      "old": "0x32c0_583b_cf1a_f865",
+      "new": "0x32c0_583b_cf1a_f865"
+    },
+    "f32_inventory": {
+      "old_count": 1936,
+      "new_count": 1936,
+      "old_digest": "8f9f378ce8e27a98e9b99961073ae70128584485778adf1dc2c597c464c0cee7",
+      "new_digest": "8f9f378ce8e27a98e9b99961073ae70128584485778adf1dc2c597c464c0cee7"
+    },
+    "shader_contract_pin_changes": [],
+    "f32_ledger_entry_changes": [],
+    "shader_proofs_ledger_changes": [],
+    "test_assertion_changes": [],
+    "golden_or_certificate_changes": []
+  },
+  "artifact": {
+    "id": 12531439533,
+    "name": "nephele-physical-gpu-evidence-40023229060-1",
+    "size_bytes": 41587262
+  },
+  "before_image_capture": {
+    "run": 39580065706,
+    "run_url": "https://github.com/milos-agathon/forge3d/actions/runs/39580065706",
+    "metrics": {
+      "b1_fraction": 0.7127659574468085,
+      "shaft_ssim": 0.9916001251541653,
+      "g4a_fraction": 0.7109826589595376,
+      "medium_changed_fraction": 0.3215661103979461,
+      "g4b_response": 0.019629758417801648,
+      "g4b_relative_error": 0.1027388636433472,
+      "margins": {
+        "b1_fraction": -0.23723404255319147,
+        "shaft_ssim": 0.041600125154165335,
+        "g4a_fraction": -0.23901734104046235,
+        "medium_changed_fraction": 0.22156611039794608,
+        "g4b_relative_error": 0.09726113635665282
+      },
+      "all_five_pass": false
+    },
+    "mean_absolute_in_scatter_rgb_error": {
+      "sky": [
+        0.0003656217595562339,
+        0.0003432325611356646,
+        0.00030062461155466735
+      ],
+      "terrain": [
+        0.0001812250557122752,
+        0.00016276123642455786,
+        0.00013771925296168774
+      ],
+      "shadow": [
+        0.00018122384790331125,
+        0.000162787371664308,
+        0.00013772929378319532
+      ]
+    },
+    "mean_absolute_transmittance_rgb_error": {
+      "sky": [
+        0.00012404228618834168,
+        0.00012421063729561865,
+        0.00012947725190315396
+      ],
+      "terrain": [
+        0.0002462560951244086,
+        0.0002538560947868973,
+        0.00024037979892455041
+      ],
+      "shadow": [
+        0.0002464142453391105,
+        0.0002538623521104455,
+        0.00024053418019320816
+      ]
+    }
+  },
+  "after_image_metrics": null,
+  "checks": {
+    "rust": [
+      {
+        "name": "fmt",
+        "command": [
+          "cargo",
+          "fmt",
+          "--check"
+        ],
+        "exit_code": 0,
+        "seconds": 4.390025799977593,
+        "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target"
+      },
+      {
+        "name": "clippy-acceptance",
+        "command": [
+          "cargo",
+          "forge3d-clippy-acceptance"
+        ],
+        "exit_code": 0,
+        "seconds": 303.2121112999739,
+        "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target"
+      },
+      {
+        "name": "media-shader-unit",
+        "command": [
+          "cargo",
+          "test",
+          "--lib",
+          "--features",
+          "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+          "terrain::renderer::media::tests::shaders_validate_and_compute_call_graphs_use_manual_shadows",
+          "--",
+          "--exact"
+        ],
+        "exit_code": 0,
+        "seconds": 707.5432161999634,
+        "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+        "accepted_as_test_execution_evidence": false,
+        "reason": "Incorrect module filter ran zero tests; corrected exact test ran and passed."
+      },
+      {
+        "name": "framegraph-unit",
+        "command": [
+          "cargo",
+          "test",
+          "--lib",
+          "--features",
+          "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+          "core::framegraph_impl::tests::"
+        ],
+        "exit_code": 0,
+        "seconds": 2.7499161000014283,
+        "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target"
+      }
+    ],
+    "corrected_shader_test": {
+      "name": "media-shader-unit-corrected",
+      "command": [
+        "cargo",
+        "test",
+        "--lib",
+        "--features",
+        "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+        "terrain::realtime_media::tests::shaders_validate_and_compute_call_graphs_use_manual_shadows",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "seconds": 1.8399182999855839,
+      "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+      "executed_one_test": true
+    },
+    "terrain_media_graph_tests": {
+      "command": [
+        "D:\\forge3d\\.worktrees\\nephele-146-release\\target\\debug\\deps\\forge3d-cbf61fdb8fb6f832.exe",
+        "terrain::renderer::render_graph::tests::",
+        "--nocapture"
+      ],
+      "exit_code": 0,
+      "seconds": 0.12303979997523129,
+      "binary_sha256": "1bdb76992a2b20ca52294b0fdaa3a82c55957d79cd31c7bf7dcd55a7f23e829a",
+      "features": "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+      "binary_provenance": "test binary built from exact approved source bytes by media-shader-unit command in rust-validation.json; no source changes since build",
+      "executed_four_tests": true
+    },
+    "f32": {
+      "command": [
+        "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-22\\analysis-venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/test_world_coord_f32_gate.py",
+        "--basetemp=D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\packed-bit-applied\\pytest-f32",
+        "--junitxml=D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\packed-bit-applied\\f32-junit.xml",
+        "-q",
+        "--tb=short"
+      ],
+      "exit_code": 0,
+      "seconds": 130.7097348999814,
+      "env": {
+        "FORGE3D_NO_BOOTSTRAP": "1"
+      },
+      "scope": "36 source checks plus 1 native camera helper on the previously installed binary; native helper revalidated separately after exact-head wheel install"
+    },
+    "f32_camera_after_wheel": {
+      "command": [
+        "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-22\\analysis-venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/test_world_coord_f32_gate.py::test_public_camera_helper_preserves_earth_scale_offset",
+        "--basetemp=D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\packed-bit-applied\\pytest-f32-camera-after-wheel",
+        "--junitxml=D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\packed-bit-applied\\f32-camera-after-wheel-junit.xml",
+        "-q",
+        "--tb=short"
+      ],
+      "exit_code": 0,
+      "seconds": 6.176931700028945,
+      "head_sha": "95b66c50566e38006aa2e7ac5ecb2065e9253731",
+      "env": {
+        "FORGE3D_NO_BOOTSTRAP": "1",
+        "FORGE3D_TEST_INSTALLED_WHEEL": "1",
+        "PYTHONPATH": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\packed-bit-applied\\installed-wheel"
+      }
+    },
+    "wheel_cpu": {
+      "head_sha": "95b66c50566e38006aa2e7ac5ecb2065e9253731",
+      "env": {
+        "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+        "GITHUB_SHA": "95b66c50566e38006aa2e7ac5ecb2065e9253731",
+        "FORGE3D_NO_BOOTSTRAP": "1",
+        "FORGE3D_TEST_INSTALLED_WHEEL": "1"
+      },
+      "checks": [
+        {
+          "name": "wheel-build",
+          "command": [
+            "C:/Users/milos/AppData/Local/Programs/Python/Python313/Scripts/maturin.exe",
+            "build",
+            "--release",
+            "--locked",
+            "--interpreter",
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-22\\analysis-venv\\Scripts\\python.exe",
+            "--out",
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\packed-bit-applied\\wheels"
+          ],
+          "exit_code": 0,
+          "seconds": 695.2542708999827
+        },
+        {
+          "name": "wheel-install",
+          "command": [
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-22\\analysis-venv\\Scripts\\python.exe",
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            "--no-deps",
+            "--force-reinstall",
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\packed-bit-applied\\wheels\\forge3d-1.46.0-cp310-abi3-win_amd64.whl"
+          ],
+          "exit_code": 1,
+          "seconds": 16.403334099974018
+        },
+        {
+          "name": "wheel-install-isolated",
+          "command": [
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-22\\analysis-venv\\Scripts\\python.exe",
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            "--no-deps",
+            "--ignore-installed",
+            "--target",
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\packed-bit-applied\\installed-wheel",
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\packed-bit-applied\\wheels\\forge3d-1.46.0-cp310-abi3-win_amd64.whl"
+          ],
+          "exit_code": 0,
+          "seconds": 3.870310900034383
+        },
+        {
+          "name": "installed-native-identity",
+          "command": [
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-22\\analysis-venv\\Scripts\\python.exe",
+            "-c",
+            "import forge3d._forge3d as n,forge3d,hashlib,json; from pathlib import Path; actual=hashlib.sha256(Path(n.__file__).read_bytes()).hexdigest(); assert actual=='0a109b05dd6be0eb145eab0553550e5b287c80f01e1e4c8985cdcd37bd73f236'; assert str(n.__file__).startswith('D:\\\\forge3d\\\\.worktrees\\\\nephele-146-release\\\\.release-evidence\\\\2026-10-23\\\\packed-bit-applied\\\\installed-wheel'); print(json.dumps(dict(version=forge3d.__version__,native=str(n.__file__),sha256=actual)))"
+          ],
+          "exit_code": 0,
+          "seconds": 4.50150150002446
+        },
+        {
+          "name": "nephele-cpu-pytest",
+          "command": [
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-22\\analysis-venv\\Scripts\\python.exe",
+            "-m",
+            "pytest",
+            "tests/test_nephele_acceptance.py",
+            "tests/test_nephele_fixture_contracts.py",
+            "tests/test_nephele_public_api.py",
+            "--basetemp=D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\packed-bit-applied\\pytest-nephele-cpu",
+            "--junitxml=D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\packed-bit-applied\\nephele-cpu-junit.xml",
+            "-q",
+            "--tb=short"
+          ],
+          "exit_code": 0,
+          "seconds": 13.190171899972484
+        }
+      ],
+      "wrapper_correction": "Build completed successfully; resumed after cp1252 log-printing UnicodeEncodeError. No build repeated.",
+      "installation_correction": "Inherited global forge3d is excluded from mutation: explicit worktree --target with --ignore-installed; worktree temporary directory.",
+      "runtime_pythonpath": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\packed-bit-applied\\installed-wheel",
+      "temp_dir": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\packed-bit-applied\\pip-temp"
+    },
+    "wheel_provenance": {
+      "head_sha": "95b66c50566e38006aa2e7ac5ecb2065e9253731",
+      "wheel": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\packed-bit-applied\\wheels\\forge3d-1.46.0-cp310-abi3-win_amd64.whl",
+      "wheel_sha256": "bc8f388fcba00e50dded379ee77831c1ae60b845728721e16d7ac9e94afac844",
+      "native_member": "forge3d/_forge3d.pyd",
+      "native_sha256": "0a109b05dd6be0eb145eab0553550e5b287c80f01e1e4c8985cdcd37bd73f236",
+      "embedded_head_sha_verified": true
+    },
+    "commit_hook": {
+      "exit_code": 0,
+      "approval_words": "Approved",
+      "seconds": 170.5825233
+    }
+  },
+  "tests_no_silent_degradation_sha256": "a1486925d016bec941303efabc94362a6331a986f568d9dee0893060759dffca",
+  "protected_diffs_empty": true,
+  "worktree_clean": true,
+  "forecast_comparison": {
+    "cpu_fixed_point_orders": {
+      "enabled": 19,
+      "disabled": 19
+    },
+    "gpu_fixed_point_orders_enabled": 22,
+    "image_metric_error": null,
+    "explanation": "Packed-bit loop now terminates, with all waits/receives returning. No frame was captured because the strict graph-order check rejected the next phase. The image forecast is untested, not contradicted by a measured image; no new forecast or GPU dispatch was attempted."
+  },
+  "blocker": {
+    "confidence": "high",
+    "observed": "renderer pass order mismatch: expected \"nephele.media.inject\", got \"terrain.forward_aov\"",
+    "definitions": {
+      "directional_forward_reads_provider": "src/terrain/renderer/render_graph.rs:448",
+      "inject_reads_provider": "src/terrain/renderer/render_graph.rs:455",
+      "aov_forward_call": "src/terrain/renderer/aov.rs:1217",
+      "aov_inject_call": "src/terrain/renderer/aov.rs:1267",
+      "strict_order_check": "src/core/framegraph_impl/mod.rs:746"
+    },
+    "cause": "Directional cloudlight writes the radiance provider; forward and injection only read it. Removing forward's provider write removes the dependency that put injection after forward. The compiled plan schedules injection first, but AOV host execution still calls forward first. These graph/AOV source files are identical in parent and current commit.",
+    "correction_proposed_not_applied": "Align AOV execution with the compiled directional pass order, preserving explicit resource declarations and strict order/barrier checks.",
+    "existing_tests": "Four terrain/media graph tests pass. The directional test checks resource declarations; AOV order assertions use directional=False."
+  },
+  "not_run": [
+    "Both NEPHELE GPU environment cases (CI skipped after trace failure)",
+    "Six-case physical JUnit and image gates (no captures)",
+    "Complete Gate 5 termination slices and Gate 6 capture memory result",
+    "1500x1500 DEM frame timing (CI skipped after trace failure)",
+    "scope=full / Full Acceptance Summary on this head",
+    "D3D12 ABSENT",
+    "Metal ABSENT",
+    "WASM ABSENT",
+    "Merge, publish dry run, tag, publication"
+  ],
+  "residual_risk": [
+    "No new physical image validates the five forecast metrics or the disabled arm.",
+    "Realistic-DEM convergence, driver timeout behavior, frame latency and memory are unmeasured.",
+    "Nonzero float residual diagnostics at packed convergence remain visible; the approved stop uses packed-word equality, not a residual threshold.",
+    "The known reference sampler RNG-dimension overlap remains unchanged."
+  ],
+  "steering_gaps_proposed_not_applied": [
+    "Record the shared Rust module test path terrain::realtime_media and terrain::renderer::render_graph; never accept a zero-test filter.",
+    "Classify test_world_coord_f32_gate.py as source checks plus one native camera test; verify wheel provenance before that native case.",
+    "Use UTF-8 output and an explicit writable temporary/install directory in Windows evidence scripts; the analysis venv inherits global packages."
+  ],
+  "runtime_reproduction_env": {
+    "FORGE3D_NO_BOOTSTRAP": "1",
+    "FORGE3D_TEST_INSTALLED_WHEEL": "1",
+    "PYTHONPATH": "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-23\\packed-bit-applied\\installed-wheel"
+  },
+  "ci_zero_skip_env": {
+    "FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN": "1",
+    "FORGE3D_NO_BOOTSTRAP": "1",
+    "FORGE3D_TEST_INSTALLED_WHEEL": "1",
+    "WGPU_BACKEND": "vulkan",
+    "WGPU_BACKENDS": "vulkan",
+    "FORGE3D_NEPHELE_LANE": "windows-nvidia-vulkan",
+    "FORGE3D_NEPHELE_CANDIDATE_SHA": "95b66c50566e38006aa2e7ac5ecb2065e9253731"
+  },
+  "validation_features": {
+    "rust_tests": "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+    "clippy_acceptance_expanded": "clippy --workspace --all-targets --features extension-module,default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,atmosphere-bake,enable-globe,splat-fusion -- -D warnings",
+    "commit_hook_lint_expanded": "clippy --workspace --all-targets --features extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion -- -D warnings",
+    "wheel_pyproject_features": [
+      "extension-module",
+      "weighted-oit",
+      "enable-pbr",
+      "enable-tbn",
+      "enable-gpu-instancing",
+      "enable-staging-rings",
+      "enable-inverse-pt",
+      "copc_laz",
+      "cog_streaming",
+      "gis-remote",
+      "geos-topology",
+      "atmosphere-bake",
+      "shader-contract-asserts",
+      "enable-globe",
+      "splat-fusion"
+    ]
+  },
+  "environment": {
+    "python": "3.13.14 (tags/v3.13.14:fd17997, Jun 10 2026, 13:03:48) [MSC v.1944 64 bit (AMD64)]",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target"
+  },
+  "local_audit_files": {
+    "committed": false,
+    "reason": "The approved production commit contains exactly two files; these dated audit records are saved as ignored local evidence.",
+    "files": [
+      "D:\\forge3d\\.worktrees\\nephele-146-release\\docs\\audits\\nephele-packed-state-2026-10-23.md",
+      "D:\\forge3d\\.worktrees\\nephele-146-release\\docs\\audits\\nephele-packed-state-2026-10-23.json",
+      "D:\\forge3d\\.worktrees\\nephele-146-release\\docs\\audits\\nephele-packed-state-2026-10-23.py"
+    ]
+  }
+}

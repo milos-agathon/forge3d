@@ -1,0 +1,61 @@
+{
+  "measurement_kind": "CPU CDF-coordinate audit; not GPU execution of the corrected sampler",
+  "candidate_source_sha256": {
+    "src/shaders/nephele_froxel.wgsl": "daecafe9f78206700b9e02479d8a02904208e5defefc26659585d4ca6d5894fc",
+    "src/shaders/nephele_realtime_terrain_trace.wgsl": "ffbc4fb20b88e2c0d985e07ee1535838d81b147b30b0b64590b1f61f5af386c4"
+  },
+  "rank_asset_sha256": "c4690ee9c66e9b2d1a608537cdc6c5384c93e69a42602093a6ce480606e780ea",
+  "rank_count": 64,
+  "phase_cdf": {
+    "shifted_tile": {
+      "occupied_joint_cdf_cells": 8,
+      "empty_joint_cdf_cells": 56,
+      "maximum_samples_per_cell": 8,
+      "coordinate_correlation": -0.9375457875457874,
+      "mean_axial_component": 0.4500735115404967,
+      "expected_axial_component": 0.45,
+      "mean_transverse_components": [
+        -0.04781348805810092,
+        -0.13539854034815435
+      ]
+    },
+    "rank_radical_inverse": {
+      "occupied_joint_cdf_cells": 64,
+      "empty_joint_cdf_cells": 0,
+      "maximum_samples_per_cell": 1,
+      "coordinate_correlation": 0.14065934065934063,
+      "mean_axial_component": 0.4500735115404967,
+      "expected_axial_component": 0.45,
+      "mean_transverse_components": [
+        -0.0048374422695374175,
+        0.0019157915246862736
+      ]
+    }
+  },
+  "captured_source_revision": "ac7390968bcba2b393ad4fbea58716f6dc1acd59",
+  "captured_gate3": {
+    "metrics": {
+      "sky_cloud_delta_e_pass_fraction": 0.7884160756501182,
+      "godray_roi_ssim": 0.9916078255428148
+    },
+    "failures": [
+      "sky/cloud DeltaE2000 < 2.5 on >= 95% of pixels"
+    ]
+  },
+  "captured_gate4": {
+    "metrics": {
+      "shadow_delta_e_pass_fraction": 0.7597944765574823,
+      "medium_ablation_changed_fraction": 0.31065468549422337,
+      "terrain_occlusion_ablation_ssim": 0.9881168841571718,
+      "shadow_pixels": 1557,
+      "terrain_occlusion_mean_linear_luminance_change": 0.020363695197357472,
+      "terrain_occlusion_reference_mean_linear_luminance_change": 0.03731673831968643,
+      "terrain_occlusion_response_relative_error": 0.45430131050294364,
+      "terrain_occlusion_maximum_relative_error": 0.2
+    },
+    "failures": [
+      "cloud-shadow terrain DeltaE2000 < 2 on >= 95% of pixels",
+      "terrain occlusion response matches accepted reference within 20%"
+    ]
+  }
+}

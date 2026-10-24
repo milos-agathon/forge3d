@@ -1159,7 +1159,7 @@ impl TerrainMaterialVT {
                 }
             }
             queue.submit(Some(vt_upload_encoder.finish()));
-            device.poll(wgpu::Maintain::Wait);
+            crate::core::gpu::wait_for_device_idle(&device);
         }
         if let Some(required) = chronos_required.as_ref() {
             for (index, key) in required.iter().enumerate() {
@@ -2357,7 +2357,7 @@ impl TerrainMaterialVTRuntime {
                         label: Some("terrain.material_vt.page_table_upload"),
                     });
                 queue.submit(Some(page_table_encoder.finish()));
-                device.poll(wgpu::Maintain::Wait);
+                crate::core::gpu::wait_for_device_idle(&device);
             }
         }
     }

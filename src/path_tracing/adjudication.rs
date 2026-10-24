@@ -285,7 +285,7 @@ pub fn render_pt_reference(
             )));
         }
         if frame % 64 == 63 {
-            device.poll(wgpu::Maintain::Wait);
+            crate::core::gpu::wait_for_device_idle(&device);
         }
     }
 
@@ -315,7 +315,7 @@ pub fn render_pt_reference(
 
     let slice = staging.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     let hdr_sum: Vec<f32> = {
         let data = slice.get_mapped_range();
         bytemuck::cast_slice::<u8, f32>(&data).to_vec()
@@ -440,7 +440,7 @@ fn stress_accumulation() {
         readback
             .slice(..)
             .map_async(wgpu::MapMode::Read, move |result| tx.send(result).unwrap());
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         rx.recv().unwrap().unwrap();
         let data = readback.slice(..).get_mapped_range();
         assert_eq!(
@@ -534,7 +534,7 @@ fn transport_probe() {
             readback
                 .slice(..)
                 .map_async(wgpu::MapMode::Read, move |result| tx.send(result).unwrap());
-            device.poll(wgpu::Maintain::Wait);
+            crate::core::gpu::wait_for_device_idle(&device);
             rx.recv().unwrap().unwrap();
             let data = readback.slice(..).get_mapped_range();
             for (got, expected) in bytemuck::cast_slice::<u8, f32>(&data).iter().zip(expected) {

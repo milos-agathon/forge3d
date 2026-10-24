@@ -306,7 +306,8 @@ def test_terrain_group_four_is_the_dedicated_shared_atmosphere_group() -> None:
     assert (
         "@group(4) @binding(2)\nvar aether_accumulated_scattering_tex" in shader
     )
-    assert shader.count("@group(4)") == 4  # one ownership comment + three resources
+    assert "@group(4) @binding(3)\nvar nephele_light_transmittance_tex" in shader
+    assert shader.count("@group(4)") == 5  # ownership comment + four resources
     assert "terrain_pbr_pom.atmosphere_bind_group_layout" in layouts
     assert "group exclusively owns fog, sky, and AETHER LUT resources" in layouts
     assert "@group(4): dedicated shared atmosphere (bindings 0-2)" in pipeline

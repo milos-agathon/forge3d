@@ -299,7 +299,7 @@ impl TwoPhaseTerrainCuller {
         slice.map_async(wgpu::MapMode::Read, move |result| {
             sender.send(result).ok();
         });
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         pollster::block_on(receiver.receive())
             .ok_or_else(|| RenderError::render("HZB culling stats callback dropped"))?
             .map_err(|error| {
@@ -955,7 +955,7 @@ mod tests {
         slice.map_async(wgpu::MapMode::Read, move |result| {
             sender.send(result).ok();
         });
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         pollster::block_on(receiver.receive())
             .expect("hzb_cull readback callback dropped")
             .expect("hzb_cull readback map failed");

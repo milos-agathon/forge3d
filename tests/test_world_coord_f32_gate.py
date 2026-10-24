@@ -72,12 +72,14 @@ REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132
 # Anchor, and Anchor remains the sole production world-position narrowing
 # owner. Release 1.39 adds six screen-label conversions and records the
 # params6 initializer change without introducing world-position narrowing.
+# NEPHELE and CHRONOS preserve independent reviewed transitions from 1.39.
 # Release 1.40 CHRONOS rewrites the two R2 jitter casts one-for-one and adds
 # the three unit-direction casts of SunPosition::to_scene_direction.
 # SPLAT-FUSED adds seven non-world sites (raster/count helpers, 3DGS PLY
 # attribute narrowing, sky-bake normalisation, variance telemetry, and the
 # signature of the Anchor-routed PointCloudFrame::to_scene); see the
 # `splat_fused` ledger record, which is pending owner review.
+# Main-side freeze (reached through `nephele_main_sync.main_side`):
 # Milos approved the combined freeze: the existing SPLAT-FUSED record plus
 # exactly six TESSELLA test casts added and two oracle casts removed. Both
 # historical records retain their own endpoints; the combined gate bridges
@@ -90,8 +92,22 @@ REVIEWED_BASELINE_SHA256 = "b60331341dbeeb3c24a16fe52b92f1c51f18d8dffcf51d7e4132
 # conversions. Its exact transition reverses to the prior texture-layout freeze;
 # no world-coordinate narrowing or scanner exemption is added.
 # Scanner unchanged.
-EXPECTED_CONVERSION_COUNT = 1846
-EXPECTED_CONVERSION_SHA256 = "f4fb63ad9529ceaaff94b99fe68f0c2454e706d019e93c669b77a82fdc52eace"
+MAIN_FREEZE_COUNT = 1846
+MAIN_FREEZE_SHA256 = "f4fb63ad9529ceaaff94b99fe68f0c2454e706d019e93c669b77a82fdc52eace"
+# NEPHELE-side freeze (reached through `nephele_main_sync.nephele_side`):
+# The merged tree carries CHRONOS, NEPHELE, and SPLAT-FUSED; each ledger record
+# below stays exact against its own base. `nephele_main_integration` (pending
+# owner review) records the sites no earlier record covers, and this freeze is
+# its result.
+NEPHELE_FREEZE_COUNT = 1905
+NEPHELE_FREEZE_SHA256 = "898594ce99e4cf6933435b6a63b64869417b199cf3c70bc1cb73cdbe1f76cd94"
+# Merging main into PR #172 combines both freezes. `nephele_main_sync`
+# (pending owner review) records, per changed file, the exact ordered sites
+# on each side; undoing one side restores the other freeze exactly.
+PREVIOUS_INTEGRATION_COUNT = 1931
+PREVIOUS_INTEGRATION_SHA256 = "eb22339b6de627ada37d1f0068d7306bfa152ae339997d7c6ee106dee09951a8"
+EXPECTED_CONVERSION_COUNT = 1936
+EXPECTED_CONVERSION_SHA256 = "8f9f378ce8e27a98e9b99961073ae70128584485778adf1dc2c597c464c0cee7"
 LEDGER_PATH = ROOT / "tests" / "data" / "world_coord_f32_ledger.json"
 MENSURA_RECORDED_COUNT = 1403
 MENSURA_RECORDED_SHA256 = "523abe73d2f80b9e007c1c0407063ff9eced19a819059f372d0eb982814de617"
@@ -674,7 +690,7 @@ def test_viewport_resize_inventory_transition_is_exact():
     assert (len(sites), _inventory_digest(sites)) == (
         transition["result_count"], transition["result_digest"],
     )
-    assert (EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256) == (
+    assert (MAIN_FREEZE_COUNT, MAIN_FREEZE_SHA256) == (
         transition["result_count"], transition["result_digest"],
     )
     _undo_viewport_resize_transition(sites)
@@ -728,7 +744,7 @@ def _undo_scene_pick_assembly_transition(sites):
 def test_scene_pick_assembly_moves_only_the_two_screen_coordinate_casts():
     sites = _undo_scene_pick_assembly_transition(_inventory_before_water_optics())
     assert (len(sites), _inventory_digest(sites)) == (
-        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256,
+        MAIN_FREEZE_COUNT, MAIN_FREEZE_SHA256,
     )
 
 
@@ -810,7 +826,7 @@ def test_reviewed_csm_layout_context_transition_is_exact():
     )
 
 def test_exact_production_conversion_inventory_is_frozen():
-    sites = _undo_scene_pick_assembly_transition(_inventory_before_water_optics())
+    sites = conversion_inventory()
     digest = _inventory_digest(sites)
     assert (len(sites), digest) == (
         EXPECTED_CONVERSION_COUNT,
@@ -1068,7 +1084,7 @@ def test_release_1_40_chronos_inventory_transition_is_exact():
     ]
     assert "fn to_scene_direction" in _read("src/lighting/ephemeris.rs")
 
-    current = collections.Counter(conversion_inventory())
+    current = _undo_reviewed_transition(_reviewed_inventory(), _ledger_data()["nephele"])
     for site in added:
         assert current[site] > 0, f"recorded addition missing: {site}"
     for site in removed:
@@ -1247,6 +1263,121 @@ def test_public_camera_helper_preserves_earth_scale_offset():
     np.testing.assert_allclose(earth, local, rtol=0.0, atol=1e-6)
 
 
+def _undo_reviewed_transition(current, transition):
+    added = collections.Counter(map(tuple, transition["added"]))
+    removed = collections.Counter(map(tuple, transition["removed"]))
+    assert not (added & removed)
+    for site, count in added.items():
+        assert current[site] >= count, f"reviewed addition missing: {site}"
+        current[site] -= count
+    for site, count in removed.items():
+        assert current[site] == 0, f"reviewed removal still present: {site}"
+        current[site] += count
+    return current
+
+
+def _undo_sync_side(sites, side):
+    """Restore one branch's exact inventory from the merged tree.
+
+    Each changed file's ordered merged sites must match the record exactly;
+    they are replaced by that branch's ordered sites for the same file. Files
+    keep the scanner's sorted-path order, so the digest is reproduced exactly.
+    """
+    files = _ledger_data()["nephele_main_sync"][side]["files"]
+    by_file = {}
+    for site in sites:
+        by_file.setdefault(site[0], []).append(site)
+    for rel, change in files.items():
+        assert by_file.get(rel, []) == list(map(tuple, change["result"])), f"{side} sync drift in {rel}"
+        by_file[rel] = list(map(tuple, change["base"]))
+    # Match the scanner's `sorted(Path)` file order, not plain string order.
+    return [site for rel in sorted(by_file, key=Path) for site in by_file[rel]]
+
+
+def _main_side_inventory():
+    return _undo_sync_side(_prior_release_inventory(), "main_side")
+
+
+def _nephele_side_inventory():
+    return _undo_sync_side(_prior_release_inventory(), "nephele_side")
+
+
+def test_nephele_main_sync_restores_both_branch_inventories_exactly():
+    record = _ledger_data()["nephele_main_sync"]
+    assert record["review"].startswith("APPROVED by Milos")
+    current = _prior_release_inventory()
+    assert (len(current), _inventory_digest(current)) == (
+        record["result_count"], record["result_digest"],
+    ) == (PREVIOUS_INTEGRATION_COUNT, PREVIOUS_INTEGRATION_SHA256)
+    for side in ("main_side", "nephele_side"):
+        restored = _undo_sync_side(current, side)
+        assert (len(restored), _inventory_digest(restored)) == (
+            record[side]["base_count"], record[side]["base_digest"],
+        )
+        for change in record[side]["files"].values():
+            added = collections.Counter(map(tuple, change["result"])) - collections.Counter(
+                map(tuple, change["base"])
+            )
+            # No merged-in conversion narrows an absolute world coordinate.
+            assert all(site[0] != SANCTIONED for site in added), added
+    nephele = _ledger_data()["nephele_main_integration"]
+    assert (record["nephele_side"]["base_count"], record["nephele_side"]["base_digest"]) == (
+        nephele["result_count"], nephele["result_digest"],
+    ) == (NEPHELE_FREEZE_COUNT, NEPHELE_FREEZE_SHA256)
+
+
+def _reviewed_inventory():
+    """Current inventory with the pending integration record undone."""
+    return _undo_reviewed_transition(
+        collections.Counter(_nephele_side_inventory()), _ledger_data()["nephele_main_integration"]
+    )
+
+
+def test_nephele_main_integration_record_reaches_the_current_freeze():
+    transition = _ledger_data()["nephele_main_integration"]
+    assert (transition["result_count"], transition["result_digest"]) == (
+        NEPHELE_FREEZE_COUNT, NEPHELE_FREEZE_SHA256
+    )
+    assert transition["review"].startswith("APPROVED by Milos")
+    added = collections.Counter(map(tuple, transition["added"]))
+    removed = collections.Counter(map(tuple, transition["removed"]))
+    assert sum(added.values()) - sum(removed.values()) == (
+        transition["result_count"] - transition["base_count"]
+    )
+    # No recorded change narrows an absolute world coordinate.
+    for site in added:
+        assert site[0] != SANCTIONED, site
+    reviewed = _reviewed_inventory()
+    assert sum(reviewed.values()) == transition["base_count"]
+    # The reviewed base is main 3a6ec9f8 plus the SPLAT-FUSED and NEPHELE records.
+    splat = _ledger_data()["splat_fused"]
+    nephele = _ledger_data()["nephele"]
+    assert transition["base_count"] == (
+        splat["result_count"] + nephele["result_count"] - nephele["base_count"]
+    )
+
+
+def test_nephele_reviewed_inventory_transition_is_exact():
+    transition = _ledger_data()["nephele"]
+    preceding = _ledger_data()["release_1_39_terrain"]
+    assert (transition["base_count"], transition["base_digest"]) == (preceding["result_count"], preceding["result_digest"])
+    assert (transition["result_count"], transition["result_digest"]) == (1878, "beeb7833b23e4ef857acdc0c56955c07ce8ba5e20a8f10b067bad23ad9ba5f1c")
+    assert transition["review"]
+    current = _undo_reviewed_transition(
+        _undo_reviewed_transition(_reviewed_inventory(), _ledger_data()["splat_fused"]),
+        _ledger_data()["release_1_40_chronos"],
+    )
+    added, removed = collections.Counter(map(tuple, transition["added"])), collections.Counter(map(tuple, transition["removed"]))
+    assert not (added & removed)
+    for site, count in added.items():
+        assert current[site] >= count, f"NEPHELE addition missing: {site}"
+        current[site] -= count
+    for site, count in removed.items():
+        assert current[site] == 0, f"NEPHELE removal still present: {site}"
+        current[site] += count
+    assert sum(current.values()) == transition["base_count"]
+
+
 def test_sutura_screen_output_inventory_transition_is_exact():
     sutura = _ledger_data()["sutura"]
     assert (sutura["base_count"], sutura["base_digest"]) == (
@@ -1278,7 +1409,7 @@ def test_sutura_screen_output_inventory_transition_is_exact():
     assert (texture["result_count"], texture["result_digest"]) == (
         viewport["base_count"], viewport["base_digest"],
     )
-    assert (EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256) == (
+    assert (MAIN_FREEZE_COUNT, MAIN_FREEZE_SHA256) == (
         viewport["result_count"], viewport["result_digest"],
     )
     sites = _undo_texture_layout_stats_transition(
@@ -1376,7 +1507,7 @@ def _undo_sky_lighting_transition(sites):
 
 
 def test_sky_lighting_relocation_is_exact_and_preserves_inventory_size():
-    sites = conversion_inventory()
+    sites = _main_side_inventory()
     restored = _undo_sky_lighting_transition(sites)
     assert len(restored) == len(sites)
     added = collections.Counter(sites) - collections.Counter(restored)
@@ -1436,7 +1567,7 @@ def test_p1_inventory_rejects_missing_duplicate_changed_and_extra_sites():
     import json
     import pytest
 
-    sites = conversion_inventory()
+    sites = _main_side_inventory()
     for path in sorted((ROOT / "tests/data/world_coord_f32_p1").glob("*.json")):
         record = json.loads(path.read_text(encoding="utf-8"))
         for rel, transition in record["files"].items():
@@ -1451,80 +1582,11 @@ def test_p1_inventory_rejects_missing_duplicate_changed_and_extra_sites():
                     _undo_p1_inventory_transitions(mutated)
 
 
-def _undo_concordia_transition(sites):
-    """Restore the approved parent inventory without changing historical freezes."""
-    transition = _ledger_data()["concordia"]
-    added = list(map(tuple, transition["added"]))
-    removed = list(map(tuple, transition["removed"]))
-    assert (len(sites), _inventory_digest(sites)) == (
-        transition["result_count"], transition["result_digest"],
-    )
-    assert len(set(added)) == len(added) == 19
-    assert len(set(removed)) == len(removed) == 14
-    for site in added:
-        assert sites.count(site) == 1, f"CONCORDIA conversion missing or duplicated: {site}"
-    assert not set(removed).intersection(sites)
-    new_viewport = {site for site in added if site[0] == "src/terrain/renderer/interactive.rs"}
-    assert len(new_viewport) == 5
-    relocated = [site for site in added if site not in new_viewport]
-    replacements = dict(zip(relocated, removed))
-    restored = [replacements.get(site, site) for site in sites if site not in new_viewport]
-    assert (len(restored), _inventory_digest(restored)) == (
-        transition["base_count"], transition["base_digest"],
-    )
-    return restored
-
-
-def test_concordia_inventory_transition_is_exact():
-    transition = _ledger_data()["concordia"]
-    assert transition["review"]
-    assert transition["source_commit"] == "3c6b5665ae827f25698fe350929444461d4164ae"
-    assert (transition["base_count"], transition["base_digest"]) == (
-        1856, "bd31cb70466826afdfb900d4fb492895aa68d297727f0084a95ab1722c52d9de",
-    )
-    assert (transition["result_count"], transition["result_digest"]) == (
-        1861, "2adcb38b0fc9c8883ae174c2f4cd17e6f00aa08fc8614cfd21d743feeb012e89",
-    )
-    sites = _undo_p1_inventory_transitions(conversion_inventory())
-    restored = _undo_concordia_transition(sites)
-    assert collections.Counter(sites) - collections.Counter(restored) == collections.Counter(
-        map(tuple, transition["added"])
-    )
-    assert collections.Counter(restored) - collections.Counter(sites) == collections.Counter(
-        map(tuple, transition["removed"])
-    )
-    body = _function_body("src/terrain/renderer/interactive.rs", "new")
-    assert "let (width, height) = params.size_px;" in body
-    assert "pub size_px: (u32, u32)" in _read("src/terrain/render_params/core.rs")
-    assert not re.search(r"\b(?:f64|DVec[234]|DMat[234])\b", body)
-    _inventory_before_water_optics()
-
-
-def test_concordia_transition_rejects_missing_duplicate_changed_and_extra_sites():
-    import pytest
-
-    sites = _undo_p1_inventory_transitions(conversion_inventory())
-    transition = _ledger_data()["concordia"]
-    for site in map(tuple, transition["added"]):
-        index = sites.index(site)
-        missing = sites[:index] + sites[index + 1:]
-        changed = sites[:index] + [(*site[:4], "world_position.x as f32")] + sites[index + 1:]
-        for mutated in (missing, sites + [site], changed):
-            with pytest.raises(AssertionError):
-                _undo_concordia_transition(mutated)
-    with pytest.raises(AssertionError):
-        _undo_concordia_transition(sites + [(
-            "src/terrain/renderer/interactive.rs", "new", "as_f32", 4,
-            "world_position.x as f32",
-        )])
-
-
 def _inventory_before_water_optics():
     """Check both approved branch inventories without replacing either freeze."""
     water = _ledger_data()["water_optics"]
     viewport = _ledger_data()["viewer_viewport_resize"]
-    sites = _undo_p1_inventory_transitions(conversion_inventory())
-    sites = _undo_sky_lighting_transition(_undo_concordia_transition(sites))
+    sites = _undo_sky_lighting_transition(_undo_p1_inventory_transitions(_main_side_inventory()))
     normalized = _undo_scene_pick_assembly_transition(sites)
     water_added = set(map(tuple, water["added"]))
     viewport_added = set(map(tuple, viewport["added"]))
@@ -1540,7 +1602,7 @@ def _inventory_before_water_optics():
     baseline = [site for site in sites if site not in water_added]
     normalized_main = _undo_scene_pick_assembly_transition(baseline)
     assert (len(normalized_main), _inventory_digest(normalized_main)) == (
-        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256,
+        MAIN_FREEZE_COUNT, MAIN_FREEZE_SHA256,
     )
     return baseline
 
@@ -1631,3 +1693,129 @@ def test_water_optics_inventory_transition_is_exact():
     assert transition["removed"] == []
     assert transition["result_count"] == transition["base_count"] + len(expected_added)
     _inventory_before_water_optics()
+
+def _undo_concordia_transition(sites):
+    """Restore the approved parent inventory without changing historical freezes."""
+    transition = _ledger_data()["concordia"]
+    added = list(map(tuple, transition["added"]))
+    removed = list(map(tuple, transition["removed"]))
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    assert len(set(added)) == len(added) == 19
+    assert len(set(removed)) == len(removed) == 14
+    for site in added:
+        assert sites.count(site) == 1, f"CONCORDIA conversion missing or duplicated: {site}"
+    assert not set(removed).intersection(sites)
+    new_viewport = {site for site in added if site[0] == "src/terrain/renderer/interactive.rs"}
+    assert len(new_viewport) == 5
+    relocated = [site for site in added if site not in new_viewport]
+    replacements = dict(zip(relocated, removed))
+    restored = [replacements.get(site, site) for site in sites if site not in new_viewport]
+    assert (len(restored), _inventory_digest(restored)) == (
+        transition["base_count"], transition["base_digest"],
+    )
+    return restored
+
+
+def test_concordia_inventory_transition_is_exact():
+    transition = _ledger_data()["concordia"]
+    assert transition["review"]
+    assert transition["source_commit"] == "3c6b5665ae827f25698fe350929444461d4164ae"
+    assert (transition["base_count"], transition["base_digest"]) == (
+        1856, "bd31cb70466826afdfb900d4fb492895aa68d297727f0084a95ab1722c52d9de",
+    )
+    assert (transition["result_count"], transition["result_digest"]) == (
+        1861, "2adcb38b0fc9c8883ae174c2f4cd17e6f00aa08fc8614cfd21d743feeb012e89",
+    )
+    sites = _undo_p1_inventory_transitions(_integrated_main_inventory())
+    restored = _undo_concordia_transition(sites)
+    assert collections.Counter(sites) - collections.Counter(restored) == collections.Counter(
+        map(tuple, transition["added"])
+    )
+    assert collections.Counter(restored) - collections.Counter(sites) == collections.Counter(
+        map(tuple, transition["removed"])
+    )
+    body = _function_body("src/terrain/renderer/interactive.rs", "new")
+    assert "let (width, height) = params.size_px;" in body
+    assert "pub size_px: (u32, u32)" in _read("src/terrain/render_params/core.rs")
+    assert not re.search(r"\b(?:f64|DVec[234]|DMat[234])\b", body)
+    _inventory_before_water_optics()
+
+
+def test_concordia_transition_rejects_missing_duplicate_changed_and_extra_sites():
+    import pytest
+
+    sites = _undo_p1_inventory_transitions(_integrated_main_inventory())
+    transition = _ledger_data()["concordia"]
+    for site in map(tuple, transition["added"]):
+        index = sites.index(site)
+        missing = sites[:index] + sites[index + 1:]
+        changed = sites[:index] + [(*site[:4], "world_position.x as f32")] + sites[index + 1:]
+        for mutated in (missing, sites + [site], changed):
+            with pytest.raises(AssertionError):
+                _undo_concordia_transition(mutated)
+    with pytest.raises(AssertionError):
+        _undo_concordia_transition(sites + [(
+            "src/terrain/renderer/interactive.rs", "new", "as_f32", 4,
+            "world_position.x as f32",
+        )])
+
+
+
+
+
+def _undo_latest_main_integration(sites, side):
+    record = _ledger_data()["nephele_main_2026_10_23"]
+    assert (len(sites), _inventory_digest(sites)) == (
+        record["result_count"], record["result_digest"],
+    )
+    by_file = {}
+    for site in sites:
+        by_file.setdefault(site[0], []).append(site)
+    for path, change in record[side]["files"].items():
+        assert by_file.get(path, []) == list(map(tuple, change["result"])), path
+        by_file[path] = list(map(tuple, change["base"]))
+    restored = [s for p in sorted(by_file, key=Path) for s in by_file[p]]
+    assert (len(restored), _inventory_digest(restored)) == (
+        record[side]["base_count"], record[side]["base_digest"],
+    )
+    return restored
+
+
+def _prior_release_inventory():
+    return _undo_latest_main_integration(conversion_inventory(), "release_side")
+
+
+def _integrated_main_inventory():
+    return _undo_latest_main_integration(conversion_inventory(), "main_side")
+
+
+def test_latest_main_integration_restores_both_exact_parent_inventories():
+    record = _ledger_data()["nephele_main_2026_10_23"]
+    assert record["review"]
+    sites = conversion_inventory()
+    for side in ("release_side", "main_side"):
+        restored = _undo_latest_main_integration(sites, side)
+        added = collections.Counter(sites) - collections.Counter(restored)
+        assert all(site[0] != SANCTIONED for site in added), added
+    assert (len(sites), _inventory_digest(sites)) == (
+        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256,
+    )
+
+
+def test_latest_main_integration_rejects_missing_duplicate_changed_and_extra_sites():
+    import pytest
+    sites = conversion_inventory()
+    record = _ledger_data()["nephele_main_2026_10_23"]
+    for side in ("release_side", "main_side"):
+        for path, change in record[side]["files"].items():
+            if not change["result"]:
+                continue
+            first = tuple(change["result"][0])
+            i = sites.index(first)
+            changed = (*first[:4], "unreviewed world-position cast")
+            for mutated in (sites[:i] + sites[i+1:], sites + [first],
+                            sites[:i] + [changed] + sites[i+1:], sites + [changed]):
+                with pytest.raises(AssertionError):
+                    _undo_latest_main_integration(mutated, side)

@@ -1,0 +1,25 @@
+diff --git a/tests/test_no_silent_degradation.py b/tests/test_no_silent_degradation.py
+index 47650673..ccae46d5 100644
+--- a/tests/test_no_silent_degradation.py
++++ b/tests/test_no_silent_degradation.py
+@@ -916,9 +916,19 @@ def test_nephele_physical_exclusion_is_one_hosted_site_and_six_required_gates():
+     exclusion = "--deselect=tests/test_nephele_physical.py"
+     assert workflow.count(exclusion) == 1
+     assert slow_job.count(exclusion) == 1
++    # Milos's existing memory-case exception belongs only to the installed
++    # NEPHELE fast step; every other deselection remains forbidden.
++    budget_case = "tests/test_budget_enforce.py::test_600mib_host_visible_raises_named_budget_error"
++    budget_option = "--deselect=" + budget_case
+     assert re.findall(r"--(?:deselect|ignore(?:-glob)?)(?:=|\s+)(\S+)", workflow) == [
+-        "tests/test_nephele_physical.py"
++        "tests/test_nephele_physical.py", budget_case
+     ]
++    gpu = _workflow_job(workflow, "test-nephele-gpu")
++    assert workflow.count(budget_option) == gpu.count(budget_option) == 1
++    assert re.findall(r"--(?:deselect|ignore(?:-glob)?)(?:=|\s+)(\S+)", gpu) == [budget_case]
++    fast_step = gpu.split("      - name: Run installed-wheel fast validation without skips\n", 1)[1].split("\n      - ", 1)[0]
++    assert "scripts/ci_pytest_lane.py --profile fast " + budget_option in fast_step
++    assert re.findall(r"--(?:deselect|ignore(?:-glob)?)(?:=|\s+)(\S+)", fast_step) == [budget_case]
+     assert re.findall(r"--deselect(?:=|\s+)(\S+)", slow_job) == ["tests/test_nephele_physical.py"]
+     assert "--ignore" not in slow_job
+     args = ci_pytest_lane.build_pytest_args("full", [], slow=True)

@@ -9,8 +9,9 @@ const FNV1A_PRIME: u64 = 0x0000_0100_0000_01b3;
 pub(super) const PINNED_DETERMINISM_SOURCE_HASH: u64 = 0xd904_56ee_98b5_6d96;
 pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0x32c0_583b_cf1a_f865;
 // Updated from the assembled terrain module whenever its source changes.
-// Full-tile screen UVs with finite [0,2] bounds (owner-approved 2026-10-22).
-pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0xec97_c657_3ea6_7ac8;
+// Combined NEPHELE directional transport and main full-tile UV assembly.
+// Apply only after the exact integration approval batch.
+pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0x17ad_c1fb_40ed_8189;
 
 #[derive(Clone, Copy)]
 pub(super) enum FunctionRef {

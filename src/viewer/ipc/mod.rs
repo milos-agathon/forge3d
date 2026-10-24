@@ -70,6 +70,110 @@ mod tests {
     }
 
     #[test]
+    fn canonical_media_attachment_and_removal_translate_without_clamping() {
+        let attach = parse_ipc_request(
+            r#"{"cmd":"set_media","media":{"sigma_a":[0.1,0.2,0.3],"sigma_s":[0.4,0.5,0.6],"phase":"Isotropic","density":{"Homogeneous":{"authored_density":0.75,"mapping":{"physical_density_per_authored_unit":2.0}}},"version":9}}"#,
+        )
+        .unwrap();
+        match ipc_request_to_viewer_cmd(&attach).unwrap().unwrap() {
+            crate::viewer::viewer_enums::ViewerCmd::SetMedia {
+                medium: Some(medium),
+                version,
+                options: _,
+            } => {
+                assert_eq!(version, 9);
+                assert!(medium
+                    .sigma_t()
+                    .components()
+                    .into_iter()
+                    .zip([0.5, 0.7, 0.9])
+                    .all(|(actual, expected)| (actual - expected).abs() < 1.0e-6));
+            }
+            _ => panic!("expected canonical media attachment"),
+        }
+
+        let remove = parse_ipc_request(r#"{"cmd":"set_media","media":null}"#).unwrap();
+        assert!(matches!(
+            ipc_request_to_viewer_cmd(&remove).unwrap(),
+            Some(crate::viewer::viewer_enums::ViewerCmd::SetMedia {
+                medium: None,
+                version: 0,
+                options: _,
+            })
+        ));
+    }
+
+    #[test]
+    fn canonical_media_homogeneous_reach_translates_and_requires_a_medium() {
+        let attach = parse_ipc_request(
+            r#"{"cmd":"set_media","media":{"sigma_a":[0.1,0.1,0.1],"sigma_s":[0.2,0.2,0.2],"phase":"Isotropic","density":{"Homogeneous":{"authored_density":1.0,"mapping":{"physical_density_per_authored_unit":1.0}}}},"homogeneous_reach":2500.0}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            ipc_request_to_viewer_cmd(&attach).unwrap(),
+            Some(crate::viewer::viewer_enums::ViewerCmd::SetMedia {
+                options,
+                ..
+            }) if options.homogeneous_reach == Some(2500.0)
+                && options == crate::terrain::realtime_media::ViewerMediaOptions {
+                    homogeneous_reach: Some(2500.0),
+                    ..crate::terrain::realtime_media::ViewerMediaOptions::default()
+                }
+        ));
+        let orphan =
+            parse_ipc_request(r#"{"cmd":"set_media","media":null,"homogeneous_reach":10.0}"#)
+                .unwrap();
+        assert!(ipc_request_to_viewer_cmd(&orphan)
+            .unwrap_err()
+            .contains("homogeneous_reach requires a medium"));
+    }
+
+    #[test]
+    fn canonical_media_ambient_and_slices_translate_and_require_a_medium() {
+        let attach = parse_ipc_request(
+            r#"{"cmd":"set_media","media":{"sigma_a":[0.1,0.1,0.1],"sigma_s":[0.2,0.2,0.2],"phase":"Isotropic","density":{"Homogeneous":{"authored_density":1.0,"mapping":{"physical_density_per_authored_unit":1.0}}}},"ambient_radiance":[0.16,0.19,0.27],"froxel_depth_slices":128}"#,
+        )
+        .unwrap();
+        match ipc_request_to_viewer_cmd(&attach).unwrap().unwrap() {
+            crate::viewer::viewer_enums::ViewerCmd::SetMedia { options, .. } => {
+                assert_eq!(options.ambient_radiance, [0.16, 0.19, 0.27]);
+                assert_eq!(options.froxel_depth_slices, 128);
+                assert_eq!(options.homogeneous_reach, None);
+            }
+            _ => panic!("expected canonical media attachment"),
+        }
+        for orphan in [
+            r#"{"cmd":"set_media","media":null,"ambient_radiance":[0.1,0.1,0.1]}"#,
+            r#"{"cmd":"set_media","media":null,"froxel_depth_slices":128}"#,
+        ] {
+            let request = parse_ipc_request(orphan).unwrap();
+            assert!(ipc_request_to_viewer_cmd(&request)
+                .unwrap_err()
+                .contains("requires a medium"));
+        }
+    }
+
+    #[test]
+    fn canonical_media_rejects_a_present_malformed_version_but_defaults_absent() {
+        let malformed: IpcRequest = serde_json::from_str(
+            r#"{"cmd":"set_media","media":{"sigma_a":[0.1,0.1,0.1],"sigma_s":[0.2,0.2,0.2],"phase":"Isotropic","density":{"Homogeneous":{"authored_density":1.0,"mapping":{"physical_density_per_authored_unit":1.0}}},"version":"bad"}}"#,
+        )
+        .unwrap();
+        assert!(ipc_request_to_viewer_cmd(&malformed)
+            .unwrap_err()
+            .contains("version must be a non-negative integer"));
+
+        let absent: IpcRequest = serde_json::from_str(
+            r#"{"cmd":"set_media","media":{"sigma_a":[0.1,0.1,0.1],"sigma_s":[0.2,0.2,0.2],"phase":"Isotropic","density":{"Homogeneous":{"authored_density":1.0,"mapping":{"physical_density_per_authored_unit":1.0}}}}}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            ipc_request_to_viewer_cmd(&absent).unwrap(),
+            Some(crate::viewer::viewer_enums::ViewerCmd::SetMedia { version: 0, .. })
+        ));
+    }
+
+    #[test]
     fn pick_and_manual_label_update_translate_to_execution_commands() {
         let pick = parse_ipc_request(r#"{"cmd":"pick_at","x":320,"y":200,"shift":true}"#).unwrap();
         assert!(matches!(

@@ -1,0 +1,103 @@
+{
+  "sampling_contract": {
+    "near": 0.1,
+    "far": 6000.0,
+    "froxel_depth": 64,
+    "camera_far_source": "make_terrain_params_config default, no capture override",
+    "legacy_unblocked_first_sample_distance": 46.875
+  },
+  "medium_bounds": [
+    [
+      -30.0,
+      4.0,
+      -30.0
+    ],
+    [
+      30.0,
+      44.0,
+      30.0
+    ]
+  ],
+  "active_froxels": 622,
+  "unblocked_continuations": 467,
+  "unblocked_rays_first_sample_beyond_medium_exit_fraction": 0.8479657387580299,
+  "medium_samples_outside_camera_fraction": 0.373693729903537,
+  "unblocked_mean_density_integral_legacy_camera_lookup": 6.167621736352593,
+  "unblocked_mean_density_integral_bounded_world_lookup": 8.386661404894422,
+  "all_mean_density_integral_absolute_error": 5.188871579002339,
+  "measurement_kind": "CPU reconstruction of all active froxel continuation rays; float64 diagnostic, not a new GPU capture",
+  "canonical_helpers": "Unmodified definitions before # Camera rays in round2/nephele_first_order.py",
+  "hypothesis_scope": "Continuation sampling bounds/extinction first; higher-order scattering remains unisolated",
+  "source_sha256": {
+    "src/shaders/nephele_froxel.wgsl": "ad8b66463721f93d887265fa54295c0e31d99558915d0b16f9b489641ca0ce8b",
+    "src/terrain/renderer/media.rs": "cb80413b025e420d61cdabe40221eb9eeb0c017c2a381b9c8a1142ea02b64f26",
+    "src/terrain/renderer/render_graph.rs": "5c288a9b31687c5b5b5d4f5812c19e48161f6bf2547a6d4a8b41b5b595c3801f",
+    "scripts/nephele_acceptance.py": "096938310e312d3038a58d57fbbfcedf32eaa0194307a3dc8577d34f6c5ae9dc",
+    "tests/nephele/gate4-policy.json": "0c742788fa0a4a6b0cf2cfc97fd540916128b0e7a6c1b7ac1716947738c76f69",
+    "tests/test_nephele_acceptance.py": "ed10c8055a1915f9c10423f56f53d5a0a0a3f558141109da51d8b7d4351b42c8",
+    "docs/audits/nephele-cloudlight-capture-2026-10-21.py": "7fe9d5d6ab872fc419d0ca84a24606ae91f587ef762779acb409f1fa47456bd6"
+  },
+  "input_sha256": {
+    "docs/audits/nephele-bounded-round-2026-10-01/round2/nephele_first_order.py": "92310bb21a62aa47faeaadbf4626145d7b70160c81a6b04a0c184f6548933ddf",
+    ".release-evidence/2026-10-21/ci-39545456967/run-a.json": "5bc392fdc5cf8a2ec593654e7b7b5128dc19e434adfbf7d3c6d3d9ca66705c24",
+    ".release-evidence/2026-10-21/ci-39545456967/nephele_blue_noise_8x8.txt": "c4690ee9c66e9b2d1a608537cdc6c5384c93e69a42602093a6ce480606e780ea",
+    "tests/nephele/fixture/medium.json": "40cb93a104db8217de4dae011d1d19dba4fe54c8942d0171e6767fb7746e9cf9",
+    "tests/nephele/fixture/terrain-dem.npy": "4ae0b3517e1e7a7e09ab4a572f5b1c06cfff60074e640ed593638810ec9d36cf"
+  },
+  "prepared_candidate_midpoint_count": "existing media.grid.z (64 in capture); no new iteration count",
+  "owner_graph_test_approval": {
+    "approved_by": "Milos",
+    "date": "2026-10-21",
+    "source": "Explicit Approved response to the exact graph-test proposal in the release chat",
+    "scope": "Restore original empty-injection-barrier assertion; retain new reads of world_medium and world_sun"
+  },
+  "base_revision": "eb31252206699f2fbd462f727317c6d733917a3d",
+  "owner_g4b_policy_approval": {
+    "approved_by": "Milos",
+    "date": "2026-10-21",
+    "source": "Explicit Approve +/-20% relative error reply in the release chat",
+    "maximum_relative_error": 0.2,
+    "reference_mean_linear_luminance_change": 0.03731673831968643,
+    "includes_policy_and_matching_pass_rejection_tests": true
+  },
+  "post_refactor_cpu_checks": {
+    "python_acceptance_policy": {
+      "passed": 13,
+      "failed": 0,
+      "seconds": 13.45,
+      "log": ".release-evidence/2026-10-21/continuation-policy-tests-approved.log"
+    },
+    "f32_contract": {
+      "passed": 32,
+      "failed": 0,
+      "seconds": 64.09,
+      "log": ".release-evidence/2026-10-21/continuation-f32-eb312522.log"
+    },
+    "graph": {
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "build_duration": "24m 17s",
+      "features": "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+      "log": ".release-evidence/2026-10-21/continuation-graph-tests-host.log"
+    },
+    "acceptance_clippy": {
+      "result": "pass",
+      "duration": "2m 13s",
+      "log": ".release-evidence/2026-10-21/continuation-clippy-host.log"
+    },
+    "format": "pass",
+    "environment": {
+      "FORGE3D_NO_BOOTSTRAP": "1",
+      "FORGE3D_TEST_INSTALLED_WHEEL": "1",
+      "native_wheel_scope": "source-only policy and inventory tests; previous d5507249 wheel, not native execution of the candidate"
+    },
+    "shader_call_graph": {
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "seconds": 0.13,
+      "log": ".release-evidence/2026-10-21/continuation-shader-unit-eb312522.log"
+    }
+  }
+}
