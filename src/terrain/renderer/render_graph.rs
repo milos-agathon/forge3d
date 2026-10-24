@@ -413,7 +413,9 @@ pub(super) fn build_terrain_render_graph(
                     pass.read(buffer);
                     if index!=2 { pass.write(buffer); }
                 }
-                for (index,texture) in m.directional_textures.unwrap().into_iter().enumerate() { pass.read(texture); if index!=3 {pass.write(texture);} }
+                let textures = m.directional_textures.ok_or_else(||
+                    crate::core::error::RenderError::render("directional cloudlight graph requires texture handles"))?;
+                for (index,texture) in textures.into_iter().enumerate() { pass.read(texture); if index!=3 {pass.write(texture);} }
             }
             Ok(())
         })?;
@@ -464,7 +466,9 @@ pub(super) fn build_terrain_render_graph(
                 .uniform_bytes(media.resource_version.to_le_bytes().to_vec());
             if let Some(buffers) = m.directional_buffers {
                 for buffer in buffers { pass.read(buffer); }
-                for texture in m.directional_textures.unwrap() {pass.read(texture);}
+                let textures = m.directional_textures.ok_or_else(||
+                    crate::core::error::RenderError::render("directional injection graph requires texture handles"))?;
+                for texture in textures {pass.read(texture);}
                 pass.read(m.in_scatter);
             } else {pass.write(m.in_scatter);}
             Ok(())

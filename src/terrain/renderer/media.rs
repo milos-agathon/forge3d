@@ -1103,13 +1103,11 @@ impl RealtimeMediaPipelines {
 }
 
 impl TerrainMediaResources {
-    fn graph_frame_key(&self, uniforms: &MediaUniforms) -> crate::core::error::RenderResult<PassKey> {
+    fn graph_frame_key(&self, uniforms: &MediaUniforms, terrain_identity: u64) -> crate::core::error::RenderResult<PassKey> {
         let uploads = self.uploaded_graph_keys.ok_or_else(||
             crate::core::error::RenderError::render("media content keys require a completed canonical upload"))?;
-        let terrain = self.terrain_trace.as_ref().ok_or_else(||
-            crate::core::error::RenderError::render("media content keys require the prepared terrain"))?;
         let mut bytes = bytemuck::bytes_of(uniforms).to_vec();
-        bytes.extend_from_slice(&terrain.terrain_identity.to_le_bytes());
+        bytes.extend_from_slice(&terrain_identity.to_le_bytes());
         Ok(media_graph_key("nephele.media.frame.contents", &bytes, &[
             uploads[0], uploads[1], uploads[2], self.radiance_provider_graph_key.get(),
             self.history_graph_keys[0], self.history_graph_keys[1],
@@ -1120,24 +1118,30 @@ impl TerrainMediaResources {
         let uploads = self.uploaded_graph_keys.ok_or_else(||
             crate::core::error::RenderError::render("media graph leaf keys require a completed canonical upload"))?;
         let directional = self.terrain_trace.as_ref().and_then(|trace| trace.directional.as_ref());
-        let nodes = self.canonical_density_nodes.as_ref();
-        let directional_buffers = directional.map(|transport| std::array::from_fn(|index| {
+        let (directional_buffers, directional_textures) = if let Some(transport) = directional {
+            let nodes = self.canonical_density_nodes.as_ref().ok_or_else(||
+                crate::core::error::RenderError::render("directional graph keys require canonical density nodes"))?;
+            let buffers = std::array::from_fn(|index| {
             if index == 2 {
-                leaf_key(&nodes.expect("directional transport owns canonical nodes").bytes)
+                leaf_key(&nodes.bytes)
             } else {
                 media_graph_key("nephele.media.directional.buffer", bytemuck::cast_slice(&[
                     index as u64, transport.buffers[index].size(),
                 ]), &[transport.graph_state_key.get()])
             }
-        }));
-        let directional_textures = directional.map(|transport| std::array::from_fn(|index| {
+            });
+            let textures = std::array::from_fn(|index| {
             if index == 3 {
-                leaf_key(bytemuck::cast_slice(&nodes.expect("directional transport owns active indices").active_indices))
+                leaf_key(bytemuck::cast_slice(&nodes.active_indices))
             } else {
                 media_graph_key("nephele.media.directional.texture", &(index as u64).to_le_bytes(),
                     &[transport.graph_state_key.get()])
             }
-        }));
+            });
+            (Some(buffers), Some(textures))
+        } else {
+            (None, None)
+        };
         Ok(MediaGraphInputKeys {
             extinction: uploads[0], light_transmittance: uploads[1], world_medium: uploads[2],
             radiance_provider: self.radiance_provider_graph_key.get(),
@@ -1538,8 +1542,15 @@ impl TerrainMediaResources {
             .map_err(crate::core::error::RenderError::render)?;
         let identity = medium.identity(density_version);
         if self.medium_identity != Some(identity) {
-            if let Some(previous) = self.terrain_trace.take() {
-                self.device_local_bytes = self.device_local_bytes.saturating_sub(previous.allocation_bytes);
+            // Legacy trace geometry is independent of the medium. Keep it when
+            // the viewer uploads its first homogeneous frame after the terrain.
+            // Directional resources also own density-dependent allocations.
+            if matches!(medium.density(), crate::media::DensityField::Grid3D(_))
+                || self.terrain_trace.as_ref().is_some_and(|trace| trace.directional.is_some())
+            {
+                if let Some(previous) = self.terrain_trace.take() {
+                    self.device_local_bytes = self.device_local_bytes.saturating_sub(previous.allocation_bytes);
+                }
             }
             self.canonical_density_nodes = match medium.density() {
                 crate::media::DensityField::Grid3D(field) => {
@@ -2178,7 +2189,7 @@ impl TerrainMediaResources {
             let key=stable_words_hash(bytemuck::cast_slice::<MediaUniforms,u32>(std::slice::from_ref(&uniforms)).iter()
                 .map(|word|u64::from(*word)).chain([self.radiance_provider_identity]));
             if self.radiance_provider_cacheable && directional.solve_key.get()==Some(key) { return Ok(()); }
-            let graph_key = self.graph_frame_key(&uniforms)?;
+            let graph_key = self.graph_frame_key(&uniforms, trace.terrain_identity)?;
             directional.solve_key.set(None);
             directional.solve_diagnostics.set(None);
             let started=std::time::Instant::now();
@@ -2340,7 +2351,17 @@ impl TerrainMediaResources {
         self.termination_readback = None;
         let decision = history_decision(self.history_key, history_key);
         uniforms.viewport[2] = u32::from(decision == HistoryDecision::Accept);
-        self.pending_graph_key = Some(self.graph_frame_key(&uniforms)?);
+        let terrain_identity = match self.terrain_trace.as_ref() {
+            Some(trace) => trace.terrain_identity,
+            // Without a production trace, identify the viewer depth revision,
+            // camera and lighting, plus the exact shadow uniforms it consumes.
+            None => stable_words_hash(
+                [history_key.scene_depth, history_key.camera, history_key.lighting].into_iter()
+                    .chain(bytemuck::cast_slice::<_, u32>(std::slice::from_ref(&csm.uniforms))
+                        .iter().map(|word| u64::from(*word))),
+            ),
+        };
+        self.pending_graph_key = Some(self.graph_frame_key(&uniforms, terrain_identity)?);
         queue.write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&uniforms));
         let extinction = self
             .extinction
@@ -3462,7 +3483,9 @@ impl crate::terrain::renderer::TerrainScene {
             for (handle, buffer) in buffer_handles.into_iter().zip(&directional.buffers) {
                 execution.bind_buffer(handle, buffer.clone())?;
             }
-            for (handle,texture) in handles.directional_textures.unwrap().into_iter().zip(&directional.textures) {
+            let texture_handles = handles.directional_textures.ok_or_else(||
+                crate::core::error::RenderError::render("directional graph requires transport texture handles"))?;
+            for (handle,texture) in texture_handles.into_iter().zip(&directional.textures) {
                 execution.bind_texture(handle,texture.clone())?;
             }
         }
