@@ -904,3 +904,61 @@ def test_d02_reuses_the_full_nvidia_lane_without_build_fanout() -> None:
     for option in ("--durations=30", "-rs", "--junitxml=python-full-junit.xml"):
         assert option in full["run"].split()
     assert "${{ runner.os != 'macOS' && '--deselect=tests/test_raster_styles_gpu.py' || '' }}" in full["run"]
+
+
+def test_python_wheel_checkout_proof_is_native_and_rejects_wrong_head(tmp_path) -> None:
+    import subprocess
+    import sys
+
+    steps = _workflow_data("test-python-wheel.yml")["jobs"]["test"]["steps"]
+    setup = next(step for step in steps if step.get("uses") == "actions/setup-python@v5")
+    proof = next(step for step in steps if step.get("name") == "Prove exact-head checkout")
+    assert proof["shell"] == "python"
+    assert steps.index(setup) < steps.index(proof)
+    assert proof["env"]["EXPECTED_HEAD"] == "${{ inputs.ref }}"
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    script = tmp_path / "checkout proof.py"
+    script.write_text(proof["run"], encoding="utf-8")
+    for expected, cwd, success in ((head, ROOT, True), ("0" * 40, ROOT, False), (head, tmp_path, False)):
+        result = subprocess.run(
+            [sys.executable, str(script)], cwd=cwd,
+            env={**os.environ, "EXPECTED_HEAD": expected, "GIT_CEILING_DIRECTORIES": str(tmp_path.parent)},
+            capture_output=True, text=True,
+        )
+        assert (result.returncode == 0) is success, result.stdout + result.stderr
+    # A Windows runner may resolve bash to WSL, which cannot open the native
+    # Actions script path. No unconditional setup step may depend on it.
+    for step in steps:
+        if step.get("shell") == "bash":
+            assert "runner.os == 'Linux'" in step.get("if", "")
+
+
+def test_python_wheel_install_stops_before_dependencies_when_wheel_fails() -> None:
+    import subprocess
+    import sys
+    from unittest.mock import patch
+
+    steps = _workflow_data("test-python-wheel.yml")["jobs"]["test"]["steps"]
+    expected_dependencies = {
+        "Install wheel and compatibility dependencies": ["pytest", "numpy"],
+        "Install wheel and full-suite dependencies": ["pytest", "pyyaml", "numpy", "pillow", "mypy", "pyproj", "rasterio"],
+    }
+    for name, dependencies in expected_dependencies.items():
+        step = next(step for step in steps if step.get("name") == name)
+        assert step["shell"] == "python"
+        with patch("subprocess.check_call") as check_call:
+            exec(compile(step["run"], name, "exec"), {})
+            assert [call.args[0] for call in check_call.call_args_list] == [
+                [sys.executable, "scripts/install_compatible_wheel.py", "dist"],
+                [sys.executable, "-m", "pip", "install", *dependencies],
+            ]
+        for failing_call in (1, 2):
+            failure = subprocess.CalledProcessError(42, "installation")
+            with patch("subprocess.check_call", side_effect=[None] * (failing_call - 1) + [failure]) as check_call:
+                try:
+                    exec(compile(step["run"], name, "exec"), {})
+                except subprocess.CalledProcessError as exc:
+                    assert exc.returncode == 42
+                else:
+                    raise AssertionError("Installation failure must stop the workflow step")
+                assert check_call.call_count == failing_call
