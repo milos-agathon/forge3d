@@ -51,15 +51,21 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
-      - name: Prove exact-head checkout
-        shell: bash
-        env:
-          EXPECTED_HEAD: ${{ inputs.ref }}
-        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Prove exact-head checkout
+        shell: python
+        env:
+          EXPECTED_HEAD: ${{ inputs.ref }}
+        run: |
+          import os
+          import subprocess
+          actual = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          expected = os.environ["EXPECTED_HEAD"]
+          if actual != expected:
+              raise SystemExit(f"Checkout mismatch: expected {expected}, got {actual}")
 
       - name: Configure physical Windows acceptance
         if: inputs.physical_windows_gpu
@@ -99,16 +105,21 @@ jobs:
 
       - name: Install wheel and compatibility dependencies
         if: inputs.test_mode == 'compatibility'
+        shell: python
         run: |
-          python scripts/install_compatible_wheel.py dist
-          python -m pip install pytest numpy
+          import subprocess
+          import sys
+          subprocess.check_call([sys.executable, "scripts/install_compatible_wheel.py", "dist"])
+          subprocess.check_call([sys.executable, "-m", "pip", "install", "pytest", "numpy"])
 
       - name: Install wheel and full-suite dependencies
         if: inputs.test_mode == 'full'
-        shell: bash
+        shell: python
         run: |
-          python scripts/install_compatible_wheel.py dist
-          python -m pip install pytest pyyaml numpy pillow mypy pyproj rasterio
+          import subprocess
+          import sys
+          subprocess.check_call([sys.executable, "scripts/install_compatible_wheel.py", "dist"])
+          subprocess.check_call([sys.executable, "-m", "pip", "install", "pytest", "pyyaml", "numpy", "pillow", "mypy", "pyproj", "rasterio"])
 
       - name: Install system fonts
         if: inputs.test_mode == 'full' && runner.os == 'Linux'
