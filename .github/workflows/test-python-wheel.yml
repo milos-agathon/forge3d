@@ -28,14 +28,19 @@ on:
         required: false
         default: false
         type: boolean
+      physical_windows_gpu:
+        description: Run the full Windows matrix on the required NVIDIA Vulkan runner.
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 jobs:
   test:
-    name: Python ${{ inputs.test_mode }} (${{ inputs.runner }}, ${{ matrix.python-version }})
-    runs-on: ${{ inputs.runner }}
+    name: Python ${{ inputs.test_mode }} (${{ inputs.physical_windows_gpu && 'Windows NVIDIA Vulkan' || inputs.runner }}, ${{ matrix.python-version }})
+    runs-on: ${{ inputs.physical_windows_gpu && fromJSON('["self-hosted", "Windows", "X64", "forge3d-gpu", "gpu-nvidia"]') || inputs.runner }}
     timeout-minutes: 35
     strategy:
       fail-fast: false
@@ -55,6 +60,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Configure physical Windows acceptance
+        if: inputs.physical_windows_gpu
+        shell: pwsh
+        run: |
+          if ('${{ inputs.test_mode }}' -ne 'full' -or '${{ runner.os }}' -ne 'Windows') {
+            throw 'Physical Windows acceptance requires the full Windows test profile'
+          }
+          $evidence = Join-Path $env:RUNNER_TEMP 'forge3d-python-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.python-version }}'
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          @(
+            'FORGE3D_NO_BOOTSTRAP=1'
+            'FORGE3D_TEST_INSTALLED_WHEEL=1'
+            'FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN=1'
+            'WGPU_BACKEND=vulkan'
+            'WGPU_BACKENDS=vulkan'
+            "FORGE3D_EXPECTED_ADAPTER_PROBE=$(Join-Path $evidence 'adapter.json')"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Download shared LFS fixture artifact
         if: inputs.restore_lfs
@@ -81,6 +104,7 @@ jobs:
 
       - name: Install wheel and full-suite dependencies
         if: inputs.test_mode == 'full'
+        shell: bash
         run: |
           python scripts/install_compatible_wheel.py dist
           python -m pip install pytest pyyaml numpy pillow mypy pyproj rasterio
@@ -92,6 +116,22 @@ jobs:
       - name: Install Vulkan runtime for native constructor tests
         if: inputs.test_mode == 'full' && runner.os == 'Linux'
         run: sudo apt-get install -y libvulkan1 mesa-vulkan-drivers
+
+      - name: Require physical NVIDIA Vulkan terrain adapter
+        if: inputs.physical_windows_gpu
+        shell: pwsh
+        run: |
+          python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:FORGE3D_EXPECTED_ADAPTER_PROBE"
+          exit $LASTEXITCODE
+
+      - name: Retain physical Windows adapter evidence
+        if: always() && inputs.physical_windows_gpu
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-full-Windows-adapter-${{ matrix.python-version }}
+          path: ${{ env.FORGE3D_EXPECTED_ADAPTER_PROBE }}
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Run compatibility smoke
         if: inputs.test_mode == 'compatibility'
@@ -107,7 +147,7 @@ jobs:
       - name: Record D02 physical-test deselection
         if: inputs.test_mode == 'full' && runner.os != 'macOS'
         run: >-
-          python -c "import os; from pathlib import Path; reason = 'D02: Linux/Windows software-adapter Python matrices deselect tests/test_raster_styles_gpu.py (three physical cases); required NVIDIA Vulkan acceptance runs all three with zero skips and unchanged physical/pixel assertions.'; print('::notice::' + reason); Path(os.environ['GITHUB_STEP_SUMMARY']).open('a', encoding='utf-8').write(reason + '\n')"
+          python -c "import os; from pathlib import Path; reason = 'D02: Linux/Windows Python matrices leave tests/test_raster_styles_gpu.py (three physical cases) to the dedicated required NVIDIA Vulkan acceptance lane, which runs all three with zero skips and unchanged physical/pixel assertions.'; print('::notice::' + reason); Path(os.environ['GITHUB_STEP_SUMMARY']).open('a', encoding='utf-8').write(reason + '\n')"
 
       - name: Run full default Python lane
         if: inputs.test_mode == 'full'

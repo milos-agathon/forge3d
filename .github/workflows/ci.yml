@@ -888,6 +888,7 @@ jobs:
     with:
       ref: ${{ github.event.pull_request.head.sha || github.sha }}
       runner: windows-latest
+      physical_windows_gpu: true
       python_versions: '["3.10", "3.11", "3.12", "3.13"]'
       wheel_artifact: wheels-windows
       test_mode: full
