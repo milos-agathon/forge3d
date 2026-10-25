@@ -498,6 +498,44 @@ def test_every_store_write_reserves_real_tree_growth(tmp_path, monkeypatch, oper
     print(json.dumps(dict(operation=operation, observations=len(events), peak=max(row[1] for row in events), max_bytes=store.max_bytes)))
 
 
+@pytest.mark.parametrize("damage", ["payload", "index"])
+def test_full_store_quarantines_corruption_with_existing_evidence(tmp_path, monkeypatch, damage):
+    from forge3d.anamnesis import leaf_key, _DEFAULT_MAX_BYTES
+
+    store = _Store(tmp_path, _DEFAULT_MAX_BYTES, True)
+    keys = []
+    for byte in (1, 2):
+        blob = bytes([byte]) * 4096
+        keys.append(leaf_key(blob))
+        store.put_leaf(keys[-1], blob, label="write-bound")
+    (tmp_path / "quarantine" / "previous.invalid").write_bytes(b"x")
+    if damage == "payload":
+        path = tmp_path / store.DATA
+        corrupted = bytes([3]) * 4096
+        before = path.stat()
+        write_blob(tmp_path, keys[0], corrupted)
+        prefix = keys[0] + "-"
+    else:
+        path = tmp_path / store.INDEX
+        before = path.stat()
+        corrupted = path.read_bytes() + b"{"
+        path.write_bytes(corrupted)
+        prefix = "index-"
+    # Separate external corruption from the prior write even on filesystems
+    # that coalesce rapid modification timestamps.
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
+    store.max_bytes = store.disk_bytes()
+    events = _observe_store_writes(monkeypatch, tmp_path, lambda: store.max_bytes)
+
+    assert store.get(keys[0]) is None
+    packets = [path for path in (tmp_path / "quarantine").iterdir()
+               if path.name.startswith(prefix)]
+    assert len(packets) == 1
+    assert packets[0].read_bytes().endswith(corrupted)
+    assert events and store.disk_bytes() <= store.max_bytes
+    assert store.admission_cleanup_bytes == 0
+
+
 @pytest.mark.parametrize("reopen", [False, True], ids=["first-use", "reopen"])
 def test_admission_cleans_lowered_bound_before_any_write(tmp_path, monkeypatch, reopen):
     from forge3d.anamnesis import leaf_key, _DEFAULT_MAX_BYTES

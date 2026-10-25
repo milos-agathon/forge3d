@@ -248,6 +248,47 @@ def test_native_snapshot_propagates_copy_errors_and_recursion_limit():
     assert snapshot({0: [1.0]}, ()) == {0: [1.0]}
 
 
+@pytest.mark.parametrize("limit", [200, 400])
+def test_native_snapshot_respects_configured_python_recursion_limit(limit):
+    import sys
+    from forge3d._native import get_native_module
+
+    snapshot = get_native_module()._anamnesis_snapshot_recipes
+    previous = sys.getrecursionlimit()
+    try:
+        sys.setrecursionlimit(limit)
+        root = node = []
+        for _ in range(limit):
+            child = []
+            node.append(child)
+            node = child
+        with pytest.raises(RecursionError):
+            snapshot({0: root}, ())
+        assert snapshot({0: [1.0]}, ()) == {0: [1.0]}
+    finally:
+        sys.setrecursionlimit(previous)
+
+
+@pytest.mark.parametrize("depth", [64, 128])
+def test_native_snapshot_deep_subtrees_preserve_aliases_and_cycles(depth):
+    from forge3d._native import get_native_module
+
+    root = node = []
+    for _ in range(depth):
+        child = []
+        node.append(child)
+        node = child
+    shared = {"value": [1.0]}
+    node.extend([root, shared, shared])
+    actual = get_native_module()._anamnesis_snapshot_recipes({0: root}, ())[0]
+    node = actual
+    for _ in range(depth):
+        node = node[0]
+    assert node[0] is actual
+    assert node[1] is node[2] and node[1] is not shared
+    assert node[1] == shared
+
+
 @pytest.mark.parametrize("metadata", [
     {"value": 1.25, "nested": {1: "integer key", None: "optional key"}},
     {"negative_zero": -0.0, "negative_small": -1e-20, "text": '"-0.0"'},
