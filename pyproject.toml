@@ -136,6 +136,7 @@ exclude = [
     "assets/tif/**",
     "assets/*.mp4",
     "assets/*.png",
+    "data/*.tif",
     "dist*/**",
     "docs/**",
     "logs/**",

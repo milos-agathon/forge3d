@@ -8,6 +8,7 @@ struct RecipeCopier<'py> {
     atomics: Vec<Bound<'py, pyo3::types::PyType>>,
     ordinary: Vec<Bound<'py, PyAny>>,
     keep_alive: std::cell::RefCell<Vec<Bound<'py, PyAny>>>,
+    recursion_limit: usize,
 }
 
 struct CopyRecursionGuard;
@@ -177,6 +178,7 @@ impl<'py> RecipeCopier<'py> {
         &self,
         value: &Bound<'py, PyAny>,
         memo: &Bound<'py, PyDict>,
+        depth: usize,
     ) -> PyResult<Bound<'py, PyAny>> {
         use pyo3::types::{PyList, PyTuple};
 
@@ -187,6 +189,19 @@ impl<'py> RecipeCopier<'py> {
         let identity = value.as_ptr() as usize;
         if let Some(owned) = memo.get_item(identity)? {
             return Ok(owned);
+        }
+        // Since Python 3.12 the C recursion guard is independent of the
+        // interpreter's configured limit. Keep both bounds for native copies.
+        if depth >= self.recursion_limit {
+            return Err(pyo3::exceptions::PyRecursionError::new_err(
+                "maximum recursion depth exceeded while copying an ANAMNESIS recipe",
+            ));
+        }
+        // Rust frames can exhaust a small native stack before Python's C
+        // guard notices, especially in debug builds. Deep subtrees use the
+        // already-validated Python copier and the same alias/cycle memo.
+        if depth >= 32.min(self.recursion_limit / 4) {
+            return self.deepcopy.call1((value, memo));
         }
         // Like copy._keep_alive, retain originals while custom hooks execute:
         // hooks can remove objects from their source graph and reuse addresses.
@@ -210,8 +225,8 @@ impl<'py> RecipeCopier<'py> {
                 let key = item.get_item(0)?;
                 let child = item.get_item(1)?;
                 // Python deepcopy evaluates the value before the key.
-                let owned = self.clone_value(&child, memo)?;
-                result.set_item(self.clone_value(&key, memo)?, owned)?;
+                let owned = self.clone_value(&child, memo, depth + 1)?;
+                result.set_item(self.clone_value(&key, memo, depth + 1)?, owned)?;
             }
             return Ok(result.into_any());
         }
@@ -219,7 +234,7 @@ impl<'py> RecipeCopier<'py> {
             let result = PyList::empty_bound(self.py);
             memo.set_item(identity, &result)?;
             for child in value.iter()? {
-                result.append(self.clone_value(&child?, memo)?)?;
+                result.append(self.clone_value(&child?, memo, depth + 1)?)?;
             }
             return Ok(result.into_any());
         }
@@ -227,7 +242,7 @@ impl<'py> RecipeCopier<'py> {
             let source = value.downcast::<PyTuple>()?;
             let children = source
                 .iter()
-                .map(|child| self.clone_value(&child, memo))
+                .map(|child| self.clone_value(&child, memo, depth + 1))
                 .collect::<PyResult<Vec<_>>>()?;
             // A list inside the tuple may already have completed this cycle.
             if let Some(owned) = memo.get_item(identity)? {
@@ -267,7 +282,7 @@ impl<'py> RecipeCopier<'py> {
                 for (key, child) in owned.iter() {
                     let child_type = child.get_type();
                     if !self.atomics.iter().any(|atomic| child_type.is(atomic)) {
-                        owned.set_item(key, self.clone_value(&child, memo)?)?;
+                        owned.set_item(key, self.clone_value(&child, memo, depth + 1)?)?;
                     }
                 }
                 return Ok(result);
@@ -306,6 +321,8 @@ pub(crate) fn _anamnesis_snapshot_recipes(
         ],
         ordinary: ordinary_types.iter().collect(),
         keep_alive: std::cell::RefCell::new(Vec::new()),
+        // SAFETY: the GIL is held; Python exposes a positive interpreter limit.
+        recursion_limit: unsafe { pyo3::ffi::Py_GetRecursionLimit() } as usize,
     };
     let native = copier.can_clone_without_callbacks(recipes, &copy_module)?;
     let result = PyDict::new_bound(py);
@@ -326,7 +343,7 @@ pub(crate) fn _anamnesis_snapshot_recipes(
         let owned = if native {
             copier.keep_alive.borrow_mut().clear();
             // A fresh memo for every frame is part of the snapshot contract.
-            copier.clone_value(&recipe, &PyDict::new_bound(py))?
+            copier.clone_value(&recipe, &PyDict::new_bound(py), 0)?
         } else {
             // Match the Python comprehension, including a hook replacing
             // copy.deepcopy for a later recipe. Preflight executes no hooks.

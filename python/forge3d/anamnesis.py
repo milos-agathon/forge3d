@@ -908,10 +908,16 @@ class _Store:
         self._rewrite(records)
         self._memory_entries.pop(key, None)
         self._touched_keys.discard(key)
+        self._write_quarantine_packet(f"{key}-{time.time_ns()}", packet)
+
+    def _write_quarantine_packet(self, name, packet):
         quarantine = self.root / "quarantine"
-        growth = 0 if os.name == "nt" and quarantine.stat().st_size == 0 and not any(quarantine.iterdir()) else 2 * self._index_bytes()
+        # Admission already created this directory. Only its new file entry
+        # can grow the directory index; reserving a second directory block
+        # can reject quarantine even after every live cache entry is evicted.
+        growth = 0 if os.name == "nt" and quarantine.stat().st_size == 0 and not any(quarantine.iterdir()) else self._index_bytes()
         self._reserve_growth(len(packet) + growth)
-        (quarantine / f"{key}-{time.time_ns()}").write_bytes(packet)
+        (quarantine / name).write_bytes(packet)
         self._current_bytes = self.disk_bytes()
 
     def _quarantine_index(self):
@@ -924,11 +930,7 @@ class _Store:
         self._invalid_index, self._bad_index_bytes = False, b""
         self._memory_entries.clear()
         self._current_bytes = self.disk_bytes()
-        quarantine = self.root / "quarantine"
-        growth = 0 if os.name == "nt" and quarantine.stat().st_size == 0 and not any(quarantine.iterdir()) else 2 * self._index_bytes()
-        self._reserve_growth(len(packet) + growth)
-        (quarantine / f"index-{time.time_ns()}.invalid").write_bytes(packet)
-        self._current_bytes = self.disk_bytes()
+        self._write_quarantine_packet(f"index-{time.time_ns()}.invalid", packet)
 
     def verify(self):
         self._refresh_residency()
