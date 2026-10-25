@@ -44,6 +44,29 @@ def _workflow_data(name: str) -> dict:
     return data
 
 
+def test_anamnesis_public_scene_lane_enables_verified_windows_terrain() -> None:
+    job = _workflow_data("ci.yml")["jobs"]["test-anamnesis-hermeticity"]
+    assert job["runs-on"] == ["self-hosted", "Windows", "X64", "forge3d-gpu", "gpu-nvidia"]
+    assert job["env"]["FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN"] == "1"
+    assert job["env"]["FORGE3D_TEST_INSTALLED_WHEEL"] == "1"
+    steps = job["steps"]
+    hardware = next(step for step in steps if "--require-nvidia-vulkan" in step.get("run", ""))
+    runtime = next(step for step in steps if step.get("name") == "Require public scene terrain runtimes")
+    acceptance = next(step for step in steps if "test_native_production_10000_mutations" in step.get("run", ""))
+    assert steps.index(hardware) < steps.index(runtime) < steps.index(acceptance)
+    for probe in ("_terrain_renderer_runtime_available", "terrain_rendering_available"):
+        assert f"if not {probe}():" in runtime["run"]
+    assert "raise SystemExit" in runtime["run"]
+    assert "exit $LASTEXITCODE" in runtime["run"]
+    assert "test_public_scene_600_frame_acceptance" in acceptance["run"]
+    assert "test_public_scene_600_frame_fresh_process_acceptance" in acceptance["run"]
+    assert "test_native_provenance_feedback_survives_normal_derivatives" in acceptance["run"]
+    assert "assert_junit_zero_skips.py" in acceptance["run"]
+    for step in (hardware, runtime, acceptance):
+        assert "continue-on-error" not in step
+    assert "continue-on-error" not in job
+
+
 def test_paths_filter_literals_are_valid_yaml_without_duplicate_keys() -> None:
     workflow = _workflow("ci.yml")
     steps = re.findall(
