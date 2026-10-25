@@ -226,7 +226,7 @@ impl TerrainScene {
             targets
                 .concordia
                 .as_ref()
-                .expect("frame owner")
+                .ok_or_else(|| anyhow!("CONCORDIA frame state is unavailable"))?
                 .cartographic_depth_view(),
             targets
                 .concordia
@@ -242,7 +242,7 @@ impl TerrainScene {
             targets
                 .concordia
                 .as_ref()
-                .expect("frame owner")
+                .ok_or_else(|| anyhow!("CONCORDIA frame state is unavailable"))?
                 .cartographic_depth_view(),
             None,
             wgpu::TextureFormat::Rgba8Unorm,
@@ -250,7 +250,10 @@ impl TerrainScene {
         let points = super::points::prepare(
             self,
             point_batches,
-            targets.concordia.as_ref().expect("frame owner"),
+            targets
+                .concordia
+                .as_ref()
+                .ok_or_else(|| anyhow!("CONCORDIA frame state is unavailable"))?,
             params,
         )?;
         let mut encoder = self
@@ -272,7 +275,7 @@ impl TerrainScene {
             targets
                 .concordia
                 .as_ref()
-                .expect("frame owner")
+                .ok_or_else(|| anyhow!("CONCORDIA frame state is unavailable"))?
                 .cloud
                 .generate_shadows(&mut encoder);
             stages.end(&mut timing, &mut encoder, scope, 0);
@@ -303,7 +306,7 @@ impl TerrainScene {
         let mut cartography = targets
             .concordia
             .as_mut()
-            .expect("frame owner")
+            .ok_or_else(|| anyhow!("CONCORDIA frame state is unavailable"))?
             .cartography_depth
             .take();
         if let Some(depth) = cartography.as_mut() {
@@ -328,9 +331,9 @@ impl TerrainScene {
         targets
             .concordia
             .as_mut()
-            .expect("frame owner")
+            .ok_or_else(|| anyhow!("CONCORDIA frame state is unavailable"))?
             .cartography_depth = cartography;
-        super::cartographic_depth::clear_shared_geometry(&mut encoder, &targets);
+        super::cartographic_depth::clear_shared_geometry(&mut encoder, &targets)?;
         let mut staged_selection = None;
         self.encode_forward_pass(
             &mut encoder,
@@ -351,7 +354,10 @@ impl TerrainScene {
             &mut staged_selection,
         )?;
         stages.end(&mut timing, &mut encoder, geometry_scope, 1);
-        let mut state = targets.concordia.take().expect("frame owner");
+        let mut state = targets
+            .concordia
+            .take()
+            .ok_or_else(|| anyhow!("CONCORDIA frame state is unavailable"))?;
 
         let settings = &decoded.screen_space;
         let mut source = targets.internal_texture.create_view(&Default::default());

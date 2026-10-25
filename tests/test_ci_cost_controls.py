@@ -751,6 +751,46 @@ def test_full_python_lane_records_measured_timings_and_skips(tmp_path) -> None:
     assert "ABSENT" in summarize(tmp_path / "missing.xml")
 
 
+def test_full_windows_python_requires_physical_adapter_without_reducing_coverage() -> None:
+    jobs = _workflow_data("ci.yml")["jobs"]
+    windows = jobs["test-python-full-windows"]
+    assert windows["with"]["physical_windows_gpu"] == "true"
+    assert windows["with"]["python_versions"] == '["3.10", "3.11", "3.12", "3.13"]'
+    assert windows["with"]["test_mode"] == "full"
+    assert windows["with"]["restore_lfs"] == "true"
+    assert "test-python-full-windows" in jobs["full-acceptance-summary"]["needs"]
+    assert "continue-on-error" not in windows
+    for name, job in jobs.items():
+        if name != "test-python-full-windows":
+            assert "physical_windows_gpu" not in job.get("with", {})
+
+    workflow = _workflow_data("test-python-wheel.yml")
+    assert workflow["on"]["workflow_call"]["inputs"]["physical_windows_gpu"]["default"] == "false"
+    job = workflow["jobs"]["test"]
+    assert job["runs-on"] == (
+        '${{ inputs.physical_windows_gpu && fromJSON('
+        '\'["self-hosted", "Windows", "X64", "forge3d-gpu", "gpu-nvidia"]\') || inputs.runner }}'
+    )
+    steps = job["steps"]
+    configure = next(step for step in steps if step.get("name") == "Configure physical Windows acceptance")
+    assert configure["if"] == "inputs.physical_windows_gpu"
+    for value in ("FORGE3D_TEST_INSTALLED_WHEEL=1", "FORGE3D_NO_BOOTSTRAP=1",
+                  "FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN=1", "WGPU_BACKEND=vulkan", "WGPU_BACKENDS=vulkan",
+                  "FORGE3D_DETERMINISM_TEST_BACKEND=vulkan"):
+        assert value in configure["run"]
+    probe = next(step for step in steps if step.get("name") == "Require physical NVIDIA Vulkan terrain adapter")
+    assert probe["if"] == "inputs.physical_windows_gpu"
+    assert "--require-nvidia-vulkan" in probe["run"]
+    assert "exit $LASTEXITCODE" in probe["run"]
+    assert "continue-on-error" not in probe
+    full = next(step for step in steps if step.get("name") == "Run full default Python lane")
+    assert steps.index(probe) < steps.index(full)
+    assert full["if"] == "inputs.test_mode == 'full'"
+    assert "scripts/ci_pytest_lane.py --profile full" in full["run"]
+    assert full["run"].count("--deselect=") == 1  # Existing separately required D02 lane.
+    assert "--ignore" not in full["run"] and " -k " not in full["run"]
+
+
 def test_optional_metal_absence_is_outside_full_verdict() -> None:
     jobs = _workflow_data("ci.yml")["jobs"]
     assert "test-substratia-gpu" not in jobs["full-acceptance-summary"]["needs"]

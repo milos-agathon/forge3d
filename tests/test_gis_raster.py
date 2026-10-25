@@ -290,7 +290,12 @@ def test_public_gis_all_matches_stub_exports():
     stub_exports = set()
     for line in Path(gis.__file__).with_suffix(".pyi").read_text(encoding="utf-8").splitlines():
         if line.startswith(("class ", "def ")):
-            stub_exports.add(line.split()[1].split("(")[0].rstrip(":"))
+            name = line.split()[1].split("(")[0].rstrip(":")
+            # Private helpers can be typed for internal callers without being
+            # public exports. Every declared callable still has to exist.
+            assert callable(getattr(gis, name))
+            if not name.startswith("_"):
+                stub_exports.add(name)
 
     assert set(gis.__all__) == stub_exports
 

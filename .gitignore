@@ -433,8 +433,10 @@ scripts/*
 !scripts/run_nvidia_visual_acceptance.py
 !scripts/run_nvidia_determinism_acceptance.py
 !scripts/run_browser_probe.py
+!scripts/windows_native_diagnosis.py
 
 # forge3d outputs (A13) 
+/.repair-evidence/
 out/
 diag_out/
 
