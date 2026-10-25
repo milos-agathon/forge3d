@@ -147,7 +147,7 @@ jobs:
       - name: Record D02 physical-test deselection
         if: inputs.test_mode == 'full' && runner.os != 'macOS'
         run: >-
-          python -c "import os; from pathlib import Path; reason = 'D02: Linux/Windows Python matrices leave tests/test_raster_styles_gpu.py (three physical cases) to the dedicated required NVIDIA Vulkan acceptance lane, which runs all three with zero skips and unchanged physical/pixel assertions.'; print('::notice::' + reason); Path(os.environ['GITHUB_STEP_SUMMARY']).open('a', encoding='utf-8').write(reason + '\n')"
+          python -c "import os; from pathlib import Path; reason = 'D02: Linux/Windows Python matrices deselect tests/test_raster_styles_gpu.py (three physical cases); required NVIDIA Vulkan acceptance runs all three with zero skips and unchanged physical/pixel assertions.'; print('::notice::' + reason); Path(os.environ['GITHUB_STEP_SUMMARY']).open('a', encoding='utf-8').write(reason + '\n')"
 
       - name: Run full default Python lane
         if: inputs.test_mode == 'full'
