@@ -1076,7 +1076,6 @@ __all__ = [
     "classify_raster",
     "write_raster",
     "parse_crs",
-    "_crs_metadata",
     "inspect_crs",
     "raster_crs",
     "assign_crs",

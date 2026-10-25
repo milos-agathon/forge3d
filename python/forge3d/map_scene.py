@@ -4203,7 +4203,6 @@ def _render_native_offscreen_result(
     landmark_metadata = {}
     if requested_effects:
         from ._map_scene_native_inputs import is_cartographic_landmark
-        from ._map_scene_validation import diagnostic_block
         incompatible = []
         volumetrics = _mapscene_lighting_extras(_metadata_dict(recipe.lighting.settings)).get("volumetrics")
         if volumetrics is not None and volumetrics.enabled and volumetrics.density_volumes:
