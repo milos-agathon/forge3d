@@ -436,6 +436,7 @@ scripts/*
 !scripts/windows_native_diagnosis.py
 
 # forge3d outputs (A13) 
+/.repair-evidence/
 out/
 diag_out/
 

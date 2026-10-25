@@ -773,7 +773,8 @@ def test_full_windows_python_requires_physical_adapter_without_reducing_coverage
     configure = next(step for step in steps if step.get("name") == "Configure physical Windows acceptance")
     assert configure["if"] == "inputs.physical_windows_gpu"
     for value in ("FORGE3D_TEST_INSTALLED_WHEEL=1", "FORGE3D_NO_BOOTSTRAP=1",
-                  "FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN=1", "WGPU_BACKEND=vulkan", "WGPU_BACKENDS=vulkan"):
+                  "FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN=1", "WGPU_BACKEND=vulkan", "WGPU_BACKENDS=vulkan",
+                  "FORGE3D_DETERMINISM_TEST_BACKEND=vulkan"):
         assert value in configure["run"]
     probe = next(step for step in steps if step.get("name") == "Require physical NVIDIA Vulkan terrain adapter")
     assert probe["if"] == "inputs.physical_windows_gpu"

@@ -76,6 +76,7 @@ jobs:
             'FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN=1'
             'WGPU_BACKEND=vulkan'
             'WGPU_BACKENDS=vulkan'
+            'FORGE3D_DETERMINISM_TEST_BACKEND=vulkan'
             "FORGE3D_EXPECTED_ADAPTER_PROBE=$(Join-Path $evidence 'adapter.json')"
           ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
