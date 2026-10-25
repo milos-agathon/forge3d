@@ -2515,6 +2515,7 @@ jobs:
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
     env:
       WGPU_BACKEND: vulkan
+      FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'
       FORGE3D_NO_BOOTSTRAP: '1'
       FORGE3D_TEST_INSTALLED_WHEEL: '1'
       FORGE3D_RUN_GPU_ANAMNESIS: '1'
@@ -2559,6 +2560,18 @@ jobs:
         shell: pwsh
         run: |
           python scripts/terrain_ci_probe.py --mode terrain --require-nvidia-vulkan --json "$env:RUNNER_TEMP/anamnesis-p0-adapter.json"
+      - name: Require public scene terrain runtimes
+        shell: pwsh
+        run: |
+          @'
+          from forge3d.map_scene import _terrain_renderer_runtime_available
+          from tests._terrain_runtime import terrain_rendering_available
+          if not _terrain_renderer_runtime_available():
+              raise SystemExit("MapScene terrain runtime unavailable after hardware probe")
+          if not terrain_rendering_available():
+              raise SystemExit("Test terrain runtime unavailable after hardware probe")
+          '@ | python -
+          exit $LASTEXITCODE
       - name: Prove native production input mutations and conservative recompute
         shell: pwsh
         env:
