@@ -361,8 +361,11 @@ def test_cli_attributes_hash_to_requested_backend(monkeypatch, tmp_path, capsys)
 @pytest.mark.skipif(sys.platform != "win32", reason="requires local DX12 and Vulkan")
 def test_device_probe_reports_initialized_render_adapter(monkeypatch, tmp_path):
     """A post-render probe reports its process's active adapter, not its argument."""
+    backend = _local_backend().lower()
+    other_backend = "dx12" if backend == "vulkan" else "vulkan"
     env = dict(os.environ)
-    env.update(FORGE3D_DETERMINISTIC="1", WGPU_BACKENDS="dx12")
+    env.update(FORGE3D_DETERMINISTIC="1", WGPU_BACKENDS=backend)
+    env.pop("WGPU_BACKEND", None)
     if env.get("FORGE3D_TEST_INSTALLED_WHEEL") != "1":
         source_python = Path(__file__).parents[1] / "python"
         env["PYTHONPATH"] = os.pathsep.join(
@@ -374,7 +377,7 @@ def test_device_probe_reports_initialized_render_adapter(monkeypatch, tmp_path):
         "import json; import forge3d as f3d; "
         "from forge3d.determinism import CANONICAL_SCENE, _render_reference_inprocess; "
         f"_render_reference_inprocess(CANONICAL_SCENE, 64, 64, {str(tmp_path / 'active-adapter.png')!r}); "
-        "print(json.dumps(f3d.device_probe('vulkan')))"
+        f"print(json.dumps(f3d.device_probe({other_backend!r})))"
     )
     result = subprocess.run([sys.executable, "-c", script], env=env, check=True, capture_output=True, text=True)
-    assert json.loads(result.stdout.strip().splitlines()[-1])["backend"] == "Dx12"
+    assert json.loads(result.stdout.strip().splitlines()[-1])["backend"].lower() == backend
