@@ -735,7 +735,7 @@ def test_full_python_lane_records_measured_timings_and_skips(tmp_path) -> None:
 
     workflow = yaml.load(_workflow("test-python-wheel.yml"), Loader=yaml.BaseLoader)
     job = workflow["jobs"]["test"]
-    assert job["timeout-minutes"] == "35"
+    assert job["timeout-minutes"] == "${{ inputs.physical_windows_gpu && 90 || 35 }}"
     run = next(step for step in job["steps"] if step.get("name") == "Run full default Python lane")
     assert "--durations=30 -rs --junitxml=python-full-junit.xml" in run["run"]
     record = next(step for step in job["steps"] if "summarize_python_lane.py" in step.get("run", ""))
