@@ -55,6 +55,7 @@ def _build_config_with_phi(phi_deg: float, overlay):
         z_scale=1.0,
         cam_target=[0.0, 0.0, 0.0],
         cam_radius=4.0,
+        camera_mode="mesh:zup",  # Exercise geometric orbit, not fullscreen shading.
         cam_phi_deg=phi_deg,
         cam_theta_deg=45.0,  # Fixed elevation
         cam_gamma_deg=0.0,
