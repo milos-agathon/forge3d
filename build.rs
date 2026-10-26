@@ -40,8 +40,13 @@ fn shader_tree_hash(root: &Path) -> String {
             .join("/");
         hash.update(normalized.as_bytes());
         if let Ok(bytes) = fs::read(path) {
+            // Reused Windows checkouts can contain mixed LF/CRLF even when
+            // Git reports a clean tree. Both spellings compile identically.
+            let bytes = String::from_utf8(bytes)
+                .expect("WGSL source must be UTF-8")
+                .replace("\r\n", "\n");
             hash.update((bytes.len() as u64).to_le_bytes());
-            hash.update(bytes);
+            hash.update(bytes.as_bytes());
         }
     }
     format!("{:x}", hash.finalize())
