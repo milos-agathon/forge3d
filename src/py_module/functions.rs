@@ -22,6 +22,7 @@ mod tiles3d;
 #[cfg(feature = "extension-module")]
 pub(crate) fn register_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     anamnesis::register_anamnesis_py_functions(m)?;
+    m.add_class::<crate::scene::label_compositor::LabelCompositor>()?;
     atmosphere::register_atmosphere_py_functions(m)?;
     astro::register_astro_py_functions(m)?;
     interactive::register_interactive_py_functions(m)?;

@@ -1058,3 +1058,93 @@ def test_completed_resource_future_uses_the_ordinary_warm_declaration_path(tmp_p
     assert not adapter._pending_resources
     assert not adapter._prepared_uniforms
     assert adapter._semantic_passes is None
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(os.environ.get("FORGE3D_RUN_GPU_ANAMNESIS") != "1", reason="native compositor parity requires a physical GPU")
+@pytest.mark.parametrize("size", [(64, 64), (31, 19)])
+@pytest.mark.parametrize("base_alpha", [0, 127, 255])
+@pytest.mark.parametrize("channels", [1, 3, 4])
+@pytest.mark.parametrize("rotation", [0.0, 0.4])
+def test_private_label_compositor_matches_scene_and_clears_reused_quads(size, base_alpha, channels, rotation):
+    from forge3d._native import get_native_module
+    native = get_native_module()
+    width, height = size
+    full = native.Scene(width, height)
+    full.disable_terrain()
+    lean = native._anamnesis_prepare_label_scene(width, height)
+    assert isinstance(lean, native._LabelCompositor)
+    assert not hasattr(lean, "enable_terrain")
+    rng = np.random.default_rng(46)
+    base = rng.integers(0, 256, (height, width, 4), dtype=np.uint8)
+    base[:, :, 3] = base_alpha
+    atlas = rng.integers(0, 256, (16, 16, channels), dtype=np.uint8)
+    for scene in (full, lean):
+        scene.set_raster_overlay(base, 1.0, None, None)
+        scene.set_native_text_atlas(atlas, channels, 1.0)
+        scene.enable_native_text()
+        for x, y in [(3., 4.), (-5., 2.), (width - 4., height - 5.)]:
+            scene.add_native_text_rect_uv_halo(x, y, 18., 20., 0., 0., 1., 1.,
+                0.8, 0.2, 0.4, 0.8, 0.1, 0.7, 0.2, 0.7, 1.3, rotation)
+    np.testing.assert_array_equal(lean.render_rgba(), full.render_rgba())
+    for scene in (full, lean):
+        scene.clear_native_text()
+    np.testing.assert_array_equal(lean.render_rgba(), full.render_rgba())
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(os.environ.get("FORGE3D_RUN_GPU_ANAMNESIS") != "1", reason="native compositor ownership requires a physical GPU")
+def test_private_label_compositor_reports_real_work_and_releases_allocations():
+    import gc
+    from forge3d._native import get_native_module
+    native = get_native_module()
+    native._anamnesis_prepare_context()
+    baseline = dict(native.global_memory_metrics())
+    compositor = native._anamnesis_prepare_label_scene(64, 64)
+    assert native.global_memory_metrics()["texture_bytes"] > baseline["texture_bytes"]
+    compositor.set_raster_overlay(np.full((64, 64, 4), 255, dtype=np.uint8), 1., None, None)
+    compositor.set_native_text_atlas(np.full((8, 8, 1), 255, dtype=np.uint8), 1, 1.)
+    compositor.enable_native_text()
+    compositor.add_native_text_rect_uv_halo(3., 4., 18., 20., 0., 0., 1., 1.,
+        0.8, 0.2, 0.4, 0.8, 0.1, 0.7, 0.2, 0.7, 1.3)
+    compositor.render_rgba()
+    report = json.loads(native.render_execution_report())
+    assert [item["label"] for item in report["passes"]] == ["label.clear", "label.composite", "label.readback_copy"]
+    assert [item["draw_calls"] for item in report["passes"]] == [0, 2, 1]
+    assert all(item["gpu_ms"] >= 0 for item in report["passes"])
+    if "timestamp_query" in report["capabilities"]["granted"]:
+        assert any(item["gpu_ms"] > 0 for item in report["passes"])
+    assert set(report["engine"]["wgsl_module_hashes"]) == {"overlays_shader", "text_overlay_shader"}
+    labels = report["allocations"]["by_label"]
+    assert "label-compositor-color" in labels
+    assert "label-compositor-readback" in labels
+    assert report["allocations"]["peak_host_visible_bytes"] > 0
+    assert report["allocations"]["peak_device_local_bytes"] > 0
+    compositor.clear_native_text()
+    compositor.render_rgba()
+    cleared = json.loads(native.render_execution_report())
+    assert set(cleared["engine"]["wgsl_module_hashes"]) == {"overlays_shader"}
+    assert cleared["passes"][1]["draw_calls"] == 1
+    del compositor
+    gc.collect()
+    after = dict(native.global_memory_metrics())
+    for name in ("buffer_count", "texture_count", "buffer_bytes", "texture_bytes", "host_visible_bytes", "total_bytes"):
+        assert after[name] == baseline[name], name
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(os.environ.get("FORGE3D_RUN_GPU_ANAMNESIS") != "1", reason="native compositor input validation requires a physical GPU")
+def test_private_label_compositor_rejects_invalid_inputs_before_rendering():
+    from forge3d._native import get_native_module
+    native = get_native_module()
+    compositor = native._anamnesis_prepare_label_scene(64, 64)
+    for channels in (0, 2, 5):
+        with pytest.raises(ValueError, match="overlay channels must be 3 or 4"):
+            compositor.set_raster_overlay(np.zeros((8, 8, channels), dtype=np.uint8), 1., None, None)
+        with pytest.raises(ValueError, match="atlas channels must be 1, 3, or 4"):
+            compositor.set_native_text_atlas(np.zeros((8, 8, channels), dtype=np.uint8), channels, 1.)
+    with pytest.raises(TypeError, match="numpy uint8"):
+        compositor.set_raster_overlay(np.zeros((8, 8, 4), dtype=np.float32), 1., None, None)
+    with pytest.raises(ValueError, match="rotation must be finite"):
+        compositor.add_native_text_rect_uv_halo(3., 4., 18., 20., 0., 0., 1., 1.,
+            0.8, 0.2, 0.4, 0.8, 0.1, 0.7, 0.2, 0.7, 1.3, float('nan'))

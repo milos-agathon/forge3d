@@ -730,13 +730,13 @@ fn _anamnesis_prepare_label_scene(
     py: Python<'_>,
     width: u32,
     height: u32,
-) -> PyResult<crate::scene::Scene> {
+) -> PyResult<crate::scene::label_compositor::LabelCompositor> {
     if width == 0 || height == 0 {
         return Err(PyValueError::new_err(
             "label compositor dimensions must be non-zero",
         ));
     }
-    py.allow_threads(|| crate::scene::Scene::new(width, height, None, None))
+    py.allow_threads(|| crate::scene::label_compositor::LabelCompositor::new(width, height))
 }
 
 pub(super) fn register_anamnesis_py_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {

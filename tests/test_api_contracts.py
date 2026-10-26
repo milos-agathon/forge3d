@@ -99,6 +99,7 @@ class TestNativeModuleSymbols:
 
     EXPECTED_CLASSES = [
         "Scene",
+        "_LabelCompositor",
         "Session",
         "Colormap1D",
         "MaterialSet",
@@ -1372,7 +1373,7 @@ class TestTerrainRendererHeightStreamingContract:
         assert not hasattr(f3d, "_anamnesis_snapshot_recipes")
         assert "_anamnesis_prepare_context" not in f3d.__all__
         assert not hasattr(f3d, "_anamnesis_prepare_context")
-        for name in ("_anamnesis_prepare_label_scene", "_anamnesis_packed_snapshot", "_AnamnesisPackedSnapshot"):
+        for name in ("_anamnesis_prepare_label_scene", "_anamnesis_packed_snapshot", "_AnamnesisPackedSnapshot", "_LabelCompositor"):
             assert name not in f3d.__all__
             assert not hasattr(f3d, name)
 
