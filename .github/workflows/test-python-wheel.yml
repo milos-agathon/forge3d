@@ -41,7 +41,9 @@ jobs:
   test:
     name: Python ${{ inputs.test_mode }} (${{ inputs.physical_windows_gpu && 'Windows NVIDIA Vulkan' || inputs.runner }}, ${{ matrix.python-version }})
     runs-on: ${{ inputs.physical_windows_gpu && fromJSON('["self-hosted", "Windows", "X64", "forge3d-gpu", "gpu-nvidia"]') || inputs.runner }}
-    timeout-minutes: 35
+    # Physical full runs include the 600-frame TESSELLA test (34m23s measured).
+    # Reuse TESSELLA's 90-minute physical allowance; hosted runs retain 35 minutes.
+    timeout-minutes: ${{ inputs.physical_windows_gpu && 90 || 35 }}
     strategy:
       fail-fast: false
       matrix:

@@ -760,7 +760,23 @@ def test_full_python_lane_records_measured_timings_and_skips(tmp_path) -> None:
 
     workflow = yaml.load(_workflow("test-python-wheel.yml"), Loader=yaml.BaseLoader)
     job = workflow["jobs"]["test"]
-    assert job["timeout-minutes"] == "35"
+    # Owner-approved physical Windows allowance; hosted lanes keep 35 minutes.
+    physical_timeout = "${{ inputs.physical_windows_gpu && 90 || 35 }}"
+    assert job["timeout-minutes"] in ("35", physical_timeout)
+    if job["timeout-minutes"] == physical_timeout:
+        option = workflow["on"]["workflow_call"]["inputs"]["physical_windows_gpu"]
+        assert option["type"] == "boolean" and option["default"] == "false"
+        assert job["runs-on"] == (
+            '${{ inputs.physical_windows_gpu && fromJSON('
+            '\'["self-hosted", "Windows", "X64", "forge3d-gpu", "gpu-nvidia"]\') || inputs.runner }}'
+        )
+        callers = _workflow_data("ci.yml")["jobs"]
+        windows = callers["test-python-full-windows"]["with"]
+        assert windows["physical_windows_gpu"] == "true"
+        assert windows["test_mode"] == "full"
+        for name, caller in callers.items():
+            if name != "test-python-full-windows":
+                assert "physical_windows_gpu" not in caller.get("with", {})
     run = next(step for step in job["steps"] if step.get("name") == "Run full default Python lane")
     assert "--durations=30 -rs --junitxml=python-full-junit.xml" in run["run"]
     record = next(step for step in job["steps"] if "summarize_python_lane.py" in step.get("run", ""))
