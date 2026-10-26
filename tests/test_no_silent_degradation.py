@@ -636,6 +636,13 @@ def test_e_anamnesis_physical_jobs_are_acceptance_scoped_honestly():
         "\n  # ============================================================================\n  # Hosted determinism families", 1
     )[0]
     assert "test_real_gpu_600_frame_acceptance" in production
+    hermeticity = ci_yml.split("  test-anamnesis-hermeticity:", 1)[1].split("\n  # ====", 1)[0]
+    for test_name in (
+        "test_private_label_compositor_matches_scene_and_clears_reused_quads",
+        "test_private_label_compositor_reports_real_work_and_releases_allocations",
+        "test_private_label_compositor_rejects_invalid_inputs_before_rendering",
+    ):
+        assert f"tests/test_anamnesis_scene.py::{test_name}" in hermeticity
     aggregate = ci_yml.split("  full-acceptance-summary:", 1)[1]
     assert "anamnesis_physical_selected=" in aggregate
     for job_name in (
