@@ -101,6 +101,47 @@ impl PackedReadSnapshot {
         keys: &[PassKey],
         data: &'a [u8],
     ) -> Vec<(String, Option<&'a [u8]>)> {
+        let workers = std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1)
+            .min(4);
+        if keys.len() < 256 || workers == 1 {
+            return self.verify_chunk(keys, data);
+        }
+        // The caller has frozen this read set. Every chunk uses the same
+        // integrity predicate over immutable owned bytes, and all workers
+        // join before returning. Keep small reads and thread-spawn failures
+        // on the serial path, without dropping or trusting any requested key.
+        std::thread::scope(|scope| {
+            let chunks: Vec<_> = keys.chunks(keys.len().div_ceil(workers)).collect();
+            let pending: Vec<_> = chunks[..chunks.len() - 1]
+                .iter()
+                .map(|chunk| {
+                    let chunk = *chunk;
+                    let handle = std::thread::Builder::new()
+                        .spawn_scoped(scope, move || self.verify_chunk(chunk, data))
+                        .ok();
+                    (handle, chunk)
+                })
+                .collect();
+            let last = self.verify_chunk(chunks[chunks.len() - 1], data);
+            let mut verified = Vec::with_capacity(keys.len());
+            for (handle, chunk) in pending {
+                verified.extend(match handle {
+                    Some(handle) => handle.join().expect("packed verification worker panicked"),
+                    None => self.verify_chunk(chunk, data),
+                });
+            }
+            verified.extend(last);
+            verified
+        })
+    }
+
+    fn verify_chunk<'a>(
+        &self,
+        keys: &[PassKey],
+        data: &'a [u8],
+    ) -> Vec<(String, Option<&'a [u8]>)> {
         keys.iter()
             .filter_map(|key| {
                 let name = key.to_hex();
@@ -1004,6 +1045,51 @@ mod tests {
         assert_eq!(snapshot.verify(&[key], b""), vec![(key.to_hex(), None)]);
         index.schema = "forge3d.anamnesis.packed-index/1".into();
         assert!(PackedReadSnapshot::from_index(&serde_json::to_vec(&index).unwrap()).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn packed_large_read_sets_preserve_order_and_reject_corrupt_entries() {
+        let root = scratch("snapshot-large-reads");
+        let store = ContentStore::new(&root, u64::MAX, true).unwrap();
+        let (valid, valid_material) = derivation("valid", b"valid bytes");
+        let (damaged_blob, blob_material) = derivation("blob", b"bad blob");
+        let (damaged_derivation, bad_material) = derivation("derivation", b"bad derivation");
+        store.put(valid, b"valid bytes", valid_material).unwrap();
+        store.put(damaged_blob, b"bad blob", blob_material).unwrap();
+        store
+            .put(damaged_derivation, b"bad derivation", bad_material)
+            .unwrap();
+        let (mut index, mut data) = store.load().unwrap();
+        data[index.entries[&damaged_blob.to_hex()].offset as usize] ^= 1;
+        let KeyDerivation::Pass { material } = &mut index
+            .entries
+            .get_mut(&damaged_derivation.to_hex())
+            .unwrap()
+            .metadata
+            .derivation
+        else {
+            panic!("expected a pass derivation");
+        };
+        material.uniform_sha256.0[0] ^= 1;
+        let snapshot =
+            PackedReadSnapshot::from_index(&serde_json::to_vec(&index).unwrap()).unwrap();
+        let absent = super::super::key::leaf_key(b"absent");
+        let pattern = [valid, damaged_blob, absent, damaged_derivation, valid];
+        for length in [0, 1, 255, 256, 600, 601] {
+            let keys: Vec<_> = pattern.into_iter().cycle().take(length).collect();
+            let expected: Vec<_> = keys
+                .iter()
+                .filter(|key| **key != absent)
+                .map(|key| {
+                    (
+                        key.to_hex(),
+                        (*key == valid).then_some(b"valid bytes".as_slice()),
+                    )
+                })
+                .collect();
+            assert_eq!(snapshot.verify(&keys, &data), expected);
+        }
         fs::remove_dir_all(root).unwrap();
     }
 }
