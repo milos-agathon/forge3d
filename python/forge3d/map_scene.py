@@ -1754,11 +1754,13 @@ class _TerrainRenderResources:
             self._renderer = self._f3d.TerrainRenderer(self.session)
         return self._renderer
 
-    def anamnesis_resource_fingerprint(self, environment: Any) -> bytes | None:
+    def anamnesis_resource_fingerprint(self, environment: Any, *, context_ready: Any = None) -> bytes | None:
         if self._renderer is None:
             return self._f3d.TerrainRenderer._anamnesis_default_resource_fingerprint(
-                self.material_set, environment,
+                self.material_set, environment, context_ready,
             )
+        if context_ready is not None:
+            context_ready.result()
         return self._renderer._anamnesis_resource_fingerprint(self.material_set, environment)
 
     def env_maps(self, hdr_path: str) -> Any:

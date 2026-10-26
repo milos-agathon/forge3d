@@ -327,6 +327,39 @@ def test_warm_key_material_does_not_bypass_blob_verification(fake_renderer, tmp_
         scene.render(cache=cache)
 
 
+@pytest.mark.parametrize("changed", ["uniforms", "resources", "capabilities", "engine", "pipeline"])
+def test_warm_instance_memo_rekeys_changed_material(fake_renderer, monkeypatch, tmp_path, changed):
+    import forge3d.anamnesis as an
+    import forge3d._anamnesis_scene as adapter
+    scene = _scene(tmp_path / "frame.png")
+    cache = tmp_path / "cache"
+    first = an.render_sequence(scene, frames=[0], cache=cache)
+    warm = an.render_sequence(scene, frames=[0], cache=cache)
+    assert warm.pass_keys == first.pass_keys and not warm.observed_recompute
+    if changed == "uniforms":
+        scene.recipe = replace(scene.recipe, camera=replace(scene.recipe.camera, azimuth_deg=80.0))
+    elif changed == "resources":
+        (tmp_path / "unit-environment.hdr").write_bytes(b"revised owned environment")
+    elif changed == "capabilities":
+        ordinary = an.get_native_module
+        def revised_native():
+            native = ordinary()
+            caps = native.capabilities()
+            native.capabilities = lambda: dict(caps, limits={"max_bind_groups": 8})
+            return native
+        monkeypatch.setattr(an, "get_native_module", revised_native)
+    elif changed == "engine":
+        monkeypatch.setattr(an, "engine_fingerprint", lambda: b"revised engine identity")
+    else:
+        monkeypatch.setattr(adapter, "_implementation_fingerprint", lambda: b"revised executor source")
+    revised = an.render_sequence(scene, frames=[0], cache=cache)
+    independent = an.render_sequence(scene, frames=[0], cache=None)
+    assert revised.pass_keys != first.pass_keys
+    assert (0, "terrain.render") in revised.observed_recompute
+    assert revised.prediction_matches
+    assert revised.frame_blobs == independent.frame_blobs
+
+
 def test_scene_constructor_hooks_keep_the_ordinary_path(fake_renderer, monkeypatch, tmp_path):
     from forge3d._anamnesis_scene import _OwnedScene, _SceneExecution
     import forge3d.map_scene as ms

@@ -641,6 +641,8 @@ def test_e_anamnesis_physical_jobs_are_acceptance_scoped_honestly():
         "test_private_label_compositor_matches_scene_and_clears_reused_quads",
         "test_private_label_compositor_reports_real_work_and_releases_allocations",
         "test_private_label_compositor_rejects_invalid_inputs_before_rendering",
+        "test_prepared_material_upload_owns_pixels_before_context_wait",
+        "test_material_preparation_propagates_context_failure_without_gpu_allocation",
     ):
         assert f"tests/test_anamnesis_scene.py::{test_name}" in hermeticity
     aggregate = ci_yml.split("  full-acceptance-summary:", 1)[1]

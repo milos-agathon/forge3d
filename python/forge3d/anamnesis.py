@@ -27,7 +27,7 @@ import tempfile
 import time
 import threading
 from types import BuiltinFunctionType, FunctionType
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, NamedTuple, Sequence
 
 from ._canonical_json import canonical_json_bytes, canonical_json_value
 from ._native import get_native_module
@@ -240,8 +240,7 @@ class SequenceResult:
         return set(self.predicted_recompute) == set(self.observed_recompute)
 
 
-@dataclass(frozen=True)
-class _PlannedPass:
+class _PlannedPass(NamedTuple):
     instance: str
     label: str
     frame: int
@@ -1621,19 +1620,22 @@ def render_sequence(
         context = f"ANAMNESIS {label} uniforms"
         uniforms = (scene_encoder(label, uniform_state, error_context=context) if scene_encoder is not None else
                     canonical_json_bytes(uniform_state, error_context=context))
-        memo_key = ((key_context, label, pipeline, uniforms, tuple(input_keys))
-                    if key_memo_enabled else None)
-        material = previous_key_material.get(memo_key) if memo_key is not None else None
-        if material is None:
-            key = pass_key(label, pipeline, uniforms, input_keys, caps, engine)
-            material = (uniforms, key)
-        else:
-            uniforms, key = material
-            # Retain the already owned bytes, rather than a second equal copy.
-            memo_key = (key_context, label, pipeline, uniforms, tuple(input_keys))
-        if memo_key is not None:
-            current_key_material[memo_key] = material
         instance = _instance_name(frame, label)
+        memo_inputs = ((key_context, label, pipeline, uniforms, tuple(input_keys))
+                       if key_memo_enabled else None)
+        material = previous_key_material.get(instance) if memo_inputs is not None else None
+        # Locate the previous instance cheaply, then compare every exact key
+        # input. Hashing the complete uniform payload again for a Python dict
+        # duplicates work already performed by the canonical native key.
+        if material is None or material[0] != memo_inputs:
+            key = pass_key(label, pipeline, uniforms, input_keys, caps, engine)
+            material = (memo_inputs, key)
+        else:
+            key = material[1]
+            # Retain the already owned bytes, rather than a second equal copy.
+            pipeline, uniforms = material[0][2:4]
+        if memo_inputs is not None:
+            current_key_material[instance] = material
         plan = _PlannedPass(
             instance=instance,
             label=label,
