@@ -27,6 +27,7 @@ def test_running_on_unsupported_hosted_macos_ci_ignores_local_macos(monkeypatch)
 
 def test_hosted_windows_gpu_override_is_explicit(monkeypatch) -> None:
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.delenv("FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN", raising=False)
     monkeypatch.setattr(terrain_runtime.platform, "system", lambda: "Windows")
 
     assert terrain_runtime._running_on_unsupported_hosted_windows_ci() is True
