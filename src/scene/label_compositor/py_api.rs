@@ -10,14 +10,14 @@ impl LabelCompositor {
         offset_xy: Option<(i32, i32)>,
         scale: Option<f32>,
     ) -> PyResult<()> {
-        super::super::overlay_upload::RasterOverlayTarget {
+        super::super::py_api::raster_overlay::RasterOverlayTarget {
             allocation_owner: &self.allocation_owner,
             renderer: self.overlay_renderer.as_mut(),
             width: self.width,
             height: self.height,
             height_view: None,
         }
-        .upload(image, alpha, offset_xy, scale)?;
+        .set_raster_overlay(image, alpha, offset_xy, scale)?;
         self.overlay_enabled = true;
         Ok(())
     }

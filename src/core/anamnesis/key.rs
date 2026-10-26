@@ -41,16 +41,19 @@ impl PassKey {
         if value.len() != 64 {
             return Err("ANAMNESIS key must contain exactly 64 hexadecimal characters".into());
         }
-        // Stored metadata is untrusted UTF-8. Check the complete alphabet
-        // before byte slicing: a 64-byte Unicode string can split a code point.
-        if !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return Err("ANAMNESIS key contains non-hexadecimal characters".into());
+        fn nibble(byte: u8) -> Result<u8, String> {
+            match byte {
+                b'0'..=b'9' => Ok(byte - b'0'),
+                b'a'..=b'f' => Ok(byte - b'a' + 10),
+                b'A'..=b'F' => Ok(byte - b'A' + 10),
+                _ => Err("ANAMNESIS key contains non-hexadecimal characters".into()),
+            }
         }
+        // Stored metadata is untrusted UTF-8. Validate every byte without
+        // slicing str at a possibly non-character boundary.
         let mut out = [0u8; 32];
-        for (index, byte) in out.iter_mut().enumerate() {
-            let offset = index * 2;
-            *byte = u8::from_str_radix(&value[offset..offset + 2], 16)
-                .map_err(|_| "ANAMNESIS key contains non-hexadecimal characters")?;
+        for (byte, pair) in out.iter_mut().zip(value.as_bytes().chunks_exact(2)) {
+            *byte = (nibble(pair[0])? << 4) | nibble(pair[1])?;
         }
         Ok(Self(out))
     }
@@ -605,5 +608,28 @@ mod tests {
         assert_eq!(PassKey::from_hex(&lower).unwrap(), expected);
         assert_eq!(PassKey::from_hex(&upper).unwrap(), expected);
         assert_eq!(expected.to_hex(), lower);
+    }
+
+    #[test]
+    fn pass_key_decodes_every_byte_and_rejects_every_non_hex_ascii_byte() {
+        for byte in 0..=255 {
+            let lower = format!("{byte:02x}").repeat(32);
+            assert_eq!(PassKey::from_hex(&lower).unwrap(), PassKey([byte; 32]));
+            assert_eq!(
+                PassKey::from_hex(&lower.to_ascii_uppercase()).unwrap(),
+                PassKey([byte; 32])
+            );
+        }
+        for byte in (0u8..=127).filter(|byte| !byte.is_ascii_hexdigit()) {
+            for offset in [0, 1, 62, 63] {
+                let mut value = vec![b'0'; 64];
+                value[offset] = byte;
+                let text = String::from_utf8(value).unwrap();
+                assert_eq!(
+                    PassKey::from_hex(&text).unwrap_err(),
+                    "ANAMNESIS key contains non-hexadecimal characters"
+                );
+            }
+        }
     }
 }

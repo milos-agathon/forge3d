@@ -15,7 +15,7 @@ mod oit;
 mod point_spot_lights_core;
 mod point_spot_lights_query;
 mod point_spot_lights_update;
-mod raster_overlay;
+pub(super) mod raster_overlay;
 mod rect_area_lights;
 mod reflections;
 mod shoreline;
