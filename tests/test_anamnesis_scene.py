@@ -662,6 +662,67 @@ def test_default_resource_identity_matches_initialized_renderer(tmp_path):
 
 
 @pytest.mark.slow
+@pytest.mark.skipif(os.environ.get("FORGE3D_RUN_GPU_ANAMNESIS") != "1", reason="material preparation ownership requires a physical GPU")
+def test_prepared_material_upload_owns_pixels_before_context_wait(tmp_path, monkeypatch):
+    from PIL import Image
+    import forge3d.map_scene as ms
+    from forge3d.determinism import write_canonical_hdr
+    from forge3d._native import get_native_module
+    native = get_native_module()
+    monkeypatch.setenv("FORGE3D_MATERIAL_DIR", str(tmp_path))
+    texture = tmp_path / "rock_albedo.png"
+    Image.new("RGBA", (13, 7), (255, 0, 0, 255)).save(texture)
+    hdr = tmp_path / "environment.hdr"
+    write_canonical_hdr(hdr)
+    original = ms._TerrainRenderResources(f3d)
+    environment = original.env_maps(str(hdr))
+    expected = original.anamnesis_resource_fingerprint(environment)
+    candidate = ms._TerrainRenderResources(f3d)
+    before = dict(native.global_memory_metrics())
+    waits = []
+
+    class Ready:
+        def result(self):
+            waits.append(True)
+            # CPU preparation has not allocated a texture or buffer yet.
+            assert dict(native.global_memory_metrics()) == before
+            Image.new("RGBA", (13, 7), (0, 0, 255, 255)).save(texture)
+
+    actual = candidate.anamnesis_resource_fingerprint(environment, context_ready=Ready())
+    assert waits == [True]
+    assert actual == expected
+    assert candidate.renderer._anamnesis_resource_fingerprint(candidate.material_set, environment) == expected
+    changed = ms._TerrainRenderResources(f3d)
+    assert changed.anamnesis_resource_fingerprint(environment) != expected
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(os.environ.get("FORGE3D_RUN_GPU_ANAMNESIS") != "1", reason="material initialization failure requires the native extension")
+def test_material_preparation_propagates_context_failure_without_gpu_allocation(tmp_path):
+    import forge3d.map_scene as ms
+    from forge3d.determinism import write_canonical_hdr
+    from forge3d._native import get_native_module
+    native = get_native_module()
+    hdr = tmp_path / "environment.hdr"
+    write_canonical_hdr(hdr)
+    resources = ms._TerrainRenderResources(f3d)
+    environment = resources.env_maps(str(hdr))
+    before = dict(native.global_memory_metrics())
+    waits = []
+
+    class Failed:
+        def result(self):
+            waits.append(True)
+            raise RuntimeError("original context initialization failed")
+
+    with pytest.raises(RuntimeError, match="original context initialization failed"):
+        resources.anamnesis_resource_fingerprint(environment, context_ready=Failed())
+    assert waits == [True]
+    assert dict(native.global_memory_metrics()) == before
+    assert resources._renderer is None and resources._session is None
+
+
+@pytest.mark.slow
 @pytest.mark.skipif(os.environ.get("FORGE3D_RUN_GPU_ANAMNESIS") != "1", reason="cached live-validation control requires a physical GPU")
 def test_cached_scene_still_runs_live_validation(tmp_path, monkeypatch):
     import forge3d._map_scene_compiler as compiler
@@ -1058,6 +1119,28 @@ def test_completed_resource_future_uses_the_ordinary_warm_declaration_path(tmp_p
     assert not adapter._pending_resources
     assert not adapter._prepared_uniforms
     assert adapter._semantic_passes is None
+
+
+@pytest.mark.parametrize("label", ["Peak", "é雪", '{"frame":-1,"state":}'])
+def test_prepared_label_payload_matches_independent_canonical_serialization(tmp_path, monkeypatch, label):
+    from concurrent.futures import Future
+    import forge3d._anamnesis_scene as adapter_module
+    from forge3d._canonical_json import canonical_json_bytes
+    resource = Future()
+    environment = tmp_path / "owned.hdr"
+    environment.write_bytes(b"owned; this contract never renders")
+    monkeypatch.setattr(adapter_module, "_default_environment_identity",
+                        lambda request: (environment, resource, (environment,)))
+    scenes = _scenes("Peak")
+    scenes[1].recipe.layers[0].labels[0]["id"] = label
+    with adapter_module._LazyScratch() as scratch:
+        adapter = adapter_module._SceneExecution(scenes, [0, 1], scratch, cache_requested=True)
+        state = adapter.label_state
+        assert adapter._prepared_label_blob is not None
+        expected = canonical_json_bytes(state, error_context="independent frozen plans")
+        assert adapter.compile_labels(state, -1, ()) == expected
+        alternate = {"changed": {"label": label, "zero": -0.0}}
+        assert adapter.compile_labels(alternate, -1, ()) == canonical_json_bytes(alternate, error_context="independent alternate")
 
 
 @pytest.mark.slow

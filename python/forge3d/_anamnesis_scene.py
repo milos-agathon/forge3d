@@ -67,8 +67,7 @@ def _native_preparation(cache, *, enabled):
             _DEFAULT_ENVIRONMENT.context_future = previous
 
 def _prepared_resource_fingerprint(context_future, resources, environment):
-    context_future.result()
-    return resources.anamnesis_resource_fingerprint(environment)
+    return resources.anamnesis_resource_fingerprint(environment, context_ready=context_future)
 
 
 def _default_material_identity():
@@ -543,6 +542,7 @@ class _SceneExecution:
         self.base_recipes, self.base_states, self._base_inputs = {}, {}, {}
         self._pending_resources = {}
         self._prepared_uniforms = {}
+        self._prepared_label_blob = None
         self._semantic_passes = None
         self._pending_compositor = None
         self.label_plans, self.atlases, self.label_state = {}, {}, {}
@@ -748,6 +748,12 @@ class _SceneExecution:
                         encoded = canonical_json_bytes({"frame": frame, "state": leaf},
                                                        error_context=f"ANAMNESIS {label} uniforms")
                     self._prepared_uniforms[label, frame] = encoded
+                    prefix = b'{"frame":-1,"state":'
+                    if (label == "label.compile" and isinstance(encoded, bytes)
+                            and encoded.startswith(prefix) and encoded.endswith(b"}")):
+                        # The owned label plan is already canonical inside
+                        # these uniforms. Preserve those exact payload bytes.
+                        self._prepared_label_blob = (leaf, encoded[len(prefix):-1])
                     self._semantic_passes.append((label, frame, leaf, inputs))
                     return f"{frame}:{label}"
                 self._declare_semantics(prepare, frames)
@@ -916,6 +922,9 @@ class _SceneExecution:
         return np.ascontiguousarray(result.rgba, dtype=np.uint8).tobytes()
 
     def compile_labels(self, state, frame, inputs):
+        prepared = self._prepared_label_blob
+        if prepared is not None and state is prepared[0]:
+            return prepared[1]
         return canonical_json_bytes(state, error_context="native ANAMNESIS frozen label plans")
 
     def labels(self, state, frame, inputs):

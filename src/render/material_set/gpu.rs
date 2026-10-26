@@ -35,31 +35,37 @@ pub(crate) struct GpuMaterialSet {
     pub(crate) anamnesis_key: [u8; 32],
 }
 
-#[cfg(feature = "extension-module")]
-impl MaterialSet {
-    pub(crate) fn gpu(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> Result<Arc<GpuMaterialSet>> {
-        self.gpu_cache
-            .get_or_try_init(|| {
-                let gpu =
-                    GpuMaterialSet::new(device, queue, &self.materials, &self._texture_paths)?;
-                Ok(Arc::new(gpu))
-            })
-            .map(Arc::clone)
+
+
+fn material_texture_descriptor<'a>(width: u32, height: u32, layers: u32, mip_level_count: u32) -> TextureDescriptor<'a> {
+    TextureDescriptor {
+        label: Some("terrain.materials.albedo"),
+        size: Extent3d { width, height, depth_or_array_layers: layers.max(1) },
+        mip_level_count,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Rgba8UnormSrgb,
+        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+        view_formats: &[],
     }
 }
 
-#[cfg(feature = "extension-module")]
-impl GpuMaterialSet {
+/// Owned CPU mip pixels and the digest of their exact padded upload bytes.
+/// Preparation allocates no GPU resources and never admits a cache hit.
+pub(crate) struct PreparedMaterialSet {
+    target_width: u32,
+    target_height: u32,
+    layer_count: usize,
+    mip_level_count: u32,
+    layer_pixels: Vec<Vec<Vec<u8>>>,
+    identity: Sha256,
+}
+
+impl PreparedMaterialSet {
     fn new(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
         materials: &[crate::core::material::PbrMaterial],
         texture_paths: &[Option<String>],
-    ) -> Result<Self> {
+    ) -> Self {
         let mut layer_count = materials.len();
         if layer_count == 0 {
             layer_count = 1;
@@ -96,7 +102,7 @@ impl GpuMaterialSet {
             .find_map(|img| img.as_ref().map(GenericImageView::dimensions));
         let (mut target_width, mut target_height) = canonical_size.unwrap_or((512, 512));
 
-        let (max_dimension, mut selected_tier) = Self::calculate_max_texture_dimension(layer_count);
+        let (max_dimension, mut selected_tier) = GpuMaterialSet::calculate_max_texture_dimension(layer_count);
         let original_size = (target_width, target_height);
         if target_width > max_dimension || target_height > max_dimension {
             target_width = target_width.min(max_dimension);
@@ -181,31 +187,17 @@ impl GpuMaterialSet {
             layer_pixels.push(mip_chain);
         }
 
-        let texture_descriptor = TextureDescriptor {
-            label: Some("terrain.materials.albedo"),
-            size: Extent3d {
-                width: target_width,
-                height: target_height,
-                depth_or_array_layers: layer_count_u32.max(1),
-            },
-            mip_level_count,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8UnormSrgb,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        };
-        let texture = tracked_create_texture(device, &texture_descriptor)?;
+        let texture_descriptor = material_texture_descriptor(target_width, target_height, layer_count_u32, mip_level_count);
         let mut identity = Sha256::new();
         identity.update(b"forge3d.terrain.material-gpu/v1\0");
         let descriptor_bytes = format!("{texture_descriptor:?}").into_bytes();
         identity.update((descriptor_bytes.len() as u64).to_le_bytes());
         identity.update(descriptor_bytes);
 
-        for (layer_idx, mip_chain) in layer_pixels.iter().enumerate() {
+        for (layer_idx, mip_chain) in layer_pixels.iter_mut().enumerate() {
             let mut mip_width = target_width;
             let mut mip_height = target_height;
-            for (mip_level, pixels) in mip_chain.iter().enumerate() {
+            for (mip_level, pixels) in mip_chain.iter_mut().enumerate() {
                 let width = mip_width.max(1);
                 let height = mip_height.max(1);
                 let (padded, padded_bpr) = pad_rgba_rows(width, height, pixels);
@@ -219,6 +211,70 @@ impl GpuMaterialSet {
                 identity.update(padded_bpr.to_le_bytes());
                 identity.update((padded.len() as u64).to_le_bytes());
                 identity.update(&padded);
+                *pixels = padded;
+                if mip_width > 1 {
+                    mip_width /= 2;
+                }
+                if mip_height > 1 {
+                    mip_height /= 2;
+                }
+            }
+        }
+
+        Self { target_width, target_height, layer_count, mip_level_count, layer_pixels, identity }
+    }
+}
+
+#[cfg(feature = "extension-module")]
+impl MaterialSet {
+    /// Prepare the same owned pixels while the ordinary device initializes.
+    pub(crate) fn prepare_material_upload(&self) -> Option<PreparedMaterialSet> {
+        self.gpu_cache.get().is_none().then(||
+            PreparedMaterialSet::new(&self.materials, &self._texture_paths))
+    }
+
+    pub(crate) fn upload_prepared_material(
+        &self, device: &wgpu::Device, queue: &wgpu::Queue, prepared: PreparedMaterialSet,
+    ) -> Result<()> {
+        self.gpu_cache.get_or_try_init(|| {
+            GpuMaterialSet::new(device, queue, prepared).map(Arc::new)
+        }).map(|_| ())
+    }
+
+    pub(crate) fn gpu(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<Arc<GpuMaterialSet>> {
+        self.gpu_cache
+            .get_or_try_init(|| {
+                let gpu =
+                    GpuMaterialSet::new(device, queue, PreparedMaterialSet::new(&self.materials, &self._texture_paths))?;
+                Ok(Arc::new(gpu))
+            })
+            .map(Arc::clone)
+    }
+}
+
+#[cfg(feature = "extension-module")]
+impl GpuMaterialSet {
+    fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        prepared: PreparedMaterialSet,
+    ) -> Result<Self> {
+        let PreparedMaterialSet { target_width, target_height, layer_count,
+            mip_level_count, layer_pixels, mut identity } = prepared;
+        let layer_count_u32 = layer_count as u32;
+        let texture_descriptor = material_texture_descriptor(target_width, target_height, layer_count_u32, mip_level_count);
+        let texture = tracked_create_texture(device, &texture_descriptor)?;
+        for (layer_idx, mip_chain) in layer_pixels.iter().enumerate() {
+            let mut mip_width = target_width;
+            let mut mip_height = target_height;
+            for (mip_level, pixels) in mip_chain.iter().enumerate() {
+                let width = mip_width.max(1);
+                let height = mip_height.max(1);
+                let padded_bpr = crate::core::gpu::align_copy_bpr(width * 4);
                 queue.write_texture(
                     wgpu::ImageCopyTexture {
                         texture: &texture,
@@ -230,7 +286,7 @@ impl GpuMaterialSet {
                         },
                         aspect: wgpu::TextureAspect::All,
                     },
-                    &padded,
+                    pixels,
                     ImageDataLayout {
                         offset: 0,
                         bytes_per_row: Some(padded_bpr),

@@ -262,12 +262,24 @@ impl TerrainRenderer {
     /// Identity of fresh default resources, without compiling an unused
     /// TerrainScene. An existing renderer always uses the instance probe.
     #[staticmethod]
+    #[pyo3(signature = (material_set, env_maps, context_ready=None))]
     fn _anamnesis_default_resource_fingerprint(
         py: Python<'_>,
         material_set: &crate::render::material_set::MaterialSet,
         env_maps: &crate::lighting::ibl_wrapper::IBL,
+        context_ready: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Py<pyo3::types::PyBytes>> {
+        let prepared = py.allow_threads(|| material_set.prepare_material_upload());
+        if let Some(ready) = context_ready {
+            // Propagate the original initialization result before trying the
+            // context again. A failed initializer must not be retried here.
+            ready.call_method0("result")?;
+        }
         let ctx = crate::core::gpu::try_ctx()?;
+        if let Some(prepared) = prepared {
+            py.allow_threads(|| material_set.upload_prepared_material(&ctx.device, &ctx.queue, prepared))
+                .map_err(|error| PyRuntimeError::new_err(format!("{error:#}")))?;
+        }
         let mut state = anamnesis_resource_state(material_set, env_maps, &ctx.adapter, &ctx.device, &ctx.queue)?;
         super::anamnesis::append_default_external_state(&mut state);
         Ok(pyo3::types::PyBytes::new_bound(py, &Sha256::digest(state)).unbind())
