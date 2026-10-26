@@ -1858,6 +1858,10 @@ jobs:
       FORGE3D_TEST_DEM: ${{ github.workspace }}/assets/tif/switzerland_dem.tif
 
     steps:
+      - name: Select acceptance Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.17'
       - name: Initialize persistent M-06 evidence before checkout
         shell: pwsh
         env:
@@ -2120,6 +2124,10 @@ jobs:
       FORGE3D_REQUIRE_F3DZ_GPU: '1'
 
     steps:
+      - name: Select acceptance Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.17'
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -2242,6 +2250,10 @@ jobs:
       FORGE3D_NO_BOOTSTRAP: '1'
 
     steps:
+      - name: Select acceptance Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.17'
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -2319,6 +2331,10 @@ jobs:
       FORGE3D_NO_BOOTSTRAP: '1'
 
     steps:
+      - name: Select acceptance Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.17'
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -2412,6 +2428,10 @@ jobs:
       FORGE3D_RUN_GPU_ANAMNESIS: '1'
 
     steps:
+      - name: Select acceptance Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.17'
       - name: Initialize isolated ANAMNESIS scratch
         shell: pwsh
         run: |
@@ -2524,6 +2544,10 @@ jobs:
       FORGE3D_RUN_GPU_ANAMNESIS: '1'
 
     steps:
+      - name: Select acceptance Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.17'
       - name: Initialize isolated ANAMNESIS scratch
         shell: pwsh
         run: |
@@ -2646,6 +2670,10 @@ jobs:
       FORGE3D_TESSELLA_REQUIRED_GPU: '1'
 
     steps:
+      - name: Select acceptance Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.17'
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -2819,6 +2847,10 @@ jobs:
       WGPU_BACKENDS: vulkan
 
     steps:
+      - name: Select acceptance Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.17'
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
