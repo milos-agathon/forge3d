@@ -269,6 +269,37 @@ def test_native_snapshot_respects_configured_python_recursion_limit(limit):
         sys.setrecursionlimit(previous)
 
 
+def test_scene_joins_context_before_synchronous_capability_query(tmp_path, monkeypatch):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    import time
+    import forge3d.anamnesis as an
+    import forge3d._anamnesis_scene as adapter_module
+    import forge3d._native as native_boundary
+
+    joined = []
+    class PendingContext:
+        def result(self):
+            joined.append(True)
+    pending = PendingContext()
+    monkeypatch.setattr(native_boundary, "get_native_module", lambda: SimpleNamespace(
+        _anamnesis_prepare_context=time.monotonic))
+    monkeypatch.setattr(an, "_signature_executor", lambda: SimpleNamespace(submit=lambda fn: pending))
+    monkeypatch.setattr(an, "_preload_packed_store", lambda root: nullcontext())
+    monkeypatch.setattr(adapter_module, "_scenes", lambda recipe, frames: {0: object()})
+    monkeypatch.setattr(adapter_module, "_SceneExecution", lambda *args, **kwargs: SimpleNamespace(
+        cache_eligible=True, executors={}, fingerprints={}, contexts={}))
+    expected = object()
+    def synchronous_capabilities(*args, **kwargs):
+        assert joined, "context worker must finish before a native query holds the GIL"
+        return expected
+    monkeypatch.setattr(an, "render_sequence", synchronous_capabilities)
+    assert adapter_module.try_render_sequence(
+        object(), [0], tmp_path, dry_run=False, max_bytes=1024,
+        verify_reads=True, capabilities=None) is expected
+    assert getattr(adapter_module._DEFAULT_ENVIRONMENT, "context_future", None) is None
+
+
 @pytest.mark.parametrize("depth", [64, 128])
 def test_native_snapshot_deep_subtrees_preserve_aliases_and_cycles(depth):
     from forge3d._native import get_native_module
@@ -996,12 +1027,14 @@ def test_sequence_rejects_device_loss_before_reusing_native_output(monkeypatch):
 
 
 @pytest.mark.parametrize("frame", [0, 250])
-def test_prepared_native_uniform_fragments_preserve_exact_canonical_bytes(frame):
+@pytest.mark.parametrize("negative_zero", [False, True])
+def test_prepared_native_uniform_fragments_preserve_exact_canonical_bytes(frame, negative_zero):
     from forge3d._anamnesis_scene import _uniform_resource_fragments
+    zero = -0.0 if negative_zero else 0.0
     from forge3d._canonical_json import canonical_json_bytes
     state = {"environment": {"native_resources": None, "quoted": '"native_resources":null'},
-             "native_resources": None, "height": {"zero": -0.0},
-             "recipe": {"nested": {"native_resources": ""}, "values": [-0.0, -0.001, "é"]}}
+             "native_resources": None, "height": {"zero": zero},
+             "recipe": {"nested": {"native_resources": ""}, "values": [zero, -0.001, "é"]}}
     prefix, suffix = _uniform_resource_fragments(frame, state)
     identity = bytes(range(32)).hex()
     state["native_resources"] = identity

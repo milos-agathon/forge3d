@@ -938,6 +938,51 @@ def test_warm_pooled_store_does_not_repeat_packed_preload(tmp_path, monkeypatch)
         assert store.get(key)[0] == b"warm"
 
 
+@pytest.mark.parametrize("change", ["unchanged", "replace", "remove", "admission"])
+def test_preloaded_manifest_is_read_only_and_rechecked_after_admission(tmp_path, monkeypatch, change):
+    import forge3d.anamnesis as an
+    from pathlib import Path
+
+    root = tmp_path / "cache"
+    store = _Store(root, an._DEFAULT_MAX_BYTES, True)
+    key = an.leaf_key(b"manifest resident")
+    store.put_leaf(key, b"manifest resident", label="test.manifest")
+    path = root / an._LAST_MANIFEST
+    old = {"schema": "forge3d.anamnesis.manifest/2", "entries": {"0:frame.output": key}}
+    path.write_text(json.dumps(old), encoding="utf-8")
+    before = {p.name: p.read_bytes() for p in root.iterdir() if p.is_file()}
+    with an._preload_packed_store(root):
+        an._PACKED_PRELOADS.manifests[os.path.abspath(root)].result()
+        assert before == {p.name: p.read_bytes() for p in root.iterdir() if p.is_file()}
+        if change == "replace":
+            original_stat = path.stat()
+            updated = dict(old, entries={"1:frame.output": "f" * 64})
+            replacement = root / "replacement"
+            replacement.write_text(json.dumps(updated), encoding="utf-8")
+            assert replacement.stat().st_size == original_stat.st_size
+            os.utime(replacement, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+            os.replace(replacement, path)
+            assert an._load_manifest(root) == updated["entries"]
+        elif change == "remove":
+            path.unlink()
+            assert an._load_manifest(root) == {}
+        elif change == "admission":
+            # Maintenance must invalidate speculative build state before use.
+            store.gc(0)
+            assert an._load_manifest(root) == {}
+        else:
+            read_text = Path.read_text
+            def forbid_repeat(target, *args, **kwargs):
+                assert target != path, "unchanged manifest should reuse the owned read"
+                return read_text(target, *args, **kwargs)
+            monkeypatch.setattr(Path, "read_text", forbid_repeat)
+            restored = an._load_manifest(root)
+            assert restored == old["entries"]
+            restored.clear()
+            assert an._load_manifest(root) == old["entries"]
+    assert not getattr(an._PACKED_PRELOADS, "manifests", {})
+
+
 def test_packed_growing_buffer_returns_owned_immutable_bytes(tmp_path):
     from forge3d.anamnesis import leaf_key, _DEFAULT_MAX_BYTES
     store = _Store(tmp_path, _DEFAULT_MAX_BYTES, True)

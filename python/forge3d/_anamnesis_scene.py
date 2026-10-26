@@ -439,6 +439,19 @@ def _base_recipe(recipe, terrain, environment, layers):
                    lighting=replace(recipe.lighting, settings=settings), layers=layers)
 
 
+def _plain_uniform_bytes(value, *, error_context):
+    # The guarded project serializer has already normalized every key to a
+    # string. Keep the ordinary canonical diagnostics and negative-zero rule.
+    try:
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":"),
+                             ensure_ascii=True, allow_nan=False).encode("utf-8")
+        if b"-0.0" not in encoded:
+            return encoded
+    except (TypeError, ValueError):
+        pass
+    return canonical_json_bytes(value, error_context=error_context)
+
+
 def _uniform_resource_fragments(frame, state):
     # Split the owned top-level state structurally, never by searching user
     # JSON for a marker. The future resource identity is the only missing value.
@@ -446,9 +459,9 @@ def _uniform_resource_fragments(frame, state):
     after = {key: value for key, value in state.items() if key > "native_resources"}
     context = "ANAMNESIS terrain.render uniforms"
     prefix = (b'{"frame":' + str(frame).encode("ascii") + b',"state":'
-              + canonical_json_bytes(before, error_context=context)[:-1]
+              + _plain_uniform_bytes(before, error_context=context)[:-1]
               + (b"," if before else b"") + b'"native_resources":')
-    suffix = ((b"," + canonical_json_bytes(after, error_context=context)[1:] if after else b"}") + b"}")
+    suffix = ((b"," + _plain_uniform_bytes(after, error_context=context)[1:] if after else b"}") + b"}")
     return prefix, suffix
 
 
@@ -797,13 +810,7 @@ class _SceneExecution:
             # json.loads(frame), and owned scalar resource records. Every key
             # is already a string. The C JSON encoder enforces finite floats;
             # only negative-zero normalization can change its canonical bytes.
-            try:
-                encoded = json.dumps(value, sort_keys=True, separators=(",", ":"),
-                                     ensure_ascii=True, allow_nan=False).encode("utf-8")
-                if b"-0.0" not in encoded:
-                    return encoded
-            except (TypeError, ValueError):
-                pass  # Retain the canonical helper's diagnostic and context.
+            return _plain_uniform_bytes(value, error_context=error_context)
         return canonical_json_bytes(value, error_context=error_context)
 
     def declare(self, declare, frames):
@@ -956,6 +963,12 @@ def try_render_sequence(recipe, frames, cache, *, dry_run, max_bytes, verify_rea
           _LazyScratch() as scratch, _shared_terrain_render_context()):
         capture = isinstance(recipe, MapScene) and len(frames) == 1
         adapter = _SceneExecution(scenes, frames, scratch, cache_requested=cache is not None, capture_results=capture)
+        context_future = getattr(_DEFAULT_ENVIRONMENT, "context_future", None)
+        if context_future is not None:
+            # Future.result releases the GIL while waiting. A synchronous
+            # native capabilities query would hold it across try_ctx instead,
+            # delaying completion of the context and resource workers.
+            context_future.result()
         result = render_sequence(
             adapter, frames=frames, cache=cache if adapter.cache_eligible else None,
             dry_run=dry_run, max_bytes=max_bytes, verify_reads=verify_reads,

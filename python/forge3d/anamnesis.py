@@ -306,11 +306,35 @@ def _load_packed_snapshot(root):
     except (OSError, ValueError, TypeError):
         return None
 
+
+def _manifest_signature(path):
+    try:
+        stat = path.stat()
+        return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+    except OSError:
+        return None
+
+
+def _load_manifest_snapshot(root):
+    path = root / _LAST_MANIFEST
+    signature = _manifest_signature(path)
+    if signature is None:
+        return None
+    try:
+        manifest = _read_manifest(root)
+        return (signature, manifest) if signature == _manifest_signature(path) else None
+    except (OSError, ValueError, TypeError, AttributeError):
+        # Speculative reads must not move validation or errors before admission.
+        return None
+
+
 @contextmanager
 def _preload_packed_store(root):
     previous = getattr(_PACKED_PRELOADS, "pending", {})
+    previous_manifests = getattr(_PACKED_PRELOADS, "manifests", {})
     pending = dict(previous)
-    started = None
+    manifests = dict(previous_manifests)
+    started = manifest_started = None
     if root is not None:
         key = os.path.abspath(root)
         # An open pooled store already owns its immutable snapshot. Reuse
@@ -319,13 +343,23 @@ def _preload_packed_store(root):
         if key not in pending and not pooled:
             started = _signature_executor().submit(_load_packed_snapshot, Path(root))
             pending[key] = started
+            manifest_started = _signature_executor().submit(_load_manifest_snapshot, Path(root))
+            manifests[key] = manifest_started
     _PACKED_PRELOADS.pending = pending
+    _PACKED_PRELOADS.manifests = manifests
     try:
         yield
     finally:
-        if started is not None:
-            started.result()  # All submitted work stays inside the caller's timer.
-        _PACKED_PRELOADS.pending = previous
+        try:
+            try:
+                if started is not None:
+                    started.result()  # All work stays inside the caller's timer.
+            finally:
+                if manifest_started is not None:
+                    manifest_started.result()
+        finally:
+            _PACKED_PRELOADS.pending = previous
+            _PACKED_PRELOADS.manifests = previous_manifests
 
 
 class _PackedBytes:
@@ -1376,6 +1410,16 @@ def _load_manifest(store: _Store | Path | None) -> dict[str, str]:
     if store is None:
         return {}
     root = store.root if isinstance(store, _Store) else store
+    pending = getattr(_PACKED_PRELOADS, "manifests", {}).get(os.path.abspath(root))
+    snapshot = pending.result() if pending is not None else None
+    # Admission may evict entries or invalidate build state. Only consume the
+    # read-only snapshot after maintenance and a fresh file-identity check.
+    if snapshot is not None and snapshot[0] == _manifest_signature(root / _LAST_MANIFEST):
+        return dict(snapshot[1])
+    return _read_manifest(root)
+
+
+def _read_manifest(root: Path) -> dict[str, str]:
     path = root / _LAST_MANIFEST
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
