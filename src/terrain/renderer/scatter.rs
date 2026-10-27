@@ -130,7 +130,7 @@ impl TerrainScene {
             light_intensity: decoded.light.intensity,
             time_seconds,
             terrain_world_to_uv_scale_bias: [1.0 / terrain_span, 1.0 / terrain_span, 0.5, 0.5],
-            terrain_height_to_world: [params.z_scale, -height_mid * params.z_scale, 0.0, 0.0],
+            terrain_height_to_world: [params.z_scale, -height_mid * params.z_scale, 1.0, 0.0],
         }
     }
 

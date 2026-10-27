@@ -57,6 +57,21 @@ def _build_bowl_heightmap(size: int = 192) -> np.ndarray:
     return heightmap.astype(np.float32)
 
 
+def _bowl_irradiance_probe_settings(heightmap: np.ndarray) -> ProbeSettings:
+    # Screen mode spans one world unit. Place probes one terrain texel above
+    # the surface so the bowl can occlude them; the default five-unit offset
+    # sits above this fixture's entire two-unit elevation range. Keep the
+    # sampled interior regions beyond the fallback edge fade as well.
+    terrain_texel = 1.0 / (heightmap.shape[0] - 1)
+    return ProbeSettings(
+        enabled=True,
+        grid_dims=(6, 6),
+        ray_count=48,
+        height_offset=terrain_texel,
+        fallback_blend_distance=terrain_texel,
+    )
+
+
 def _build_water_mask(size: int = 192) -> np.ndarray:
     x = np.linspace(-1.0, 1.0, size, dtype=np.float32)
     y = np.linspace(-1.0, 1.0, size, dtype=np.float32)
@@ -306,7 +321,7 @@ class TestTerrainProbeLighting:
             ibl,
             heightmap,
             overlay,
-            probes=ProbeSettings(enabled=True, grid_dims=(6, 6), ray_count=48),
+            probes=_bowl_irradiance_probe_settings(heightmap),
             debug_mode=50,
         )
         valley = _mean_luminance(probe_debug[96:128, 96:128])
@@ -323,7 +338,7 @@ class TestTerrainProbeLighting:
             ibl,
             heightmap,
             overlay,
-            probes=ProbeSettings(enabled=True, grid_dims=(6, 6), ray_count=48),
+            probes=_bowl_irradiance_probe_settings(heightmap),
             debug_mode=50,
         )
         ridge = _mean_luminance(probe_debug[96:128, 40:72])

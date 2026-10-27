@@ -44,6 +44,9 @@ jobs:
     # Physical full runs include the 600-frame TESSELLA test (34m23s measured).
     # Reuse TESSELLA's 90-minute physical allowance; hosted runs retain 35 minutes.
     timeout-minutes: ${{ inputs.physical_windows_gpu && 90 || 35 }}
+    env:
+      # Self-hosted runners must use declared dependencies, not user packages.
+      PYTHONNOUSERSITE: '1'
     strategy:
       fail-fast: false
       matrix:

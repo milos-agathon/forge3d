@@ -949,6 +949,41 @@ def test_python_wheel_checkout_proof_is_native_and_rejects_wrong_head(tmp_path) 
             assert "runner.os == 'Linux'" in step.get("if", "")
 
 
+def test_python_wheel_job_excludes_user_site_from_child_processes(tmp_path) -> None:
+    import json
+    import subprocess
+    import sys
+
+    job = _workflow_data("test-python-wheel.yml")["jobs"]["test"]
+    baseline = {**os.environ, "PYTHONUSERBASE": str(tmp_path / "user-base")}
+    baseline.pop("PYTHONNOUSERSITE", None)
+    baseline.pop("PYTHONPATH", None)
+    user_site = Path(subprocess.check_output(
+        [sys.executable, "-c", "import site; print(site.getusersitepackages())"],
+        env=baseline, cwd=tmp_path, text=True,
+    ).strip())
+    assert user_site.is_relative_to(tmp_path)
+    user_site.mkdir(parents=True)
+    (user_site / "forge3d_user_site_sentinel.py").write_text("", encoding="utf-8")
+    probe = (
+        "import importlib.util, json, site; "
+        "print(json.dumps([site.ENABLE_USER_SITE, "
+        "importlib.util.find_spec('forge3d_user_site_sentinel') is not None]))"
+    )
+    # The control proves the temporary user package is discoverable; the job's
+    # real environment must prevent discovery in each step and its children.
+    control = subprocess.check_output(
+        [sys.executable, "-c", probe], env=baseline, cwd=tmp_path, text=True,
+    )
+    assert json.loads(control) == [True, True]
+    for step in job["steps"]:
+        environment = {**baseline, **job.get("env", {}), **step.get("env", {})}
+        result = subprocess.check_output(
+            [sys.executable, "-c", probe], env=environment, cwd=tmp_path, text=True,
+        )
+        assert json.loads(result) == [False, False], step.get("name", step.get("uses"))
+
+
 def test_python_wheel_install_stops_before_dependencies_when_wheel_fails() -> None:
     import subprocess
     import sys
