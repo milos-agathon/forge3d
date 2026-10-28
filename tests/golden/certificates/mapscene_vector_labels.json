@@ -171,22 +171,22 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "673a01d996df",
-    "version": "1.45.0",
+    "git_sha": "8e0b5431d500",
+    "version": "1.46.0",
     "wgsl_module_hashes": {
       "ibl.precompute.shader.brdf": "1ae542caaac04a941c211ec924c0072a3110cbff03aff23e140ea9305ba8dc75",
       "ibl.precompute.shader.equirect": "c77440fdaca6bb421e6775d86cb0be2f7cb3638e103de07121027e338c2a9772",
       "ibl.precompute.shader.prefilter": "7e705dff6742aa1a9ad760a42561d01d66899e27408043c0e62f8c907f9d1694",
       "overlays_shader": "3f7493a10d4734daa97dedac61a21ab27ebc20e1c9353018abb40f31fdfa803d",
       "terrain.shadow_depth.shader": "0e96b377bb089fcf83499ebaedee708ee3cf2adf2330b68ac6b848bcc7992f15",
-      "terrain_pbr_pom.shader": "c4a501446d238755cc707e3dab23b28ed634a7adbfcda13069d46b7b7b14e9ae",
+      "terrain_pbr_pom.shader": "78d6ebd26d8b351f2343392460294c960c98d674f40ea1d10b0cdc0ca61dbe57",
       "text_overlay_shader": "b21d02a2f703089b81e02e776ef228819aaca8d05f0dd9de1d1108f1da063925"
     }
   },
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 1.627135992050171,
+      "gpu_ms": 1.4632960557937622,
       "label": "terrain.shadow"
     },
     {
@@ -211,7 +211,7 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.09830400347709656,
+      "gpu_ms": 0.09523200243711472,
       "label": "terrain.main"
     },
     {
@@ -221,7 +221,7 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0030720001086592674,
       "label": "scene.main"
     },
     {
@@ -239,7 +239,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "aac0b142117efd6d12d12bd79cf97f34ddec72e66aaf65591e94e3906acefd9547be1a693de9a5894e8d6400f9de24a05e6408a7812ac2a47bbdd34cc00b4e0f",
+    "sig": "0b4c3b2358b2e69e71a56a88401ceba64da85bc69f9d5720c41657713bbb3bd22d2ba98f060f32e3c9a3ec331b23d38722464d8cfca33f6a1aadabb563f2af0c",
     "signed_fields": [
       "adapter",
       "allocations",
