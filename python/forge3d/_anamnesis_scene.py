@@ -374,9 +374,16 @@ def _decoded_label_atlas(png, metrics):
     identity = (png.stem, metrics.stem)
     entry = getattr(_LABEL_COMPOSITOR, "decoded_atlas", None)
     if entry is None or entry[0] != identity:
-        from ._png import load_png_rgba
+        from ._png import decode_png, load_png_rgba
         from .text_atlas import load_atlas_metrics
-        image = load_png_rgba(png)
+        # The bundled atlases are 8-bit RGBA; the CRC-checked built-in
+        # decoder reads them without importing PIL inside the render.
+        try:
+            image = decode_png(Path(png).read_bytes())
+        except ValueError:
+            image = None
+        if image is None or image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 4:
+            image = load_png_rgba(png)
         image.setflags(write=False)
         entry = (identity, image, load_atlas_metrics(metrics))
         _LABEL_COMPOSITOR.decoded_atlas = entry
