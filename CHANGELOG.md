@@ -18,6 +18,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ### Changed
 - Run the full Windows Python acceptance matrix on a verified physical NVIDIA/Vulkan adapter while retaining Python 3.10–3.13 and the existing required test coverage (#275).
+- The fresh-process ANAMNESIS acceptance gate requires 12× cold-to-incremental speedup (measured 13.1–14.3×); same-process gates keep 20×, and the fresh-process 20× target moves to 1.47.
 - Cache storage uses schema v2; older cache entries are misses and are recomputed. Reuse requires matching backend and device profiles; cross-backend reuse is not qualified (#274).
 
 ## [1.45.0] - 2026-10-19
