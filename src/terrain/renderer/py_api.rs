@@ -1335,6 +1335,7 @@ impl TerrainRenderer {
             max_gpu_visible_bytes,
             false,
             crate::terrain::page_table::OverviewUvTransform::identity(),
+            super::streaming::DEFAULT_HEIGHT_OVERVIEW_SIZE,
         )
         .map_err(|e| PyRuntimeError::new_err(format!("enable_height_streaming failed: {:#}", e)))?;
         self.scene.height_streaming = Some(state);
@@ -1398,6 +1399,7 @@ impl TerrainRenderer {
             max_gpu_visible_bytes,
             false,
             overview,
+            super::streaming::DEFAULT_HEIGHT_OVERVIEW_SIZE,
         )
         .map_err(|error| {
             PyRuntimeError::new_err(format!("enable_height_streaming_cog failed: {error:#}"))
@@ -1429,22 +1431,8 @@ impl TerrainRenderer {
         overview_lonlat_bounds: Option<(f64, f64, f64, f64)>,
         max_gpu_visible_bytes: Option<u64>,
     ) -> PyResult<()> {
-        if !(terrain_extent_m.is_finite() && terrain_extent_m > 0.0) {
-            return Err(PyRuntimeError::new_err(
-                "terrain_extent_m must be a positive finite value",
-            ));
-        }
-        let tile_resolution = tile_resolution.clamp(8, 1024);
-        let reader: std::sync::Arc<dyn crate::terrain::page_table::HeightReader> = dataset.reader();
-        let overview = overview_lonlat_bounds
-            .map(crate::terrain::page_table::OverviewUvTransform::from_lonlat_bounds)
-            .transpose()
-            .map_err(pyo3::exceptions::PyValueError::new_err)?
-            .unwrap_or_else(crate::terrain::page_table::OverviewUvTransform::identity);
-        let state = super::streaming::HeightVtFamilyRuntime::new(
-            self.scene.device.clone(),
-            self.scene.queue.clone(),
-            self.scene.allocation_owner.clone(),
+        self.enable_height_streaming_cog_globe_with_overview_capacity(
+            dataset,
             terrain_extent_m,
             ring_count,
             ring_resolution,
@@ -1452,21 +1440,12 @@ impl TerrainRenderer {
             tile_resolution,
             max_in_flight,
             pool_size,
-            reader,
             coarse_prefill,
             max_resident_bytes,
+            overview_lonlat_bounds,
             max_gpu_visible_bytes,
-            true,
-            overview,
+            super::streaming::DEFAULT_HEIGHT_OVERVIEW_SIZE,
         )
-        .map_err(|error| {
-            PyRuntimeError::new_err(format!(
-                "enable_height_streaming_cog_globe failed: {error:#}"
-            ))
-        })?;
-        self.scene.height_streaming = Some(state);
-        self.scene.geometry_provider = None;
-        Ok(())
     }
 
     /// BOP-P2-02: drop the streaming state; renders fall back to the
@@ -1614,6 +1593,69 @@ impl TerrainRenderer {
         // ECEF update, even when their local 2D center remains near zero.
         self.scene.geometry_provider = None;
         height_streaming_stats_to_py(py, &stats)
+    }
+}
+
+impl TerrainRenderer {
+    /// Reserve the exact regional overview capacity required by the internal
+    /// GlobeTerrainScene switching path. This does not add a Python API option.
+    #[cfg(all(feature = "cog_streaming", feature = "enable-globe"))]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn enable_height_streaming_cog_globe_with_overview_capacity(
+        &mut self,
+        dataset: &crate::terrain::cog::py_bindings::PyCogDataset,
+        terrain_extent_m: f32,
+        ring_count: u32,
+        ring_resolution: u32,
+        lod: u32,
+        tile_resolution: u32,
+        max_in_flight: usize,
+        pool_size: usize,
+        coarse_prefill: bool,
+        max_resident_bytes: Option<u64>,
+        overview_lonlat_bounds: Option<(f64, f64, f64, f64)>,
+        max_gpu_visible_bytes: Option<u64>,
+        overview_reservation_size: u32,
+    ) -> PyResult<()> {
+        if !(terrain_extent_m.is_finite() && terrain_extent_m > 0.0) {
+            return Err(PyRuntimeError::new_err(
+                "terrain_extent_m must be a positive finite value",
+            ));
+        }
+        let tile_resolution = tile_resolution.clamp(8, 1024);
+        let reader: std::sync::Arc<dyn crate::terrain::page_table::HeightReader> = dataset.reader();
+        let overview = overview_lonlat_bounds
+            .map(crate::terrain::page_table::OverviewUvTransform::from_lonlat_bounds)
+            .transpose()
+            .map_err(pyo3::exceptions::PyValueError::new_err)?
+            .unwrap_or_else(crate::terrain::page_table::OverviewUvTransform::identity);
+        let state = super::streaming::HeightVtFamilyRuntime::new(
+            self.scene.device.clone(),
+            self.scene.queue.clone(),
+            self.scene.allocation_owner.clone(),
+            terrain_extent_m,
+            ring_count,
+            ring_resolution,
+            lod,
+            tile_resolution,
+            max_in_flight,
+            pool_size,
+            reader,
+            coarse_prefill,
+            max_resident_bytes,
+            max_gpu_visible_bytes,
+            true,
+            overview,
+            overview_reservation_size,
+        )
+        .map_err(|error| {
+            PyRuntimeError::new_err(format!(
+                "enable_height_streaming_cog_globe failed: {error:#}"
+            ))
+        })?;
+        self.scene.height_streaming = Some(state);
+        self.scene.geometry_provider = None;
+        Ok(())
     }
 }
 

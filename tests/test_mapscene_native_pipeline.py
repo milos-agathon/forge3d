@@ -144,6 +144,32 @@ def test_transparent_points_preserve_opaque_depth(alpha, edl):
     assert after.metadata["native_pipeline"]["layer_stages"]["point_clouds"] == "post_resolve_depth_aware_unlit"
 
 
+def test_shared_scatter_buildings_keep_the_y_up_mesh_contract():
+    from forge3d._map_scene_projection import TerrainProjector
+
+    model = scene()
+    heightmap = TerrainProjector(model.recipe).heightmap
+    ordinary, _ = ms._terrain_scatter_building_batches_for_recipe(
+        model.recipe, heightmap, shared_frame=False
+    )
+    shared, _ = ms._terrain_scatter_building_batches_for_recipe(
+        model.recipe, heightmap, shared_frame=True
+    )
+    assert ordinary and len(shared) == len(ordinary)
+    for first, second in zip(ordinary, shared):
+        # Native instance packing owns the Y-up to Z-up conversion for both paths.
+        np.testing.assert_array_equal(first["transforms"], second["transforms"])
+        a = first["levels"][0]["mesh"]
+        b = second["levels"][0]["mesh"]
+        np.testing.assert_array_equal(a["positions"], b["positions"])
+        np.testing.assert_array_equal(a["normals"], b["normals"])
+        # The shared path retains its existing front-face winding convention.
+        np.testing.assert_array_equal(
+            np.asarray(a["indices"]).reshape(-1, 3)[:, [0, 2, 1]],
+            np.asarray(b["indices"]).reshape(-1, 3),
+        )
+
+
 def test_building_occlusion_is_frozen_before_rendering():
     require_gpu()
     model = scene()

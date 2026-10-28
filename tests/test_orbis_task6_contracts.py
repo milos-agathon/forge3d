@@ -315,7 +315,8 @@ def test_cog_streaming_flat_and_globe_apis_are_explicit_and_unclamped() -> None:
     assert "pub fn enable_height_streaming_cog(" in source
     assert "pub fn enable_height_streaming_cog_globe(" in source
     assert "lod.min(6)" not in source
-    assert "enable_height_streaming_cog_globe(" in scene
+    assert "enable_height_streaming_cog_globe_with_overview_capacity(" in scene
+    assert "source::overview_size_for_extent(terrain_extent_m)" in scene
     assert "let (initial_seed, overview_lod)" in scene
     assert "load_covered_overview(" in scene
     assert "OverviewSeedCache::new(initial_seed)" in scene
@@ -329,7 +330,13 @@ def test_cog_streaming_flat_and_globe_apis_are_explicit_and_unclamped() -> None:
         "pub fn disable_height_streaming", 1
     )[0]
     assert "\n            false,\n" in flat_impl
-    assert "\n            true,\n" in globe_impl
+    assert "self.enable_height_streaming_cog_globe_with_overview_capacity(" in globe_impl
+    assert "super::streaming::DEFAULT_HEIGHT_OVERVIEW_SIZE" in globe_impl
+    globe_native_impl = source.split(
+        "pub(crate) fn enable_height_streaming_cog_globe_with_overview_capacity(", 1
+    )[1].split("fn height_streaming_stats_to_py", 1)[0]
+    assert "\n            true,\n" in globe_native_impl
+    assert "\n            overview_reservation_size,\n" in globe_native_impl
     assert 'dict.set_item("effective_target_lod", stats.effective_target_lod)' in source
     assert 'dict.set_item("coarse_prefill_enabled", stats.coarse_prefill_enabled)' in source
     assert 'dict.set_item("required_leaf_tiles", stats.required_leaf_tiles)' in source

@@ -76,6 +76,7 @@ pub struct VertexPN {
 pub struct TerrainBlendContext<'a> {
     pub heightmap_view: &'a wgpu::TextureView,
     pub world_to_uv_scale_bias: [f32; 4],
+    /// Height scale, height bias, Z-up flag (0 = viewer Y-up, 1 = offscreen Z-up), padding.
     pub height_to_world: [f32; 4],
 }
 

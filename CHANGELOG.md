@@ -6,6 +6,20 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.46.0] - Unreleased
+
+### Added
+- MapScene native terrain effects and refreshed production render certificates (#272, #273).
+- Content-addressed render caching with packed storage, fresh-process reuse, and cache integrity controls (#274).
+
+### Fixed
+- Validate tile and point-cloud inputs, animation times, style filters, mesh and building geometry, raster alignment, F3DZ page coordinates, and MapScene bundle/cache identities (#263–#271).
+- Restore raster diagnostics, propagate missing native terrain-frame errors, and correct GIS exports and CRS capability refresh behavior (#275).
+
+### Changed
+- Run the full Windows Python acceptance matrix on a verified physical NVIDIA/Vulkan adapter while retaining Python 3.10–3.13 and the existing required test coverage (#275).
+- Cache storage uses schema v2; older cache entries are misses and are recomputed. Reuse requires matching backend and device profiles; cross-backend reuse is not qualified (#274).
+
 ## [1.45.0] - 2026-10-19
 
 ### Added

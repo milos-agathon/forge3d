@@ -201,7 +201,7 @@ impl GlobeScene {
                 .set_orbis_earth_texture(*width, *height, rgba)
                 .map_err(|error| PyValueError::new_err(format!("earth_texture: {error:#}")))?;
         }
-        renderer.enable_height_streaming_cog_globe(
+        renderer.enable_height_streaming_cog_globe_with_overview_capacity(
             &dataset,
             terrain_extent_m,
             GLOBE_RING_COUNT,
@@ -214,6 +214,7 @@ impl GlobeScene {
             None,
             Some(tile_bounds),
             Some(GPU_VISIBLE_BUDGET),
+            source::overview_size_for_extent(terrain_extent_m),
         )
         .map_err(|error| {
             source_error(
