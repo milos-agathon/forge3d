@@ -40,6 +40,10 @@ use glam::{Mat4, Vec2, Vec3};
 const ORBIS_GPU_VISIBLE_CAP_BYTES: u64 = 512 * 1024 * 1024 - 1;
 const ORBIS_UPLOAD_RING_COUNT: usize = 3;
 const ORBIS_MAX_IN_FLIGHT: usize = 1024;
+/// Low-level streaming uses the caller's overview texture. Retain capacity
+/// for the legacy 96-square overview; GlobeTerrainScene explicitly reserves
+/// its larger regional overview before allocating the atlas and upload ring.
+pub(super) const DEFAULT_HEIGHT_OVERVIEW_SIZE: u32 = 96;
 /// Flat clipmap demand can include a coarse root which must be expanded over
 /// the complete fixed-LOD mosaic. Keep that public operation bounded to at
 /// most 64 x 64 descendants. Globe demand is camera-local and is deliberately
@@ -781,7 +785,12 @@ impl HeightVtFamilyRuntime {
         max_gpu_visible_bytes: Option<u64>,
         globe_mode: bool,
         overview: OverviewUvTransform,
+        overview_reservation_size: u32,
     ) -> Result<Self> {
+        ensure!(
+            overview_reservation_size > 0,
+            "height overview capacity must be positive"
+        );
         if !globe_mode {
             validate_flat_height_streaming_lod(lod)?;
         }
@@ -821,11 +830,6 @@ impl HeightVtFamilyRuntime {
         let staging_height_bytes = padded_tile_row.saturating_mul(u64::from(tile_resolution));
         let staging_coverage_bytes =
             padded_coverage_row.saturating_mul(u64::from(tile_resolution));
-        let overview_reservation_size = if globe_mode {
-            ((terrain_extent / 60.0).ceil() as u32).saturating_add(1).max(96)
-        } else {
-            96
-        };
         let overview_texture_bytes = u64::from(overview_reservation_size)
             .saturating_mul(u64::from(overview_reservation_size))
             .saturating_mul(4);

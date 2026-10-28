@@ -3715,11 +3715,8 @@ def _terrain_scatter_building_batches_for_recipe(
         local[:, 0] -= center_x
         local[:, 2] -= center_z
         if shared_frame:
-            # pack_instance_transforms maps translation into terrain Z-up,
-            # while its local basis is already render-space. Author the mesh
-            # in that same basis for the shared opaque/depth/shadow frame.
-            local = local[:, [0, 2, 1]]
-            normals = normals[:, [0, 2, 1]]
+            # Native packing maps the Y-up local mesh into terrain Z-up.
+            # Retain the shared frame's winding under that axis reflection.
             indices = indices[:, [0, 2, 1]]
         row, col = source.contract_to_pixel(center_x, center_z)
         base_y = source.sample_scaled_height(row, col)
@@ -4203,7 +4200,6 @@ def _render_native_offscreen_result(
     landmark_metadata = {}
     if requested_effects:
         from ._map_scene_native_inputs import is_cartographic_landmark
-        from ._map_scene_validation import diagnostic_block
         incompatible = []
         volumetrics = _mapscene_lighting_extras(_metadata_dict(recipe.lighting.settings)).get("volumetrics")
         if volumetrics is not None and volumetrics.enabled and volumetrics.density_volumes:

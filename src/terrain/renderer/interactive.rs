@@ -721,7 +721,10 @@ impl ConcordiaFrame {
                 binding: 3,
                 resource: wgpu::BindingResource::TextureView(
                     if matches!(effect, ComposePass::Fog) {
-                        self.froxels.as_ref().expect("enabled froxels").view()
+                        self.froxels
+                            .as_ref()
+                            .ok_or_else(|| anyhow!("CONCORDIA fog requires initialized froxels"))?
+                            .view()
                     } else {
                         self.effects
                             .ssgi_output_for_display_view()

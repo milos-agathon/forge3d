@@ -268,7 +268,7 @@ class TestHLODRendering:
             fh.write(b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 4 +X 8\n")
             fh.write(bytes([128, 128, 180, 128] * 32))
 
-    def _build_render_context(self, gpu_session):
+    def _build_render_context(self, gpu_session, *, cam_radius=220.0):
         heightmap = np.sin(np.mgrid[0:96, 0:96][1].astype(np.float32) / 7.0) * 8.0 \
             + np.cos(np.mgrid[0:96, 0:96][0].astype(np.float32) / 9.0) * 6.0 + 25.0
         heightmap = heightmap.astype(np.float32)
@@ -292,7 +292,7 @@ class TestHLODRendering:
             z_scale=1.4,
             exposure=1.0,
             domain=(float(np.min(heightmap)), float(np.max(heightmap))),
-            cam_radius=220.0,
+            cam_radius=cam_radius,
             cam_phi_deg=138.0,
             cam_theta_deg=57.0,
             fov_y_deg=48.0,
@@ -346,17 +346,32 @@ class TestHLODRendering:
     def test_hlod_respects_mesh_extents_and_scale(self, gpu_session):
         """Large-scale instances should have a large effective cluster radius,
         preventing HLOD activation when geometry is still close to camera."""
-        renderer, material_set, ibl, params, heightmap = self._build_render_context(gpu_session)
+        instance_scale = 100.0
+        renderer, material_set, ibl, params, heightmap = self._build_render_context(
+            gpu_session, cam_radius=instance_scale
+        )
         box_mesh = primitive_mesh("box")
         levels = [TerrainScatterLevel(mesh=box_mesh)]
-        # Two boxes at scale 100 placed close together
-        transforms = np.array([
-            [100, 0, 0, 10, 0, 100, 0, 0, 0, 0, 100, 10, 0, 0, 0, 1],
-            [100, 0, 0, 15, 0, 100, 0, 0, 0, 0, 100, 15, 0, 0, 0, 1],
+        # With this camera, the contract-space distance to the cluster center
+        # is about 100. The scaled radius is about 90, so the geometry is near;
+        # unit boxes at the same positions remain beyond the 50-unit threshold.
+        unit_transforms = np.array([
+            [1, 0, 0, 10, 0, 1, 0, 0, 0, 0, 1, 10, 0, 0, 0, 1],
+            [1, 0, 0, 15, 0, 1, 0, 0, 0, 0, 1, 15, 0, 0, 0, 1],
         ], dtype=np.float32)
-        # hlod_distance=50, but boxes extend ~86 units from origin at scale 100
-        # so the cluster's effective radius should keep HLOD inactive
         policy = HLODPolicy(hlod_distance=50.0, cluster_radius=20.0, simplify_ratio=0.5)
+        unit_batch = TerrainScatterBatch(
+            levels=levels, transforms=unit_transforms, name="unit_scale",
+            max_draw_distance=1000.0, hlod=policy,
+        )
+        ts.apply_to_renderer(renderer, [unit_batch])
+        renderer.render_terrain_pbr_pom(material_set, ibl, params, heightmap)
+        unit_stats = renderer.get_scatter_stats()
+        assert unit_stats["hlod_cluster_draws"] == 1
+        assert unit_stats["hlod_covered_instances"] == len(unit_transforms)
+
+        transforms = unit_transforms.copy()
+        transforms[:, [0, 5, 10]] = instance_scale
         batch = TerrainScatterBatch(
             levels=levels, transforms=transforms, name="large_scale",
             max_draw_distance=1000.0, hlod=policy,
@@ -364,8 +379,7 @@ class TestHLODRendering:
         ts.apply_to_renderer(renderer, [batch])
         renderer.render_terrain_pbr_pom(material_set, ibl, params, heightmap)
         stats = renderer.get_scatter_stats()
-        # With camera at ~220 and cluster radius >> hlod_distance,
-        # HLOD should NOT activate because geometry extends well past the threshold
+        # Keep the camera and threshold fixed; only the mesh scale changes.
         assert stats["hlod_cluster_draws"] == 0, (
             f"HLOD should not activate for 100x-scale instances near camera, "
             f"got {stats['hlod_cluster_draws']} cluster draws"

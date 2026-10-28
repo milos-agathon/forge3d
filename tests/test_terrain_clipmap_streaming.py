@@ -41,6 +41,9 @@ TERRAIN_SPAN_M = 100_000.0
 CLIPMAP_MODE = "clipmap:4:32:32:10:0.3"
 # Background clear color from the terrain render pass (linear 0.1/0.1/0.15).
 BACKGROUND_RGB_LINEAR = np.array([0.1, 0.1, 0.15], dtype=np.float32)
+# Far-clip ceiling enforced by the terrain runtime contract
+# (src/terrain/renderer/runtime_contract.rs).
+MAX_FAR_CLIP_M = 10_000_000.0
 
 
 def _steep_dem(size: int = 128) -> np.ndarray:
@@ -104,7 +107,7 @@ def _make_params(
             culling=culling,
             shading=shading,
             vt=vt,
-            clip=(0.1, terrain_span * 1.5),
+            clip=(0.1, min(terrain_span * 1.5, MAX_FAR_CLIP_M)),
             overlays=[_build_overlay()],
             pom=PomSettings(False, "Occlusion", 0.0, 1, 1, 0, False, False),
         )

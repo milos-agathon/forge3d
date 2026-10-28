@@ -17,7 +17,7 @@ struct ScatterBatchUniforms {
 
 struct TerrainContextUniforms {
   world_to_uv_scale_bias: vec4<f32>, // xy=scale, zw=bias
-  height_to_world: vec4<f32>, // x=scale, y=bias
+  height_to_world: vec4<f32>, // x=scale, y=bias, z=Z-up flag (zero means Y-up)
 }
 
 @group(1) @binding(0) var<uniform> T : TerrainContextUniforms;
@@ -179,13 +179,18 @@ fn sample_height_bilinear(uv: vec2<f32>) -> f32 {
   return mix(hx0, hx1, frac.y);
 }
 
+fn terrain_up_component(value: vec3<f32>) -> f32 {
+  return select(value.y, value.z, T.height_to_world.z != 0.0);
+}
+
 fn terrain_height_delta(world_pos: vec3<f32>) -> f32 {
+  let horizontal = select(world_pos.xz, world_pos.xy, T.height_to_world.z != 0.0);
   let uv = vec2<f32>(
-    world_pos.x * T.world_to_uv_scale_bias.x + T.world_to_uv_scale_bias.z,
-    world_pos.z * T.world_to_uv_scale_bias.y + T.world_to_uv_scale_bias.w
+    horizontal.x * T.world_to_uv_scale_bias.x + T.world_to_uv_scale_bias.z,
+    horizontal.y * T.world_to_uv_scale_bias.y + T.world_to_uv_scale_bias.w
   );
   let terrain_height = sample_height_bilinear(uv) * T.height_to_world.x + T.height_to_world.y;
-  return world_pos.y - terrain_height;
+  return terrain_up_component(world_pos) - terrain_height;
 }
 
 fn mesh_shadow_visibility(world_pos: vec3<f32>) -> f32 {
@@ -263,7 +268,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let strength = saturate(U.terrain_contact.z);
     let vertical_weight = saturate(U.terrain_contact.w);
     let proximity = 1.0 - smoothstep(0.0, contact_distance, abs(height_delta));
-    let side_factor = mix(1.0, saturate(1.0 - abs(n.y)), vertical_weight);
+    let side_factor = mix(1.0, saturate(1.0 - abs(terrain_up_component(n))), vertical_weight);
     contact = proximity * side_factor * strength;
   }
   let shaded = lit * (1.0 - contact);

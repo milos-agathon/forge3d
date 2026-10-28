@@ -888,6 +888,7 @@ jobs:
     with:
       ref: ${{ github.event.pull_request.head.sha || github.sha }}
       runner: windows-latest
+      physical_windows_gpu: true
       python_versions: '["3.10", "3.11", "3.12", "3.13"]'
       wheel_artifact: wheels-windows
       test_mode: full
@@ -1852,6 +1853,10 @@ jobs:
       FORGE3D_TEST_DEM: ${{ github.workspace }}/assets/tif/switzerland_dem.tif
 
     steps:
+      - name: Select acceptance Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.17'
       - name: Initialize persistent M-06 evidence before checkout
         shell: pwsh
         env:
@@ -2105,13 +2110,19 @@ jobs:
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && (inputs.scope == 'full' || inputs.scope == 'f3dz'))
     runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]
-    timeout-minutes: 30
+    # Full acceptance also builds the source benchmark in a fresh target tree.
+    # Leave time for that cold build before the benchmark and evidence upload.
+    timeout-minutes: 60
     env:
       WGPU_BACKEND: vulkan
       FORGE3D_NO_BOOTSTRAP: '1'
       FORGE3D_REQUIRE_F3DZ_GPU: '1'
 
     steps:
+      - name: Select acceptance Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.17'
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -2235,6 +2246,10 @@ jobs:
       FORGE3D_ANAMNESIS_COMPATIBILITY_PROFILE: terra-determinata-native-portable-v1
 
     steps:
+      - name: Select acceptance Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.17'
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -2313,6 +2328,10 @@ jobs:
       FORGE3D_ANAMNESIS_COMPATIBILITY_PROFILE: terra-determinata-native-portable-v1
 
     steps:
+      - name: Select acceptance Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.17'
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -2406,6 +2425,10 @@ jobs:
       FORGE3D_RUN_GPU_ANAMNESIS: '1'
 
     steps:
+      - name: Select acceptance Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.17'
       - name: Initialize isolated ANAMNESIS scratch
         shell: pwsh
         run: |
@@ -2526,6 +2549,10 @@ jobs:
       FORGE3D_TESSELLA_REQUIRED_GPU: '1'
 
     steps:
+      - name: Select acceptance Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.17'
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -2699,6 +2726,10 @@ jobs:
       WGPU_BACKENDS: vulkan
 
     steps:
+      - name: Select acceptance Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.17'
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}

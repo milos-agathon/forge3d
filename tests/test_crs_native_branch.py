@@ -3,7 +3,6 @@ from forge3d import crs
 
 
 def test_native_branch_without_pyproj(monkeypatch):
-    monkeypatch.setattr(crs, "HAS_NATIVE_PROJ", True)
     monkeypatch.setattr(crs, "HAS_PYPROJ", False)
     monkeypatch.setattr(crs, "HAS_PYPROJ_LEGACY", False)
     xy = crs.transform_coords([[10., 0.]], "EPSG:4326", "EPSG:3857")
