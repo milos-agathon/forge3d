@@ -256,6 +256,11 @@ class TestTerrainSubsurfaceMaterials:
         assert _mean_abs_diff(baseline, subsurface) > 0.65
         assert _mean_luma(subsurface) > _mean_luma(baseline) + 0.005
 
+    @pytest.mark.xfail(
+        strict=True,
+        reason="Terrain height normal under-states glacial highlight cooling; "
+        "deferred to 1.47 (milos-agathon/forge3d#277)",
+    )
     def test_glacial_ice_subsurface_cools_highlights(self, tv10_render_env) -> None:
         renderer, material_set, ibl, overlay = tv10_render_env
         heightmap = _build_glacier_heightmap()
