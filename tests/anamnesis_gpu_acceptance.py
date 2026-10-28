@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+from dataclasses import asdict
 import hashlib
 import json
 import os
@@ -15,12 +16,13 @@ from typing import Any
 import numpy as np
 
 import forge3d as f3d
+from forge3d._canonical_json import canonical_json_bytes
 from forge3d.anamnesis import render_sequence
 from forge3d.determinism import (
-    _canonical_params_config,
     canonical_heightmap,
     write_canonical_hdr,
 )
+from anamnesis_native_mutations import native_config
 
 
 _NATIVE_PASSES = (
@@ -73,6 +75,7 @@ def _recipe(
             "phi_start": 20.0,
             "phi_step": 0.25,
             "theta": 45.0,
+            "mode": "mesh",
         },
         "layers": [
             {
@@ -107,7 +110,7 @@ def _render_phase(
     for frame_index in range(600):
         if frame_index % 100 == 0:
             print(f"ANAMNESIS GPU {phase} frame {frame_index}/600", flush=True)
-        config = _canonical_params_config()(64, 64)
+        config = native_config()
         config.cam_phi_deg = 20.0 + frame_index * 0.25
         config.cam_theta_deg = 45.0
         frame = renderer.render_terrain_pbr_pom(
@@ -156,39 +159,35 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
     env_maps = f3d.IBL.from_hdr(str(hdr_path), intensity=1.0)
     backend = str(f3d.device_probe().get("backend", "unknown")).lower()
 
-    seeded, cold_seconds, seed_report = _render_phase(
-        renderer=renderer,
-        material_set=material_set,
-        env_maps=env_maps,
-        heightmap=heightmap,
-        cache=root / "warm-native",
-        phase="seed",
-    )
-    incremental, incremental_seconds, incremental_report = _render_phase(
-        renderer=renderer,
-        material_set=material_set,
-        env_maps=env_maps,
-        heightmap=heightmap,
-        cache=root / "warm-native",
-        phase="incremental",
-    )
-
-    # Exercise the outer recipe scheduler too. Its terrain node consumes the
-    # frames already produced by the native graph above; it never substitutes
-    # for or bypasses the direct 600-frame native pass proof. The seed is the
-    # cold baseline: rendering an identical second empty store would repeat the
-    # same 600 native executions without strengthening the acceptance claim.
+    # Execute native terrain inside the sequence driver. In particular the
+    # cold modified sequence must independently encode its terrain; reusing
+    # the original frame array would make the equality check circular.
     outer_phase = ["seed"]
     outer_calls: list[tuple[str, str, int]] = []
-    native_frames = {
-        "seed": seeded,
-        "incremental": incremental,
-        "cold": seeded,
-    }
+    native_frames: dict[str, list[bytes]] = {phase: [] for phase in ("seed", "incremental", "cold")}
+    native_reports: dict[str, list[dict]] = {phase: [] for phase in native_frames}
 
-    def terrain_frame(_state: Any, frame: int, _inputs: list[bytes]) -> bytes:
+    def terrain_frame(state: Any, frame: int, _inputs: list[bytes]) -> bytes:
         outer_calls.append((outer_phase[0], "terrain.shade", frame))
-        return native_frames[outer_phase[0]][frame]
+        config = native_config()
+        camera = state["camera"]
+        config.cam_phi_deg = camera["phi_start"] + frame * camera["phi_step"]
+        config.cam_theta_deg = camera["theta"]
+        config.camera_mode = camera["mode"]
+        image = renderer.render_terrain_pbr_pom(
+            material_set,
+            env_maps,
+            f3d.TerrainRenderParams(config),
+            heightmap,
+            time_seconds=frame / 60.0,
+            cache=root / ("cold-native" if outer_phase[0] == "cold" else "warm-native"),
+        )
+        rgba = np.ascontiguousarray(image.to_numpy(), dtype=np.uint8).tobytes()
+        native_frames[outer_phase[0]].append(rgba)
+        native_reports[outer_phase[0]].append(dict(renderer.last_anamnesis_cache_report))
+        if frame % 100 == 0:
+            print(f"ANAMNESIS GPU {outer_phase[0]} frame {frame}/600", flush=True)
+        return rgba
 
     def identity(_state: Any, frame: int, inputs: list[bytes]) -> bytes:
         outer_calls.append((outer_phase[0], "identity", frame))
@@ -223,6 +222,7 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
             b"native-terrain-graph/v2\0"
             + heightmap.tobytes()
             + hdr_path.read_bytes()
+            + canonical_json_bytes(asdict(native_config()), error_context="native acceptance configuration")
             + f3d.__version__.encode("ascii")
         ).digest(),
         "accumulation": b"identity/no-hidden-inputs/v1",
@@ -242,7 +242,7 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
     )
     modified = copy.deepcopy(original)
     modified["layers"][0]["text"] = "New summit"
-    render_sequence(
+    outer_seed = render_sequence(
         original,
         cache=root / "outer-warm",
         pass_executors=pass_executors,
@@ -268,6 +268,31 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
         pass_executor_contexts=pass_contexts,
         verify_reads=False,
     )
+    cold_seconds = outer_cold.elapsed_seconds
+    incremental_seconds = outer_incremental.elapsed_seconds
+
+    def summarize(reports: list[dict]) -> dict:
+        hits = [label for report in reports for label in report["hits"]]
+        misses = [label for report in reports for label in report["misses"]]
+        return {
+            "hits": hits,
+            "misses": misses,
+            "graph_command_submissions": sum(report["graph_command_submissions"] for report in reports),
+        }
+
+    seed_report = summarize(native_reports["seed"])
+    cold_report = summarize(native_reports["cold"])
+    seeded = native_frames["seed"]
+    # Separately exercise resource restoration at the native boundary. These
+    # calls are outside both complete-sequence timings above.
+    incremental, native_restore_seconds, incremental_report = _render_phase(
+        renderer=renderer,
+        material_set=material_set,
+        env_maps=env_maps,
+        heightmap=heightmap,
+        cache=root / "warm-native",
+        phase="native-restore",
+    )
     symmetric_difference = sorted(
         set(outer_incremental.predicted_recompute)
         ^ set(outer_incremental.observed_recompute)
@@ -277,7 +302,7 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
     # dependent native terrain pass, then restore all four on repetition.
     changed_heightmap = heightmap.copy()
     changed_heightmap[0, 0] += np.float32(0.25)
-    changed_config = _canonical_params_config()(64, 64)
+    changed_config = native_config()
     changed_config.cam_phi_deg = 20.0
     changed_config.cam_theta_deg = 45.0
     changed_params = f3d.TerrainRenderParams(changed_config)
@@ -300,8 +325,12 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
     )
     restored_changed_report = dict(renderer.last_anamnesis_cache_report)
 
-    cacheable_passes = [label for label in _NATIVE_PASSES if label != "terrain.shadow"]
-    expected_incremental_hits = cacheable_passes * 600
+    # Shadow depth is never served from the store. With every forward
+    # consumer restored, its keyed ancestor is elided (reported as a hit).
+    # Any live consumer must instead materialize depth; the exact-pixel
+    # partial-eviction controls exercise that positive case separately.
+    restored_passes = list(_NATIVE_PASSES)
+    expected_incremental_hits = restored_passes * 600
     expected_seed_misses = list(_NATIVE_PASSES) * 600
     result = {
         "matching_frames": sum(
@@ -318,7 +347,7 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
         "pass_labels": sorted(
             {label for _, label in outer_incremental.observed_recompute}
         ),
-        "native_predicted": 600,
+        "native_predicted": 0,
         "native_observed": len(incremental_report["misses"]),
         "native_incremental_hits": len(incremental_report["hits"]),
         "native_incremental_misses": len(incremental_report["misses"]),
@@ -345,12 +374,14 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
         "seed_graph_command_submissions": seed_report[
             "graph_command_submissions"
         ],
-        "cold_native_misses": len(seed_report["misses"]),
-        "cold_native_hits": len(seed_report["hits"]),
-        "cold_graph_command_submissions": seed_report[
+        "cold_native_misses": len(cold_report["misses"]),
+        "cold_native_hits": len(cold_report["hits"]),
+        "cold_graph_command_submissions": cold_report[
             "graph_command_submissions"
         ],
-        "cold_baseline_source": "native-seed",
+        "cold_baseline_source": "independent-cold-modified-sequence",
+        "native_restore_seconds": native_restore_seconds,
+        "sequence_incremental_native_invocations": len(native_reports["incremental"]),
         "incremental_native_invocations": 600,
         "incremental_outer_terrain_executions": sum(
             1
@@ -363,6 +394,12 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
         raise AssertionError(f"GPU frame hash mismatch: {result}")
     if seeded != incremental:
         raise AssertionError(f"native warm restoration differs from its seed: {result}")
+    if not any(frame != seeded[0] for frame in seeded[1:]):
+        raise AssertionError(f"flythrough produced no visible camera motion: {result}")
+    if seeded != native_frames["cold"] or len(native_frames["cold"]) != 600:
+        raise AssertionError(f"independent cold terrain differs from original: {result}")
+    if outer_seed.frame_hashes[250] == outer_cold.frame_hashes[250]:
+        raise AssertionError(f"label edit did not change a rendered frame: {result}")
     if (
         result["predicted"] != 3
         or result["observed"] != 3
@@ -375,23 +412,31 @@ def run_acceptance(root: str | Path) -> dict[str, Any]:
         raise AssertionError(f"outer scheduler recomputed terrain node: {result}")
     if incremental_report["hits"] != expected_incremental_hits:
         raise AssertionError(f"native pass restoration order mismatch: {result}")
-    if incremental_report["misses"] != ["terrain.shadow"] * 600 or incremental_report["hit_rate"] != 0.75:
+    if incremental_report["misses"] or incremental_report["hit_rate"] != 1.0:
         raise AssertionError(f"incremental native terrain recomputed: {result}")
-    if incremental_report["graph_command_submissions"] != 1200:
+    if incremental_report["graph_command_submissions"] != 0:
         raise AssertionError(f"restored native graph submitted GPU work: {result}")
+    # Five submissions per cold frame: shadow, forward and resolve encoders
+    # plus the forward and resolve cache captures. Shadow depth is never stored.
     if (
         seed_report["misses"] != expected_seed_misses
         or seed_report["hits"]
         or seed_report["graph_command_submissions"] != 3000
     ):
         raise AssertionError(f"native cold per-pass recompute set mismatch: {result}")
+    if (
+        cold_report["misses"] != expected_seed_misses
+        or cold_report["hits"]
+        or cold_report["graph_command_submissions"] != 3000
+    ):
+        raise AssertionError(f"modified cold sequence reused native work: {result}")
     if changed_report["hits"] or changed_report["misses"] != list(_NATIVE_PASSES):
         raise AssertionError(f"native DEM invalidation mismatch: {result}")
     if changed_report["graph_command_submissions"] != 5:
         raise AssertionError(f"native DEM invalidation did not execute graph work: {result}")
-    if restored_changed_report["hits"] != cacheable_passes or restored_changed_report["misses"] != ["terrain.shadow"]:
+    if restored_changed_report["hits"] != restored_passes or restored_changed_report["misses"]:
         raise AssertionError(f"changed native resources did not restore: {result}")
-    if restored_changed_report["graph_command_submissions"] != 2:
+    if restored_changed_report["graph_command_submissions"] != 0:
         raise AssertionError(f"changed native restoration submitted GPU work: {result}")
     if changed_frame.to_numpy().tobytes() != restored_changed.to_numpy().tobytes():
         raise AssertionError(f"changed native restoration is not byte-identical: {result}")

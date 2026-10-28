@@ -41,11 +41,19 @@ impl PassKey {
         if value.len() != 64 {
             return Err("ANAMNESIS key must contain exactly 64 hexadecimal characters".into());
         }
+        fn nibble(byte: u8) -> Result<u8, String> {
+            match byte {
+                b'0'..=b'9' => Ok(byte - b'0'),
+                b'a'..=b'f' => Ok(byte - b'a' + 10),
+                b'A'..=b'F' => Ok(byte - b'A' + 10),
+                _ => Err("ANAMNESIS key contains non-hexadecimal characters".into()),
+            }
+        }
+        // Stored metadata is untrusted UTF-8. Validate every byte without
+        // slicing str at a possibly non-character boundary.
         let mut out = [0u8; 32];
-        for (index, byte) in out.iter_mut().enumerate() {
-            let offset = index * 2;
-            *byte = u8::from_str_radix(&value[offset..offset + 2], 16)
-                .map_err(|_| "ANAMNESIS key contains non-hexadecimal characters")?;
+        for (byte, pair) in out.iter_mut().zip(value.as_bytes().chunks_exact(2)) {
+            *byte = (nibble(pair[0])? << 4) | nibble(pair[1])?;
         }
         Ok(Self(out))
     }
@@ -102,8 +110,63 @@ impl CapabilityFingerprint {
         canonical.granted_features.dedup();
         canonical.naga_capabilities.sort();
         canonical.naga_capabilities.dedup();
-        serde_json::to_vec(&canonical).expect("CapabilityFingerprint is infallibly serializable")
+        let value = serde_json::to_value(&canonical)
+            .expect("CapabilityFingerprint is infallibly serializable");
+        serde_json::to_vec(&value).expect("CapabilityFingerprint is infallibly serializable")
     }
+}
+
+/// Keep every negotiated limit in cache identity. The exhaustive pattern
+/// intentionally stops compiling when wgpu adds another limit.
+pub(crate) fn device_limits(limits: &wgpu::Limits) -> BTreeMap<String, u64> {
+    macro_rules! capture {
+        ($($name:ident),+ $(,)?) => {{
+            let wgpu::Limits { $($name),+ } = *limits;
+            BTreeMap::from([$((stringify!($name).to_string(), u64::from($name))),+])
+        }};
+    }
+    capture!(
+        max_texture_dimension_1d,
+        max_texture_dimension_2d,
+        max_texture_dimension_3d,
+        max_texture_array_layers,
+        max_bind_groups,
+        max_bindings_per_bind_group,
+        max_dynamic_uniform_buffers_per_pipeline_layout,
+        max_dynamic_storage_buffers_per_pipeline_layout,
+        max_sampled_textures_per_shader_stage,
+        max_samplers_per_shader_stage,
+        max_storage_buffers_per_shader_stage,
+        max_storage_textures_per_shader_stage,
+        max_uniform_buffers_per_shader_stage,
+        max_uniform_buffer_binding_size,
+        max_storage_buffer_binding_size,
+        max_vertex_buffers,
+        max_buffer_size,
+        max_vertex_attributes,
+        max_vertex_buffer_array_stride,
+        min_uniform_buffer_offset_alignment,
+        min_storage_buffer_offset_alignment,
+        max_inter_stage_shader_components,
+        max_compute_workgroup_storage_size,
+        max_compute_invocations_per_workgroup,
+        max_compute_workgroup_size_x,
+        max_compute_workgroup_size_y,
+        max_compute_workgroup_size_z,
+        max_compute_workgroups_per_dimension,
+        max_push_constant_size,
+        max_non_sampler_bindings,
+    )
+}
+
+pub(crate) fn naga_policy() -> Vec<String> {
+    vec![
+        format!(
+            "wgpu-validation-default@naga-{}",
+            env!("FORGE3D_NAGA_VERSION")
+        ),
+        format!("deterministic={}", crate::core::gpu::deterministic_mode()),
+    ]
 }
 
 /// Self-describing derivation retained in each store entry.
@@ -182,27 +245,14 @@ pub fn pass_key(
     let mut sorted_inputs = input_keys.to_vec();
     sorted_inputs.sort_unstable();
 
-    let mut hasher = Sha256::new();
-    add_segment(&mut hasher, b"domain", DOMAIN);
-    add_segment(&mut hasher, b"label", label.as_bytes());
-    add_segment(
-        &mut hasher,
-        b"pipeline_descriptor_hash",
-        &pipeline_descriptor_hash.0,
-    );
-    // Hash the exact bytes, not a Rust struct or a logical field projection.
-    add_segment(&mut hasher, b"uniform_bytes", uniform_bytes);
-    for input in &sorted_inputs {
-        add_segment(&mut hasher, b"input_binding", input.binding.as_bytes());
-        add_segment(&mut hasher, b"input_key", &input.key.0);
-    }
-    add_segment(
-        &mut hasher,
-        b"capability_fingerprint",
+    let key = hash_pass_key(
+        label,
+        pipeline_descriptor_hash,
+        uniform_bytes,
+        &sorted_inputs,
         capability_fingerprint_bytes,
+        engine_fingerprint_bytes,
     );
-    add_segment(&mut hasher, b"engine_fingerprint", engine_fingerprint_bytes);
-    let key = PassKey(hasher.finalize().into());
     (
         key,
         PassKeyMaterial {
@@ -223,18 +273,79 @@ pub fn pass_key(
     )
 }
 
+// The Python key API needs only the hash, not the large reconstruction record.
+#[cfg(any(feature = "extension-module", test))]
+pub(crate) fn pass_key_only(
+    label: &str,
+    pipeline_descriptor_bytes: &[u8],
+    uniform_bytes: &[u8],
+    input_keys: &[InputKey],
+    capability_fingerprint_bytes: &[u8],
+    engine_fingerprint_bytes: &[u8],
+) -> PassKey {
+    let mut sorted_inputs = input_keys.to_vec();
+    sorted_inputs.sort_unstable();
+    hash_pass_key(
+        label,
+        sha256(pipeline_descriptor_bytes),
+        uniform_bytes,
+        &sorted_inputs,
+        capability_fingerprint_bytes,
+        engine_fingerprint_bytes,
+    )
+}
+
+fn hash_pass_key(
+    label: &str,
+    pipeline_descriptor_hash: PassKey,
+    uniform_bytes: &[u8],
+    sorted_inputs: &[InputKey],
+    capability_fingerprint_bytes: &[u8],
+    engine_fingerprint_bytes: &[u8],
+) -> PassKey {
+    let mut hasher = Sha256::new();
+    add_segment(&mut hasher, b"domain", DOMAIN);
+    add_segment(&mut hasher, b"label", label.as_bytes());
+    add_segment(
+        &mut hasher,
+        b"pipeline_descriptor_hash",
+        &pipeline_descriptor_hash.0,
+    );
+    // Hash the exact bytes, not a Rust struct or a logical field projection.
+    add_segment(&mut hasher, b"uniform_bytes", uniform_bytes);
+    for input in sorted_inputs {
+        add_segment(&mut hasher, b"input_binding", input.binding.as_bytes());
+        add_segment(&mut hasher, b"input_key", &input.key.0);
+    }
+    add_segment(
+        &mut hasher,
+        b"capability_fingerprint",
+        capability_fingerprint_bytes,
+    );
+    add_segment(&mut hasher, b"engine_fingerprint", engine_fingerprint_bytes);
+    PassKey(hasher.finalize().into())
+}
+
 /// Recompute a stored derivation. This is the rejecting-power primitive used
 /// by store verification and `explain`.
 pub fn reconstruct_pass_key(material: &PassKeyMaterial) -> Result<PassKey, String> {
     fn decode(name: &str, value: &str) -> Result<Vec<u8>, String> {
+        fn nibble(byte: u8) -> Option<u8> {
+            match byte {
+                b'0'..=b'9' => Some(byte - b'0'),
+                b'a'..=b'f' => Some(byte - b'a' + 10),
+                _ => None,
+            }
+        }
         if !value.len().is_multiple_of(2) {
             return Err(format!("{name} contains an odd number of hex characters"));
         }
-        (0..value.len())
-            .step_by(2)
-            .map(|offset| {
-                u8::from_str_radix(&value[offset..offset + 2], 16)
-                    .map_err(|_| format!("{name} contains non-hexadecimal characters"))
+        value
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|pair| match (nibble(pair[0]), nibble(pair[1])) {
+                (Some(high), Some(low)) => Ok(high * 16 + low),
+                _ => Err(format!("{name} is not canonical lowercase hex")),
             })
             .collect()
     }
@@ -245,23 +356,70 @@ pub fn reconstruct_pass_key(material: &PassKeyMaterial) -> Result<PassKey, Strin
         &material.capability_fingerprint_hex,
     )?;
     let engine = decode("engine_fingerprint_hex", &material.engine_fingerprint_hex)?;
-    let (key, recomputed) = pass_key(
+    // Preserve the full reconstruction comparison without allocating a second
+    // metadata record or re-encoding every canonical byte as hexadecimal.
+    if material.pipeline_descriptor_hash != sha256(&pipeline)
+        || material.uniform_sha256 != sha256(&uniforms)
+        || material.uniform_byte_length != uniforms.len() as u64
+        || material.capability_fingerprint_sha256 != sha256(&capabilities)
+        || material.engine_fingerprint_sha256 != sha256(&engine)
+        || material.input_keys.windows(2).any(|pair| pair[0] > pair[1])
+    {
+        return Err("ANAMNESIS derivation hashes do not match stored canonical bytes".into());
+    }
+    Ok(hash_pass_key(
         &material.label,
-        &pipeline,
+        material.pipeline_descriptor_hash,
         &uniforms,
         &material.input_keys,
         &capabilities,
         &engine,
-    );
-    if recomputed != *material {
-        return Err("ANAMNESIS derivation hashes do not match stored canonical bytes".into());
-    }
-    Ok(key)
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hash_only_path_preserves_exact_keys() {
+        let inputs = [
+            InputKey::new("z@1", leaf_key(b"z")),
+            InputKey::new("a@0", leaf_key(b"a")),
+        ];
+        for label in ["terrain.render", "frame.output"] {
+            assert_eq!(
+                pass_key_only(
+                    label,
+                    b"pipeline",
+                    b"uniform\0padding",
+                    &inputs,
+                    b"caps",
+                    b"engine"
+                ),
+                pass_key(
+                    label,
+                    b"pipeline",
+                    b"uniform\0padding",
+                    &inputs,
+                    b"caps",
+                    b"engine"
+                )
+                .0,
+            );
+        }
+    }
+
+    #[test]
+    fn negotiated_texture_and_storage_limits_change_identity() {
+        let baseline = wgpu::Limits::downlevel_defaults();
+        let mut changed = baseline.clone();
+        changed.max_texture_array_layers += 1;
+        assert_ne!(device_limits(&baseline), device_limits(&changed));
+        changed = baseline.clone();
+        changed.max_storage_buffer_binding_size += 1;
+        assert_ne!(device_limits(&baseline), device_limits(&changed));
+    }
 
     fn key_with(pipeline: &[u8], uniform: &[u8], capability: &[u8]) -> PassKey {
         pass_key(
@@ -377,5 +535,101 @@ mod tests {
             &engine,
         );
         assert_eq!(reconstruct_pass_key(&material).unwrap(), key);
+    }
+
+    #[test]
+    fn stored_material_preserves_rejection_of_altered_fields() {
+        let (_, material) = pass_key("x", b"pipeline", b"uniform", &[], b"caps", b"engine");
+        let alterations: [fn(&mut PassKeyMaterial); 5] = [
+            |value| value.pipeline_descriptor_hash = sha256(b"other"),
+            |value| value.uniform_sha256 = sha256(b"other"),
+            |value| value.uniform_byte_length += 1,
+            |value| value.capability_fingerprint_sha256 = sha256(b"other"),
+            |value| value.engine_fingerprint_sha256 = sha256(b"other"),
+        ];
+        for alter in alterations {
+            let mut invalid = material.clone();
+            alter(&mut invalid);
+            assert!(reconstruct_pass_key(&invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn stored_material_rejects_noncanonical_hex_and_input_order() {
+        let (_, material) = pass_key(
+            "x",
+            &[0xab],
+            &[0xcd],
+            &[
+                InputKey::new("a", leaf_key(b"a")),
+                InputKey::new("b", leaf_key(b"b")),
+            ],
+            &[0xef],
+            &[0xab],
+        );
+        for field in ["pipeline", "uniform", "capabilities", "engine"] {
+            let mut invalid = material.clone();
+            let hex = match field {
+                "pipeline" => &mut invalid.pipeline_descriptor_hex,
+                "uniform" => &mut invalid.uniform_hex,
+                "capabilities" => &mut invalid.capability_fingerprint_hex,
+                _ => &mut invalid.engine_fingerprint_hex,
+            };
+            *hex = hex.to_uppercase();
+            assert!(reconstruct_pass_key(&invalid).is_err());
+        }
+        let mut invalid = material.clone();
+        invalid.uniform_hex = "é".into();
+        assert!(reconstruct_pass_key(&invalid).is_err());
+        invalid = material;
+        invalid.input_keys.reverse();
+        assert!(reconstruct_pass_key(&invalid).is_err());
+    }
+
+    #[test]
+    fn pass_key_rejects_non_hex_utf8_and_signs_without_panicking() {
+        for invalid in [
+            "\u{1f4a9}".repeat(16),
+            format!("{}0", "\u{20ac}".repeat(21)),
+            "+0".repeat(32),
+        ] {
+            assert_eq!(invalid.len(), 64);
+            assert!(PassKey::from_hex(&invalid).is_err());
+            let encoded = serde_json::to_string(&invalid).unwrap();
+            assert!(serde_json::from_str::<PassKey>(&encoded).is_err());
+        }
+    }
+
+    #[test]
+    fn pass_key_preserves_ascii_hex_case_compatibility() {
+        let lower = "ab".repeat(32);
+        let upper = lower.to_ascii_uppercase();
+        let expected = PassKey([0xab; 32]);
+        assert_eq!(PassKey::from_hex(&lower).unwrap(), expected);
+        assert_eq!(PassKey::from_hex(&upper).unwrap(), expected);
+        assert_eq!(expected.to_hex(), lower);
+    }
+
+    #[test]
+    fn pass_key_decodes_every_byte_and_rejects_every_non_hex_ascii_byte() {
+        for byte in 0..=255 {
+            let lower = format!("{byte:02x}").repeat(32);
+            assert_eq!(PassKey::from_hex(&lower).unwrap(), PassKey([byte; 32]));
+            assert_eq!(
+                PassKey::from_hex(&lower.to_ascii_uppercase()).unwrap(),
+                PassKey([byte; 32])
+            );
+        }
+        for byte in (0u8..=127).filter(|byte| !byte.is_ascii_hexdigit()) {
+            for offset in [0, 1, 62, 63] {
+                let mut value = vec![b'0'; 64];
+                value[offset] = byte;
+                let text = String::from_utf8(value).unwrap();
+                assert_eq!(
+                    PassKey::from_hex(&text).unwrap_err(),
+                    "ANAMNESIS key contains non-hexadecimal characters"
+                );
+            }
+        }
     }
 }

@@ -51,7 +51,11 @@ fn texture_resource(
 
 fn pipeline_material(label: &str, color_format: wgpu::TextureFormat, aov: bool) -> Vec<u8> {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"forge3d.terrain.pipeline-declaration/v1\0");
+    // v2 separated format-correct color blobs from RGBA8-only serialization.
+    // v3 retires every entry written while shadow depth was restored through
+    // a forbidden Depth32Float upload: a forward pass encoded after that
+    // failed restore may have read a stale shadow map.
+    bytes.extend_from_slice(b"forge3d.terrain.pipeline-declaration/v3\0");
     bytes.extend_from_slice(label.as_bytes());
     bytes.push(0);
     bytes.extend_from_slice(format!("{color_format:?}").as_bytes());
@@ -166,11 +170,18 @@ pub(super) fn build_terrain_render_graph(
             .write(shadow)
             .pipeline_descriptor(pipeline_material("terrain.shadow", color_format, aov))
             .uniform_bytes(declarations.shadow);
-        // Depth32Float cannot be restored by Queue::write_texture. Recompute
-        // this producer explicitly; dependent pass keys still describe its inputs.
-        pass.disable_cache(
-            "Depth32Float shadow resources are recomputed; queue depth uploads are unsupported",
-        );
+        if !cacheable {
+            pass.disable_cache("native terrain cache declaration is unavailable for this render");
+        } else {
+            // Depth32Float cannot be written by Queue::write_texture, so the
+            // shadow map is keyed but never stored or served. It is encoded
+            // freshly whenever terrain.forward executes and elided when the
+            // forward output is restored (its key commits to this one).
+            pass.disable_cache(
+                "terrain.shadow depth is keyed but never served: Depth32Float has no queue upload path",
+            )
+            .materialize_on_demand();
+        }
         Ok(())
     })?;
     let forward_label = if aov {
@@ -221,4 +232,58 @@ pub(super) fn build_terrain_render_graph(
             resolved,
         },
     })
+}
+
+// Validate before any GPU work, including actions the normal scheduler is
+// forbidden to request. This boundary can be exercised without a GPU texture.
+pub(super) fn validate_terrain_pass_action(
+    label: &str,
+    action: &crate::core::anamnesis::GraphPassAction<'_>,
+) -> anyhow::Result<()> {
+    use crate::core::anamnesis::GraphPassAction;
+    match (label, action) {
+        ("terrain.shadow", GraphPassAction::Restore { .. }) => anyhow::bail!(
+            "terrain.shadow depth is keyed but never served; the scheduler requested a restore"
+        ),
+        (
+            "terrain.shadow",
+            GraphPassAction::Execute {
+                capture_output: true,
+                ..
+            },
+        ) => anyhow::bail!(
+            "terrain.shadow depth is keyed but never stored; it cannot capture a cache blob"
+        ),
+        _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod action_tests {
+    use super::validate_terrain_pass_action;
+    use crate::core::anamnesis::GraphPassAction;
+
+    #[test]
+    fn shadow_restore_and_capture_are_rejected_before_gpu_work() {
+        let restore = GraphPassAction::Restore {
+            blob: &[],
+            barriers: &[],
+        };
+        let error = validate_terrain_pass_action("terrain.shadow", &restore).unwrap_err();
+        assert!(error.to_string().contains("scheduler requested a restore"));
+        assert!(validate_terrain_pass_action("terrain.forward", &restore).is_ok());
+        let capture = GraphPassAction::Execute {
+            barriers: &[],
+            capture_output: true,
+        };
+        assert!(validate_terrain_pass_action("terrain.shadow", &capture)
+            .unwrap_err()
+            .to_string()
+            .contains("cannot capture a cache blob"));
+        let execute = GraphPassAction::Execute {
+            barriers: &[],
+            capture_output: false,
+        };
+        assert!(validate_terrain_pass_action("terrain.shadow", &execute).is_ok());
+    }
 }

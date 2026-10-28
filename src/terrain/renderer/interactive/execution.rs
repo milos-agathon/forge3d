@@ -104,7 +104,7 @@ impl TerrainScene {
             height_inputs.terrain_data_hash,
         )?;
         let materials =
-            self.prepare_material_context_with_mode(material_set, params, decoded, true)?;
+            self.prepare_material_context_with_mode(material_set, params, decoded, true, None)?;
         let ibl = self.prepare_ibl_bind_group(env_maps)?;
         let curve = if params.height_curve_mode == "lut" {
             params

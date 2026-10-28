@@ -616,6 +616,7 @@ impl TerrainScene {
             queue,
             adapter,
             allocation_owner,
+            last_anamnesis_pass_keys: std::collections::BTreeMap::new(),
             pipeline: Mutex::new(pipeline_cache),
             bind_group_layout,
             ibl_bind_group_layout,

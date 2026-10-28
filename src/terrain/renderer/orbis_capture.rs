@@ -352,7 +352,7 @@ impl TerrainScene {
         self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let module = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("orbis.metric.probe.shader"),
-            source: wgpu::ShaderSource::Wgsl(Self::preprocess_terrain_shader(self.device.as_ref(), false).into()),
+            source: wgpu::ShaderSource::Wgsl(Self::preprocess_terrain_shader_with_orbis(self.device.as_ref(), false, true).into()),
         });
         let probe_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("orbis.metric.probe.layout"),

@@ -538,28 +538,13 @@ pub(crate) fn capabilities(py: Python<'_>) -> PyResult<PyObject> {
     d.set_item("dx12_compiler", ctx.dx12_compiler)?;
     d.set_item(
         "naga_capabilities",
-        vec![format!(
-            "wgpu-validation-default@naga-{}",
-            env!("FORGE3D_NAGA_VERSION")
-        )],
+        crate::core::anamnesis::key::naga_policy(),
     )?;
 
     let lim = PyDict::new_bound(py);
-    lim.set_item("max_texture_dimension_2d", limits.max_texture_dimension_2d)?;
-    lim.set_item("max_buffer_size", limits.max_buffer_size)?;
-    lim.set_item("max_bind_groups", limits.max_bind_groups)?;
-    lim.set_item(
-        "max_storage_buffers_per_shader_stage",
-        limits.max_storage_buffers_per_shader_stage,
-    )?;
-    lim.set_item(
-        "min_uniform_buffer_offset_alignment",
-        limits.min_uniform_buffer_offset_alignment,
-    )?;
-    lim.set_item(
-        "min_storage_buffer_offset_alignment",
-        limits.min_storage_buffer_offset_alignment,
-    )?;
+    for (name, value) in crate::core::anamnesis::key::device_limits(&limits) {
+        lim.set_item(name, value)?;
+    }
     d.set_item("limits", lim)?;
     Ok(d.into())
 }

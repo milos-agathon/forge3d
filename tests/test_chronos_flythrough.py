@@ -15,6 +15,7 @@ import pytest
 import forge3d as f3d
 from forge3d.chronos import FlythroughManifest, render_flythrough
 from _terrain_runtime import terrain_rendering_available
+from test_mapscene_render_cache import fake_renderer
 
 CHRONOS_NATIVE_SYMBOLS = (
     "frame_seed",
@@ -768,24 +769,9 @@ def _require_terrain_rendering() -> None:
         pytest.skip("CHRONOS flythrough requires a hardware terrain renderer")
 
 
-def _capture_cache_context(monkeypatch, scene: "f3d.MapScene", output: Path) -> bytes:
-    import forge3d.anamnesis as anamnesis
-
-    class ContextCaptured(Exception):
-        pass
-
-    captured: list[bytes] = []
-
-    def capture_sequence(*_args, **kwargs):
-        captured.append(kwargs["render_frame_context"])
-        raise ContextCaptured
-
-    with monkeypatch.context() as patch:
-        patch.setattr(anamnesis, "render_sequence", capture_sequence)
-        with pytest.raises(ContextCaptured):
-            scene.render(str(output), cache=output.parent / "cache")
-    assert len(captured) == 1
-    return captured[0]
+def _capture_cache_context(monkeypatch, scene: "f3d.MapScene", output: Path) -> dict:
+    from test_mapscene_render_cache import _capture_context
+    return _capture_context(monkeypatch, scene, output)
 
 
 def _path_free_scene(scene: "f3d.MapScene") -> dict:
@@ -841,17 +827,19 @@ def test_label_payload_only_normalizes_unknown_terrain_elevation(tmp_path, unkno
         _canonical_json_text(_label_payload(label), "labels")
 
 
-def test_frame_free_cache_context_preserves_existing_bytes(monkeypatch, tmp_path):
+def test_frame_free_cache_context_preserves_existing_bytes(monkeypatch, fake_renderer, tmp_path):
     from forge3d._canonical_json import canonical_json_bytes
 
     scene = _synthetic_scene()
     context = _capture_cache_context(monkeypatch, scene, tmp_path / "frame.png")
-    assert context == canonical_json_bytes(
-        _path_free_scene(scene), error_context="MapScene ANAMNESIS callback context"
-    )
+    expected = scene.recipe.to_dict()
+    expected["output"].pop("path", None)
+    assert canonical_json_bytes(context["recipe"], error_context="owned inputs") == canonical_json_bytes(expected, error_context="expected inputs")
+    assert context["frame"] is None
+    assert context["height"]["sha256"] == hashlib.sha256(scene.recipe.terrain.data.tobytes()).hexdigest()
 
 
-def test_compiled_frame_changes_cache_context_for_same_recipe(monkeypatch, tmp_path):
+def test_compiled_frame_changes_cache_context_for_same_recipe(monkeypatch, fake_renderer, tmp_path):
     scene = _synthetic_scene()
     plan = scene.compile_plan()
     output = tmp_path / "frame.png"
@@ -862,10 +850,8 @@ def test_compiled_frame_changes_cache_context_for_same_recipe(monkeypatch, tmp_p
         )
         contexts.append(_capture_cache_context(monkeypatch, scene, output))
     assert contexts[0] != contexts[1]
-    assert json.loads(contexts[0]) == {
-        "scene": _path_free_scene(scene),
-        "chronos_frame": '{"frame":0}',
-    }
+    assert contexts[0]["frame"] == {"frame": 0}
+    assert contexts[1]["frame"] == {"frame": 1}
 
 
 def test_flythrough_default_keywords_preserve_artifact_bytes(tmp_path):
@@ -920,18 +906,18 @@ def test_flythrough_repeat_run_hits_cache_and_preserves_pixel_hashes(
     camera_path = {0: scene, 1: scene}
     output = tmp_path / "output"
     cache = tmp_path / "cache"
-    original_render = f3d.MapScene.render
+    import forge3d.map_scene as ms
+    original_render = ms._render_native_offscreen_result
     rendered: list[int] = []
 
-    # The flythrough cache is one ANAMNESIS sequence: a hit replays stored
-    # frame bytes without calling MapScene.render at all.
-    def record_render(self, *args, **kwargs):
-        report = original_render(self, *args, **kwargs)
-        frame = json.loads(self.compiled_plan.frame.to_json())
+    # Observe the actual native boundary used by the production adapter.
+    def record_render(recipe, compiled, **kwargs):
+        report = original_render(recipe, compiled, **kwargs)
+        frame = json.loads(compiled.frame.to_json())
         rendered.append(frame["frame_index"])
         return report
 
-    monkeypatch.setattr(f3d.MapScene, "render", record_render)
+    monkeypatch.setattr(ms, "_render_native_offscreen_result", record_render)
     first = render_flythrough(
         camera_path, base_seed=7, samples=1, out_dir=output, cache=cache
     )
@@ -1097,13 +1083,14 @@ class TestFlythroughPhysical:
             camera_path, base_seed=11, samples=1, out_dir=tmp_path / "cold", cache=cache_dir
         )
         fresh_renders = []
-        original = chronos_module.MapScene.render
+        import forge3d.map_scene as map_scene_module
+        original = map_scene_module._render_native_offscreen_result
 
-        def counting_render(self, *args, **kwargs):
-            fresh_renders.append(args)
-            return original(self, *args, **kwargs)
+        def counting_render(recipe, compiled, **kwargs):
+            fresh_renders.append(compiled.frame)
+            return original(recipe, compiled, **kwargs)
 
-        monkeypatch.setattr(chronos_module.MapScene, "render", counting_render)
+        monkeypatch.setattr(map_scene_module, "_render_native_offscreen_result", counting_render)
         warm = render_flythrough(
             camera_path, base_seed=11, samples=1, out_dir=tmp_path / "warm", cache=cache_dir
         )
@@ -1439,23 +1426,43 @@ class TestFlythroughPhysical:
             render_compiled(vt_scene(128, 0.25), 2)
 
 
+def _record_fresh_raster_context(monkeypatch, contexts):
+    """CPU dispatch fixture; unsupported rasters must execute fresh every time."""
+    from forge3d._map_scene_rasters import raster_content_hashes
+    from forge3d.helpers.offscreen import save_png_deterministic
+
+    def capture(self, path, **kwargs):
+        from forge3d._anamnesis_scene import _cache_bypass_reason
+        assert _cache_bypass_reason(self) == "scene_accumulation"
+        assert kwargs.get("cache") is None
+        value = {"0": self.compiled_plan.frame.to_json()}
+        content = raster_content_hashes(self.recipe)
+        if content:
+            value["raster_content"] = {"0": content}
+        contexts.append(json.dumps(value, sort_keys=True))
+        save_png_deterministic(path, np.full((64, 64, 4), 255, dtype=np.uint8))
+
+    monkeypatch.setattr(f3d.MapScene, "render", capture)
+
+
 def test_reused_compiled_frames_include_current_raster_bytes(monkeypatch, tmp_path):
-    import forge3d.anamnesis as anamnesis
     from forge3d.chronos import _render_frames
     from forge3d.helpers.offscreen import save_png_deterministic
 
-    scene = _synthetic_scene()
+    # Multi-sample output is an explicit fresh bypass; PNG/NPY raster
+    # inputs themselves are now eligible for the native cache.
+    scene = _synthetic_scene(output_overrides={"samples": 2})
     path = tmp_path / "source.png"
     pixels = np.full((4, 4, 4), 255, dtype=np.uint8)
     save_png_deterministic(path, pixels)
     scene.recipe.layers = [f3d.RasterOverlay(layer_id="raster", path=str(path), crs="EPSG:32610")]
-    frame = SimpleNamespace(to_json=lambda: '{"frame":0}')
+    from forge3d.chronos import _camera_json, _scene_json
+    frame = f3d.compile_frame(0, 7, 2, _camera_json(scene), _scene_json(scene, []))
     contexts = []
-    def capture(*args, **kwargs):
-        contexts.append(kwargs["render_frame_context"])
-        return SimpleNamespace(frame_blobs=[])
-    monkeypatch.setattr(anamnesis, "render_sequence", capture)
+    _record_fresh_raster_context(monkeypatch, contexts)
     def context():
+        scene.compile_plan()
+        scene.compiled_plan = replace(scene.compiled_plan, frame=frame)
         _render_frames({0: scene}, {0: frame}, {0: tmp_path / "frame.png"},
                        certificate_paths=None, cache=tmp_path / "cache")
     context()
@@ -1468,36 +1475,40 @@ def test_reused_compiled_frames_include_current_raster_bytes(monkeypatch, tmp_pa
         assert decoded["0"] == frame.to_json()
         assert decoded["raster_content"]["0"][0]["layer_id"] == "raster"
     scene.recipe.layers = []
+    scene.recipe.output = replace(scene.recipe.output, samples=2)
     context()
+    assert len(contexts) == 3 and not (tmp_path / "cache").exists()
     assert json.loads(contexts[-1]) == {"0": frame.to_json()}
 
 
 @pytest.mark.parametrize("axis", ("primary", "secondary"))
 @pytest.mark.parametrize("storage", ("file", "inline"))
 def test_styled_source_edits_invalidate_reused_chronos_cache(monkeypatch, tmp_path, axis, storage):
-    import forge3d.anamnesis as anamnesis
     from forge3d.chronos import _render_frames, _scene_json
     from test_raster_styles import bivariate
 
-    scene = _synthetic_scene()
-    primary, secondary = np.zeros((4, 4), np.float32), np.zeros((4, 4), np.float32)
+    # Multi-sample output is an explicit fresh bypass; PNG/NPY raster
+    # inputs themselves are now eligible for the native cache.
+    scene = _synthetic_scene(output_overrides={"samples": 2})
+    # The production adapter validates the same aligned grid as MapScene.render.
+    primary, secondary = np.zeros((64, 64), np.float32), np.zeros((64, 64), np.float32)
     paths = [tmp_path / "primary.npy", tmp_path / "secondary.npy"]
     for path, values in zip(paths, (primary, secondary)):
         np.save(path, values)
     style = bivariate()
-    layer = f3d.RasterOverlay("thematic", style=style,
+    layer = f3d.RasterOverlay("thematic", style=style, crs="EPSG:32610",
         path=paths[0] if storage == "file" else None,
         secondary_path=paths[1] if storage == "file" else None,
         data=primary if storage == "inline" else None,
         secondary_data=secondary if storage == "inline" else None)
     scene.recipe.layers = [layer]
-    frame = SimpleNamespace(to_json=lambda: '{"frame":0}')
+    from forge3d.chronos import _camera_json, _scene_json
+    frame = f3d.compile_frame(0, 7, 2, _camera_json(scene), _scene_json(scene, []))
     contexts = []
-    def capture(*args, **kwargs):
-        contexts.append(kwargs["render_frame_context"])
-        return SimpleNamespace(frame_blobs=[])
-    monkeypatch.setattr(anamnesis, "render_sequence", capture)
+    _record_fresh_raster_context(monkeypatch, contexts)
     def context():
+        scene.compile_plan()
+        scene.compiled_plan = replace(scene.compiled_plan, frame=frame)
         _render_frames({0: scene}, {0: frame}, {0: tmp_path / "frame.png"},
                        certificate_paths=None, cache=tmp_path / "cache")
     original_scene = _scene_json(scene, [])
@@ -1511,6 +1522,7 @@ def test_styled_source_edits_invalidate_reused_chronos_cache(monkeypatch, tmp_pa
         np.save(paths[changed_index], values)
     context()
     assert contexts[2] != contexts[0]
+    assert len(contexts) == 3 and not (tmp_path / "cache").exists()
     assert _scene_json(scene, []) != original_scene
     before = json.loads(contexts[0])["raster_content"]["0"]
     after = json.loads(contexts[2])["raster_content"]["0"]

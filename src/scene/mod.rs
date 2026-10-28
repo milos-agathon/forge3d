@@ -1,6 +1,10 @@
 // T41-BEGIN:scene-module
 #![allow(deprecated)]
 mod core;
+#[cfg(feature = "extension-module")]
+pub(crate) mod label_compositor;
+#[cfg(feature = "extension-module")]
+mod text_upload;
 mod postfx_cpu;
 mod private_impl;
 #[cfg(feature = "extension-module")]

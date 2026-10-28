@@ -165,7 +165,13 @@ pub fn verify_root(
 /// Hex-encode bytes (lowercase), matching `format!("{:02x}")` semantics used
 /// elsewhere in the crate (no `hex` dependency).
 pub fn to_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for &byte in bytes {
+        output.push(DIGITS[(byte >> 4) as usize] as char);
+        output.push(DIGITS[(byte & 15) as usize] as char);
+    }
+    output
 }
 
 /// Decode a lowercase/uppercase hex string into bytes.
@@ -361,5 +367,15 @@ mod tests {
         assert_eq!(from_hex(&text).unwrap(), bytes.to_vec());
         assert!(from_hex("zz").is_err());
         assert!(from_hex("abc").is_err());
+    }
+
+    #[test]
+    fn hex_encoding_preserves_the_complete_lowercase_wire_alphabet() {
+        let bytes: Vec<u8> = (0..=255).collect();
+        let formatted: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        assert_eq!(to_hex(&bytes), formatted);
+        assert_eq!(from_hex(&formatted).unwrap(), bytes);
+        assert_eq!(to_hex(&[]), "");
+        assert_eq!(to_hex(&[0, 15, 16, 255]), "000f10ff");
     }
 }

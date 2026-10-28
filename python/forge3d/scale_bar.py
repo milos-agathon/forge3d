@@ -136,7 +136,8 @@ class ScaleBar:
     @_captured_cpu_render("python.scale_bar.render", "scale_bar.cpu", draw_calls=1)
     def render(self, *, certificate: bool | str = False, cache: str | None = None) -> np.ndarray:
         """Render geometry and its label through the shared native text engine."""
-        _ = cache
+        from ._cache_policy import report_cache_bypass
+        report_cache_bypass(cache, "scale_bar.render")
         from ._map_scene_render import _draw_text
 
         image, label, anchor = self.render_geometry()
@@ -156,7 +157,8 @@ class ScaleBar:
         self, *, cache: str | os.PathLike[str] | None = None
     ) -> tuple[np.ndarray, str, tuple[int, int]]:
         """Return deterministic bar geometry plus native-label placement metadata."""
-        _ = cache  # deterministic CPU helper; accepted for render-surface consistency
+        from ._cache_policy import report_cache_bypass
+        report_cache_bypass(cache, "scale_bar.render_geometry")
         from ._map_scene_render import _text_outline_metrics
 
         cfg = self.config

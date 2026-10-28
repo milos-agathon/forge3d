@@ -25,6 +25,7 @@ fn restore_texture(
     width: u32,
     height: u32,
     layers: u32,
+    bytes_per_pixel: u32,
     aspect: wgpu::TextureAspect,
 ) -> Result<()> {
     context.queue().write_texture(
@@ -37,7 +38,11 @@ fn restore_texture(
         payload,
         wgpu::ImageDataLayout {
             offset: 0,
-            bytes_per_row: Some(width * 4),
+            bytes_per_row: Some(
+                width
+                    .checked_mul(bytes_per_pixel)
+                    .ok_or_else(|| anyhow!("terrain cache row stride overflow"))?,
+            ),
             rows_per_image: Some(height),
         },
         wgpu::Extent3d {
@@ -104,7 +109,13 @@ impl TerrainScene {
             params.z_scale,
             height_inputs.terrain_data_hash,
         )?;
-        let materials = self.prepare_material_context(material_set, params, decoded)?;
+        let materials = self.prepare_material_context_with_mode(
+            material_set,
+            params,
+            decoded,
+            false,
+            cache.map(|options| &options.material_maps),
+        )?;
         let uniforms = self.build_uniforms(
             params,
             decoded,
@@ -166,6 +177,8 @@ impl TerrainScene {
             is_clipmap_camera_mode(&params.camera_mode),
         )?;
         let render_targets = self.create_render_targets(params, requested_msaa, effective_msaa)?;
+        let (color_blob_kind, color_stride) =
+            super::anamnesis::color_blob_format(self.color_format)?;
 
         let declaration_uniforms = cache
             .map(|options| options.state_bytes.clone())
@@ -255,9 +268,11 @@ impl TerrainScene {
         let mut staged_lod_selection = None;
         let mut submitted_lod_provenance = None;
 
-        scheduler
+        let resource_keys = scheduler
             .execute_graph_with(&scheduler_plan, &leaf_keys, |pass, action| {
-                let result: Result<GraphPassOutcome> = (|| match (pass.name.as_str(), action) {
+                let result: Result<GraphPassOutcome> = (|| {
+                    super::render_graph::validate_terrain_pass_action(&pass.name, &action)?;
+                    match (pass.name.as_str(), action) {
                     ("terrain.prepare", GraphPassAction::Execute { capture_output, .. }) => {
                         execution
                             .run_pass("terrain.prepare", |_context| Ok::<_, anyhow::Error>(()))?;
@@ -291,7 +306,7 @@ impl TerrainScene {
                         })?;
                         Ok(GraphPassOutcome::Restored)
                     }
-                    ("terrain.shadow", GraphPassAction::Execute { capture_output, .. }) => {
+                    ("terrain.shadow", GraphPassAction::Execute { .. }) => {
                         let setup = execution.run_pass("terrain.shadow", |context| {
                             let scope = ts_begin(&mut timing, context.encoder(), "terrain.shadow");
                             let setup = self.prepare_shadow_setup(
@@ -307,38 +322,8 @@ impl TerrainScene {
                             Ok::<_, anyhow::Error>(setup)
                         })?;
                         shadow_setup = Some(setup);
-                        let payload = if capture_output && decoded.shadow.enabled {
-                            let depth = execution.read_texture_tight(
-                                handles.shadow,
-                                shadow_width,
-                                shadow_width,
-                                shadow_layers,
-                                4,
-                                wgpu::TextureAspect::DepthOnly,
-                            )?;
-                            super::anamnesis::encode_depth_rle(&depth)?
-                        } else {
-                            Vec::new()
-                        };
-                        Ok(GraphPassOutcome::Executed(if capture_output {
-                            super::anamnesis::encode_blob(
-                                super::anamnesis::BlobKind::ShadowDepth32,
-                                shadow_width,
-                                shadow_width,
-                                if decoded.shadow.enabled {
-                                    shadow_layers
-                                } else {
-                                    0
-                                },
-                                &payload,
-                            )
-                        } else {
-                            Vec::new()
-                        }))
+                        Ok(GraphPassOutcome::Executed(Vec::new()))
                     }
-                    ("terrain.shadow", GraphPassAction::Restore { .. }) => Err(anyhow!(
-                        "terrain.shadow must be recomputed: Depth32Float upload is unsupported"
-                    )),
                     (
                         "terrain.forward",
                         GraphPassAction::Execute {
@@ -450,11 +435,11 @@ impl TerrainScene {
                                 render_targets.internal_width,
                                 render_targets.internal_height,
                                 1,
-                                4,
+                                color_stride,
                                 wgpu::TextureAspect::All,
                             )?;
                             super::anamnesis::encode_blob(
-                                super::anamnesis::BlobKind::Rgba8,
+                                color_blob_kind,
                                 render_targets.internal_width,
                                 render_targets.internal_height,
                                 1,
@@ -472,7 +457,7 @@ impl TerrainScene {
                         }
                         let payload = super::anamnesis::require_blob(
                             blob,
-                            super::anamnesis::BlobKind::Rgba8,
+                            color_blob_kind,
                             render_targets.internal_width,
                             render_targets.internal_height,
                             1,
@@ -485,6 +470,7 @@ impl TerrainScene {
                                 render_targets.internal_width,
                                 render_targets.internal_height,
                                 1,
+                                color_stride,
                                 wgpu::TextureAspect::All,
                             )
                         })?;
@@ -518,11 +504,11 @@ impl TerrainScene {
                                 render_targets.out_width,
                                 render_targets.out_height,
                                 1,
-                                4,
+                                color_stride,
                                 wgpu::TextureAspect::All,
                             )?;
                             super::anamnesis::encode_blob(
-                                super::anamnesis::BlobKind::Rgba8,
+                                color_blob_kind,
                                 render_targets.out_width,
                                 render_targets.out_height,
                                 1,
@@ -540,7 +526,7 @@ impl TerrainScene {
                         }
                         let payload = super::anamnesis::require_blob(
                             blob,
-                            super::anamnesis::BlobKind::Rgba8,
+                            color_blob_kind,
                             render_targets.out_width,
                             render_targets.out_height,
                             1,
@@ -553,6 +539,7 @@ impl TerrainScene {
                                 render_targets.out_width,
                                 render_targets.out_height,
                                 1,
+                                color_stride,
                                 wgpu::TextureAspect::All,
                             )?;
                             Ok::<_, anyhow::Error>(())
@@ -560,11 +547,26 @@ impl TerrainScene {
                         Ok(GraphPassOutcome::Restored)
                     }
                     (label, _) => Err(anyhow!("unexpected native terrain graph pass {label:?}")),
+                    }
                 })();
                 result.map_err(io_error)
             })
             .map_err(io_error)?;
         let submitted = execution.finish()?;
+        self.last_anamnesis_pass_keys = if cache.is_some() {
+            scheduler_plan
+                .ordered_passes()
+                .filter_map(|pass| {
+                    pass.writes.first().and_then(|handle| {
+                        resource_keys
+                            .get(handle)
+                            .map(|key| (pass.name.clone(), key.to_hex()))
+                    })
+                })
+                .collect()
+        } else {
+            std::collections::BTreeMap::new()
+        };
         #[cfg(feature = "enable-globe")]
         self.mark_orbis_capture_submitted();
         debug_assert!(

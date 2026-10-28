@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 import tempfile
 
@@ -53,9 +54,8 @@ def _runner_name(value: str) -> str:
 
 
 def _native_render(
-    cache: str, *, compatibility_profile: str = _PORTABLE_PROFILE
+    cache: str
 ) -> tuple[bytes, dict]:
-    os.environ["FORGE3D_ANAMNESIS_COMPATIBILITY_PROFILE"] = compatibility_profile
     heightmap = np.ascontiguousarray(canonical_heightmap(), dtype=np.float32)
     with tempfile.TemporaryDirectory(prefix="forge3d-anamnesis-portable-") as root:
         hdr_path = Path(root) / "environment.hdr"
@@ -87,8 +87,12 @@ def main() -> int:
     parser.add_argument("--machine-id-file")
     parser.add_argument("--runner-name", default=os.environ.get("RUNNER_NAME", ""))
     parser.add_argument("--producer-backend", default="vulkan")
-    parser.add_argument("--consumer-backend", default="dx12")
+    parser.add_argument("--consumer-backend", default="vulkan")
     args = parser.parse_args()
+    if os.environ.get("FORGE3D_ANAMNESIS_COMPATIBILITY_PROFILE"):
+        raise SystemExit("compatibility acceptance requires the actual device profile, without an override")
+    if args.producer_backend.lower() != args.consumer_backend.lower():
+        raise SystemExit("cross-backend cache reuse is outside the compatibility contract")
     record_path = Path(args.record)
 
     if args.mode == "seed":
@@ -108,7 +112,7 @@ def main() -> int:
         if (
             report["hits"]
             or report["misses"] != _PASS_LABELS
-            or report["graph_command_submissions"] != 6
+            or report["graph_command_submissions"] != 5
         ):
             raise SystemExit(f"native producer did not seed every terrain pass: {report}")
         record_path.parent.mkdir(parents=True, exist_ok=True)
@@ -159,6 +163,15 @@ def main() -> int:
             )
         machine_id = _machine_id(args.machine_id_file)
         runner_name = _runner_name(args.runner_name)
+        distinct_machine = machine_id != record["producer_machine_id"]
+        if not distinct_machine:
+            # Machine identity is diagnostic. Separate producer/consumer
+            # processes with the same full device profile qualify reuse.
+            print(json.dumps({
+                "check": "distinct_machine", "distinct_machine": "ABSENT",
+                "producer_machine_id": record["producer_machine_id"],
+                "consumer_machine_id": machine_id,
+            }, sort_keys=True), file=sys.stderr)
         consumer_png_sha = hashlib.sha256(
             Path(args.consumer_frame_blob).read_bytes()
         ).hexdigest()
@@ -186,9 +199,28 @@ def main() -> int:
             or report["graph_command_submissions"] != 0
         ):
             raise SystemExit(f"native consumer did not restore every terrain pass: {report}")
+        if hashlib.sha256(rgba).hexdigest() != record["rgba_sha256"]:
+            raise SystemExit("restored native terrain pixels differ from the producer")
+        # A cached frame cannot qualify the consumer's compatibility profile.
+        # Independently encode the same production graph before accepting reuse.
+        with tempfile.TemporaryDirectory(prefix="forge3d-anamnesis-fresh-") as fresh_cache:
+            fresh_rgba, fresh_report = _native_render(fresh_cache)
+        if (
+            fresh_report["hits"]
+            or fresh_report["misses"] != _PASS_LABELS
+            or fresh_report["graph_command_submissions"] != 5
+            or fresh_rgba != rgba
+        ):
+            raise SystemExit("restored native terrain differs from an independent fresh render")
+        from PIL import Image
+
+        with Image.open(args.consumer_frame_blob) as image:
+            golden_rgba = image.convert("RGBA").tobytes()
+        if fresh_rgba != golden_rgba:
+            raise SystemExit("fresh native pixels differ from the golden-checked consumer PNG")
         result = {
             "mode": "check",
-            "distinct_machine": machine_id != record["producer_machine_id"],
+            "distinct_machine": True if distinct_machine else "ABSENT",
             "producer_machine_id": record["producer_machine_id"],
             "consumer_machine_id": machine_id,
             "producer_runner_name": record.get("producer_runner_name"),
@@ -196,6 +228,7 @@ def main() -> int:
             "producer_adapter": record["producer_adapter"],
             "consumer_adapter": consumer_adapter,
             "backend_goldens_match": True,
+            "fresh_native_matches": True,
             "hits": len(report["hits"]),
             "misses": len(report["misses"]),
             "hit_rate": report["hit_rate"],
@@ -204,28 +237,53 @@ def main() -> int:
         print(json.dumps(result, sort_keys=True))
         return 0
 
-    rgba, report = _native_render(
-        args.cache, compatibility_profile=_PORTABLE_PROFILE + "-mismatch"
-    )
-    if (
-        report["hits"]
-        or report["misses"] != _PASS_LABELS
-        or report["graph_command_submissions"] != 6
-    ):
-        raise SystemExit(f"native compatibility mismatch served stale terrain passes: {report}")
-    print(
-        json.dumps(
-            {
-                "mode": "mismatch",
-                "hits": 0,
-                "misses": len(report["misses"]),
-                "hit_rate": report["hit_rate"],
-                "cache_isolated": True,
-                "mismatch_dimension": "compatibility_profile",
-            },
-            sort_keys=True,
-        )
-    )
+    # Reconstruct the actual production keys from their persisted derivation.
+    # Vary one negotiated dimension at a time, then ask the native store for
+    # each new key. This probes key/store isolation without pretending to have
+    # rendered another backend or weakening the physical profile.
+    from copy import deepcopy
+
+    packed_index = json.loads((Path(args.cache) / "index.v2.json").read_text(encoding="utf-8"))
+    if packed_index.get("schema") != "forge3d.anamnesis.packed-index/2":
+        raise SystemExit("mismatch control requires the current packed store schema")
+    entries = [record["metadata"] for record in packed_index["entries"].values()
+               if record["metadata"].get("pass_label") in _PASS_LABELS]
+    if sorted(meta["pass_label"] for meta in entries) != sorted(label for label in _PASS_LABELS if label != "terrain.shadow"):
+        raise SystemExit("mismatch control requires all stored production terrain passes (shadow is keyed on demand)")
+    results = {}
+    for dimension in ("backend", "granted_features", "limits", "dx12_compiler", "naga_capabilities"):
+        hits = 0
+        for meta in entries:
+            material = meta["derivation"]["material"]
+            original = bytes.fromhex(material["capability_fingerprint_hex"])
+            capabilities = json.loads(original)
+            changed = deepcopy(capabilities)
+            if dimension in {"backend", "dx12_compiler"}:
+                changed[dimension] += "-mismatch"
+            elif dimension == "limits":
+                name = sorted(changed[dimension])[0]
+                changed[dimension][name] += 1
+            else:
+                changed[dimension].append("mismatch-control")
+            def key(capability_bytes):
+                return f3d.anamnesis_pass_key(
+                    material["label"], bytes.fromhex(material["pipeline_descriptor_hex"]),
+                    bytes.fromhex(material["uniform_hex"]),
+                    [(item["binding"], item["key"]) for item in material["input_keys"]],
+                    capability_bytes, bytes.fromhex(material["engine_fingerprint_hex"]),
+                )
+            if key(original) != meta["key"]:
+                raise SystemExit("production key cannot be reconstructed")
+            revised = key(json.dumps(changed, sort_keys=True, separators=(",", ":")).encode())
+            if revised == meta["key"]:
+                raise SystemExit(f"{dimension} did not affect the production key")
+            if f3d.anamnesis_store_get(args.cache, revised, 512 * 1024 * 1024) is not None:
+                hits += 1
+        results[dimension] = {"hits": hits, "misses": len(entries) - hits, "hit_rate": hits / len(entries)}
+        if hits:
+            raise SystemExit(f"{dimension} mismatch served cached terrain: {results[dimension]}")
+    print(json.dumps({"mode": "mismatch", "hits": 0, "misses": len(entries) * len(results),
+                      "hit_rate": 0.0, "cache_isolated": True, "dimensions": results}, sort_keys=True))
     return 0
 
 

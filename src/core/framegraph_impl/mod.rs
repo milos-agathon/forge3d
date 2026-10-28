@@ -35,6 +35,7 @@ impl PassBuilder {
                 pipeline_descriptor_bytes: Vec::new(),
                 uniform_bytes: Vec::new(),
                 cache_disabled_reason: None,
+                materialize_on_demand: false,
                 pass_key: None,
             },
         }
@@ -73,6 +74,13 @@ impl PassBuilder {
     /// Disable cache reuse when any pixel-affecting declaration is incomplete.
     pub fn disable_cache(&mut self, reason: impl Into<String>) -> &mut Self {
         self.desc.cache_disabled_reason = Some(reason.into());
+        self
+    }
+
+    /// Never serve this cache-disabled pass; materialize it only for an
+    /// executing consumer (see `PassDesc::materialize_on_demand`).
+    pub fn materialize_on_demand(&mut self) -> &mut Self {
+        self.desc.materialize_on_demand = true;
         self
     }
 
@@ -160,6 +168,11 @@ impl FrameGraph {
         {
             return Err(RenderError::render(format!(
                 "framegraph pass {name:?} has an empty cache-disabled reason"
+            )));
+        }
+        if builder.desc.materialize_on_demand && builder.desc.cache_disabled_reason.is_none() {
+            return Err(RenderError::render(format!(
+                "framegraph pass {name:?} is materialized on demand but still cacheable"
             )));
         }
         if self
@@ -597,6 +610,73 @@ mod tests {
     }
 
     #[test]
+    fn only_on_demand_passes_may_be_overtaken_in_execution() {
+        let build = |on_demand: bool| {
+            let mut builder = RendererGraphBuilder::new();
+            let resource = |name: &str| ResourceDesc {
+                name: name.into(),
+                resource_type: ResourceType::ColorAttachment,
+                format: Some(wgpu::TextureFormat::Rgba8Unorm),
+                extent: Some(wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                }),
+                size: None,
+                usage: Some(
+                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                ),
+                can_alias: false,
+                is_transient: false,
+            };
+            let depth = builder.add_resource(resource("depth"));
+            let color = builder.add_resource(resource("color"));
+            builder
+                .add_pass("shadow", PassType::Graphics, |pass| {
+                    pass.write(depth)
+                        .pipeline_descriptor(b"shadow-pipeline".to_vec())
+                        .uniform_bytes(Vec::new());
+                    if on_demand {
+                        pass.disable_cache("never served").materialize_on_demand();
+                    }
+                    Ok(())
+                })
+                .unwrap();
+            builder
+                .add_pass("forward", PassType::Graphics, |pass| {
+                    pass.read(depth)
+                        .write(color)
+                        .pipeline_descriptor(b"forward-pipeline".to_vec())
+                        .uniform_bytes(Vec::new());
+                    Ok(())
+                })
+                .unwrap();
+            builder.compile().unwrap()
+        };
+
+        let mut elided = build(true);
+        elided
+            .execute("forward", || Ok::<_, RenderError>(()))
+            .unwrap();
+        elided.finish().unwrap();
+
+        let mut strict = build(false);
+        assert!(strict
+            .execute("forward", || Ok::<_, RenderError>(()))
+            .is_err());
+
+        let mut builder = RendererGraphBuilder::new();
+        assert!(builder
+            .add_pass("cacheable", PassType::Graphics, |pass| {
+                pass.pipeline_descriptor(b"p".to_vec())
+                    .uniform_bytes(Vec::new())
+                    .materialize_on_demand();
+                Ok(())
+            })
+            .is_err());
+    }
+
+    #[test]
     fn production_execution_receives_compiled_resource_transitions() {
         let mut builder = RendererGraphBuilder::new();
         let output = builder.add_resource(ResourceDesc {
@@ -746,7 +826,22 @@ pub struct RendererGraphPlan {
 }
 
 impl RendererGraphPlan {
+    fn is_on_demand(&self, label: &str) -> bool {
+        self.passes
+            .get(label)
+            .is_some_and(|pass| pass.materialize_on_demand)
+    }
+
     fn advance(&mut self, label: &str) -> RenderResult<()> {
+        // An on-demand pass runs before its consumer or not at all, so a
+        // later pass overtaking it means it was elided.
+        while self
+            .labels
+            .get(self.next_pass)
+            .is_some_and(|expected| expected != label && self.is_on_demand(expected))
+        {
+            self.next_pass += 1;
+        }
         let expected = self.labels.get(self.next_pass).ok_or_else(|| {
             RenderError::render(format!(
                 "renderer executed undeclared pass {label:?} after graph completion"
@@ -809,7 +904,14 @@ impl RendererGraphPlan {
             .collect()
     }
 
-    pub fn finish(self) -> RenderResult<()> {
+    pub fn finish(mut self) -> RenderResult<()> {
+        while self
+            .labels
+            .get(self.next_pass)
+            .is_some_and(|label| self.is_on_demand(label))
+        {
+            self.next_pass += 1;
+        }
         if self.next_pass != self.labels.len() {
             return Err(RenderError::render(format!(
                 "renderer stopped after {} of {} compiled passes",

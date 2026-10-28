@@ -63,11 +63,39 @@ impl TerrainScene {
         device: &wgpu::Device,
         include_aov_depth: bool,
     ) -> String {
+        Self::preprocess_terrain_shader_with_orbis(device, include_aov_depth, false)
+    }
+
+    pub(super) fn preprocess_terrain_shader_with_orbis(
+        device: &wgpu::Device,
+        include_aov_depth: bool,
+        include_orbis_probe: bool,
+    ) -> String {
         let mut source = if Self::terrain_atlas_is_bindless(device) {
             crate::shader_sources::terrain_bindless()
         } else {
             crate::shader_sources::terrain()
         };
+
+        if !include_orbis_probe {
+            for section in ["BINDINGS", "PROBE"] {
+                let begin_marker = format!("// TERRAIN_ORBIS_{section}_BEGIN");
+                let end_marker = format!("// TERRAIN_ORBIS_{section}_END");
+                let begin = source.find(&begin_marker);
+                assert!(
+                    begin.is_some(),
+                    "terrain shader must contain the ORBIS {section} begin marker"
+                );
+                let begin = begin.unwrap_or(0);
+                let end_offset = source[begin..].find(&end_marker);
+                assert!(
+                    end_offset.is_some(),
+                    "terrain shader must contain the ORBIS {section} end marker"
+                );
+                let end = begin + end_offset.unwrap_or(0) + end_marker.len();
+                source.replace_range(begin..end, "// ORBIS probe is source-isolated.");
+            }
+        }
 
         if !include_aov_depth {
             const BEGIN: &str = "// TERRAIN_AOV_DEPTH_BEGIN";

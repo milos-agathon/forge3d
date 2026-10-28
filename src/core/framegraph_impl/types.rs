@@ -96,6 +96,12 @@ pub struct PassDesc {
     /// Why this pass must conservatively execute instead of using ANAMNESIS.
     /// `None` means the declaration is eligible once its bottom-up key exists.
     pub cache_disabled_reason: Option<String>,
+    /// A cache-disabled pass whose output is never served from the store.
+    /// With a store, it executes only when a later executing pass reads its
+    /// output; when every consumer is restored it is elided, because the
+    /// restored consumer keys commit to its key. Without a store it executes
+    /// in graph order like any other pass.
+    pub materialize_on_demand: bool,
     /// Optional ANAMNESIS identity computed from the pass's complete declared
     /// input space. `None` means the pass is deliberately not cacheable.
     pub pass_key: Option<crate::core::anamnesis::PassKey>,

@@ -424,7 +424,8 @@ else:
             certificate: bool | str | Path = False,
             cache: str | Path | None = None,
         ) -> np.ndarray:
-            _ = cache
+            from ._cache_policy import report_cache_bypass
+            report_cache_bypass(cache, "smoke.render_projection_rgba")
             from . import _degradation
 
             _degradation.record(

@@ -107,7 +107,8 @@ def render_offline(
     # Soundness therefore chooses an explicit false miss for this entry point;
     # `forge3d.anamnesis.render_sequence` provides pass-granular sequence
     # caching, while accepting `cache=` here keeps the render API uniform.
-    _ = cache
+    from ._cache_policy import report_cache_bypass
+    report_cache_bypass(cache, "offline.render_offline")
     from . import certificate as _certificate
 
     with _certificate._render_capture(

@@ -236,7 +236,8 @@ def render_reference(
     GPU context creation, because the backend is locked process-wide at first
     use and ``Session(backend=...)`` does not switch it.
     """
-    _ = cache
+    from ._cache_policy import report_cache_bypass
+    report_cache_bypass(cache, "determinism.render_reference")
     scene = scene_spec or CANONICAL_SCENE
     if backend is None and not (
         os.environ.get("WGPU_BACKENDS") or os.environ.get("WGPU_BACKEND")
