@@ -60,7 +60,7 @@
       "src/terrain/renderer/constructor.rs:593": 4,
       "src/terrain/renderer/constructor.rs:598": 16,
       "src/terrain/renderer/constructor.rs:599": 8,
-      "src/terrain/scatter.rs:1144": 16384,
+      "src/terrain/scatter.rs:1152": 16384,
       "ssao.blur.settings": 16,
       "ssao.comp.uniform": 16,
       "ssao.settings.staging": 40,
@@ -171,15 +171,15 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "673a01d996df",
-    "version": "1.45.0",
+    "git_sha": "8e0b5431d500",
+    "version": "1.46.0",
     "wgsl_module_hashes": {
       "concordia.ao_filter.shader": "b78182a96a1e3913a29f7d6af1baf83a00b1ccceee6109b6c67cfc6a3e08c8ad",
       "concordia.compose.shader": "7a4be4fae4608d5bf09c510aa59c6314536e68e88f0123a771d3ce5a8da9c462",
-      "concordia.geometry.shader": "6ab4893173bbde788b07cd46552b346f7722c6153642bb26b498eaf5714bb2c1",
+      "concordia.geometry.shader": "366187b4a23d6b4a189f514003188130ff3afd9495eb672f883336a339c48151",
       "concordia.gtao.shader": "a17a39c8baf66585c6d892574488a81cb0bc8a100263da51fe53008713589ed0",
       "concordia.hzb.shader": "2f04dffe097070463bad16139fb185f7383135dabdb67f2aa37285be69f3e990",
-      "concordia.scatter.shader": "3159ca047ca28c8e6137ccff50d216ab78fb72df6b35dc99638e5579cddfd14f",
+      "concordia.scatter.shader": "4cf71b6e2eb469aab514f6596f6d4c55e277e7f23ada5ac2fd5c8370b13195b1",
       "concordia.taa.shader": "59e5f02dc3e1d9cd81ea10076170c4cc36179e8fa22a36efaa0d81e5ed6cd925",
       "terrain.offline.tonemap.pipeline": "621a5f156ac352a671a78e65d7599e5ef974efdc8426829f8975d16af668fe7a",
       "terrain.shadow_depth.shader": "0e96b377bb089fcf83499ebaedee708ee3cf2adf2330b68ac6b848bcc7992f15"
@@ -195,17 +195,17 @@
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "concordia.resources"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.41676801443099976,
+      "gpu_ms": 0.37273600697517395,
       "label": "concordia.shadows"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.30720001459121704,
+      "gpu_ms": 3.7939200401306152,
       "label": "concordia.geometry"
     },
     {
@@ -215,37 +215,37 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.2877439856529236,
+      "gpu_ms": 3.7744638919830322,
       "label": "terrain.main"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.06451199948787689,
+      "gpu_ms": 0.05939200147986412,
       "label": "concordia.depth_pyramid"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.06758400052785873,
+      "gpu_ms": 0.05734400078654289,
       "label": "concordia.ao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.05734400078654289,
+      "gpu_ms": 0.048128001391887665,
       "label": "p5.ssao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.058368001133203506,
+      "gpu_ms": 4.890624046325684,
       "label": "concordia.ssgi"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.04915200173854828,
+      "gpu_ms": 4.881408214569092,
       "label": "p5.ssgi"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.009216000325977802,
+      "gpu_ms": 0.008191999979317188,
       "label": "concordia.temporal"
     },
     {
@@ -258,7 +258,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "ad207fbfe52fb723f5eedec7e19aa59965b96f467632d0777cb19e4c2f44276264218d03011ff883ea699b0dfae448c067c607425d115968f518d35e23835c0b",
+    "sig": "3418cd560549dff865df22da034535b46e2fd3c2b3665e81a45dfe57dd2e5a423d6da523c5a74c29ca5bdc36676afc627a180eb11415d13034ed4de0e5f6d309",
     "signed_fields": [
       "adapter",
       "allocations",

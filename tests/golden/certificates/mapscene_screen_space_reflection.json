@@ -160,11 +160,11 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "673a01d996df",
-    "version": "1.45.0",
+    "git_sha": "8e0b5431d500",
+    "version": "1.46.0",
     "wgsl_module_hashes": {
       "concordia.compose.shader": "7a4be4fae4608d5bf09c510aa59c6314536e68e88f0123a771d3ce5a8da9c462",
-      "concordia.geometry.shader": "6ab4893173bbde788b07cd46552b346f7722c6153642bb26b498eaf5714bb2c1",
+      "concordia.geometry.shader": "366187b4a23d6b4a189f514003188130ff3afd9495eb672f883336a339c48151",
       "concordia.hzb.shader": "2f04dffe097070463bad16139fb185f7383135dabdb67f2aa37285be69f3e990",
       "ibl.precompute.shader.brdf": "1ae542caaac04a941c211ec924c0072a3110cbff03aff23e140ea9305ba8dc75",
       "ibl.precompute.shader.equirect": "c77440fdaca6bb421e6775d86cb0be2f7cb3638e103de07121027e338c2a9772",
@@ -183,17 +183,17 @@
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0030720001086592674,
       "label": "concordia.resources"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 2.0305919647216797,
+      "gpu_ms": 1.5831040143966675,
       "label": "concordia.shadows"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.3420160114765167,
+      "gpu_ms": 2.3695359230041504,
       "label": "concordia.geometry"
     },
     {
@@ -203,27 +203,27 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.32870399951934814,
+      "gpu_ms": 0.32256001234054565,
       "label": "terrain.main"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.06758400052785873,
+      "gpu_ms": 0.05939200147986412,
       "label": "concordia.depth_pyramid"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.05632000043988228,
+      "gpu_ms": 2.0142080783843994,
       "label": "concordia.ssr"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.04608000069856644,
+      "gpu_ms": 2.0049920082092285,
       "label": "p5.ssr"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.010239999741315842,
+      "gpu_ms": 0.009216000325977802,
       "label": "concordia.output_transform"
     }
   ],
@@ -231,7 +231,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "f826b7bcd6655d2665190d19d647fc219c6c0f5e53b2a5047e00454716819cb9057ef02ae0869aba32410cf3f2045b32fdd90f82437f3924329d5e0e8fff0709",
+    "sig": "aaf5750073912c6f5d0dc889b4d7660450ac3a7bc8a272cbfac3334b10cf7c66b36afb642906bd6955847ce925c0d59fff4f8f08ae43a981fc137ada0ff4c20f",
     "signed_fields": [
       "adapter",
       "allocations",
