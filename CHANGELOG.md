@@ -6,7 +6,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
-## [1.46.0] - Unreleased
+## [1.46.0] - 2026-10-29
 
 ### Added
 - MapScene native terrain effects and refreshed production render certificates (#272, #273).
