@@ -30,6 +30,7 @@ organized by workflow rather than by Rust module layout.
 | Area | Main APIs | Covered by examples or tutorials |
 | --- | --- | --- |
 | Map plates and cartographic furniture | `MapPlate`, `Legend`, `ScaleBar`, `NorthArrow` | `map_plate.ipynb`, GIS tutorial 03 |
+| Linked plan-view PNG publications | `PublicationSource`, `PublicationExtent`, `PublicationRecipe`; native unlit-albedo scene with validated cache reuse, style-derived legend, viewport locator, qualified on-map scale and extent series | [C06 guide](linked_publication.md), `examples/c06_population_publication.py`; local first delivery, broader C06 remains partial |
 | Vector export | `export_svg`, `export_pdf`, `VectorScene` | gallery vector-export workflow |
 | Buildings | `add_buildings`, `add_buildings_cityjson`, `add_buildings_3dtiles` | `buildings_viewer_interactive.py`, GIS tutorial 04 |
 | Mapbox-style import | `style.load_style`, `style.apply_style` | `style_viewer_interactive.py` |

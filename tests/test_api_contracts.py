@@ -25,6 +25,13 @@ from forge3d._native import NATIVE_AVAILABLE, get_native_module
 from _toml_compat import load_toml
 
 
+def test_c06_publication_python_surface():
+    from forge3d import publication
+    for name in publication.__all__:
+        assert name in f3d.__all__
+        assert getattr(f3d, name) is getattr(publication, name)
+
+
 def test_d04_python_composition_public_surface():
     from forge3d.map_scene import RenderPassInput, RenderPassSpec
 

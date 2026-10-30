@@ -508,6 +508,7 @@ from . import io
 # P4: Map Plate / Creator Workflow
 # -----------------------------------------------------------------------------
 from .map_plate import MapPlate, MapPlateConfig, BBox, PlateRegion
+from .publication import PublicationSource, PublicationExtent, PublicationRecipe
 from .legend import Legend, LegendConfig
 from .raster_style import RasterHeightSurfaceStyle, CategoricalRasterStyle, BivariateRasterStyle, RasterStyleResult
 from .scale_bar import ScaleBar, ScaleBarConfig
@@ -960,6 +961,9 @@ __all__ = [
     # P4: Map Plate / Creator Workflow
     "MapPlate",
     "MapPlateConfig",
+    "PublicationSource",
+    "PublicationExtent",
+    "PublicationRecipe",
     "BBox",
     "PlateRegion",
     "Legend",

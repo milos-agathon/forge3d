@@ -802,6 +802,29 @@ def _mapscene_aov_settings(
     )
 
 
+def _mapscene_unlit_albedo(recipe: "SceneRecipe") -> bool:
+    """Flat thematic maps publish the unlit albedo as the frame, not shaded beauty."""
+    return bool(_metadata_dict(recipe.lighting.settings).get("unlit_albedo"))
+
+
+def _unlit_albedo_rgba(aov_frame: Any, output: "OutputSpec") -> Any:
+    """Encode the native linear albedo as the opaque sRGB RGBA8 frame."""
+    import numpy as np
+
+    if aov_frame is None:
+        raise MapSceneNativeUnavailable(diagnostic_block(
+            layer="terrain", reason="unlit_albedo requires the native albedo AOV",
+            required_native="TerrainRenderer.render_with_aov"))
+    linear = np.asarray(aov_frame.albedo(), dtype=np.float64)[..., :3]
+    if linear.shape[:2] != (int(output.height), int(output.width)):
+        raise ValueError("Native albedo dimensions do not match the requested output")
+    linear = np.clip(linear, 0.0, 1.0)
+    srgb = np.where(linear <= 0.0031308, linear * 12.92, 1.055 * linear ** (1 / 2.4) - 0.055)
+    rgba = np.full((*linear.shape[:2], 4), 255, np.uint8)
+    rgba[..., :3] = np.rint(srgb * 255)
+    return rgba
+
+
 def _mapscene_denoise_settings(output: "OutputSpec" | None) -> Any | None:
     from .terrain_params import DenoiseSettings
 
@@ -1596,6 +1619,9 @@ def _build_mapscene_terrain_params(
         # beauty pass (requires the msaa_samples=1 path used above).
         config.aov.enabled = True
         config.aov.source_id = True
+    if _mapscene_unlit_albedo(recipe):
+        config.aov.enabled = True
+        config.aov.albedo = True
     if chronos_frame_json is not None:
         config.chronos_frame_json = chronos_frame_json
     native_params = f3d.TerrainRenderParams(config)
@@ -1968,7 +1994,11 @@ def _render_terrain_renderer_result_impl(
         # camera/terrain sampler. Never retain a live GPU depth AOV merely
         # because labels request terrain occlusion; render must be a pure
         # consumer of that compiled plan.
-        needs_aov = bool(output.aovs) or emit_provenance
+        unlit_albedo = _mapscene_unlit_albedo(recipe)
+        if unlit_albedo and (needs_offline or requested_effects
+                             or _mapscene_effective_camera_mode(recipe) != "screen"):
+            raise ValueError("unlit_albedo supports only one-shot flat screen views without effects")
+        needs_aov = bool(output.aovs) or emit_provenance or unlit_albedo
         if requested_effects and int(output.bit_depth)!=8:
             _mapscene_pipeline_block(requested_effects,"interactive output uses RGBA8; the requested bit depth has no matching GPU output transform")
         if requested_effects and (needs_offline or needs_aov):
@@ -2091,6 +2121,9 @@ def _render_terrain_renderer_result_impl(
         if requested_effects and tuple(frame.size) != (int(output.width),int(output.height)):
             _mapscene_pipeline_block(requested_effects,"native frame dimensions would require a CPU resize")
         rgba = _frame_to_rgba(frame, output)
+        if unlit_albedo:
+            rgba = _unlit_albedo_rgba(aov_frame, output)
+            metadata["frame_color_source"] = "native_albedo_srgb"
         if requested_effects:
             readback_info = json.loads(renderer.interactive_pipeline_info())
             metadata["native_pipeline"].update(readback_info)
@@ -6445,6 +6478,7 @@ class MapScene:
             "raster_overlay_backend",
             "raster_overlay_layer_count",
             "thematic_backend",
+            "frame_color_source",
             "thematic_legend",
             "vector_backend",
             "point_cloud_backend",
