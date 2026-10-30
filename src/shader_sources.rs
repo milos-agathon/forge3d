@@ -195,6 +195,46 @@ const FUSED_TERRAIN_EDITS: &[(&str, &str, &str)] = &[
     // enough to break byte identity (and any sha256 sidecar gate).
     // Keeping the two branches separate is what makes "fog off" provably
     // byte-identical to the base line, not merely close to it.
+    // The base kernel reads the environment by nearest texel, which is what
+    // lighting wants (deterministic, and the cosine lobe blurs it anyway) but
+    // shows as blocks when a sky fills the frame. Only the fused miss-ray
+    // background interpolates, and only for an HDRI: the analytic bake is
+    // 256 wide, so the default sky stays byte-identical.
+    (
+        "interpolated HDRI background helper",
+        "fn terrain_env_haze() -> f32 {\n",
+        concat!(
+            "fn fused_env_background(dir: vec3<f32>) -> vec3<f32> {\n",
+            "    let ew = terrain.mips.z;\n",
+            "    let eh = terrain.mips.w;\n",
+            "    if (ew <= 256u || eh == 0u) {\n",
+            "        return terrain_env_effective(dir);\n",
+            "    }\n",
+            "    let d = normalize(dir);\n",
+            "    let u = ((atan2(d.z, d.x) / (2.0 * TERRAIN_PI)) + 0.5) * f32(ew) - 0.5;\n",
+            "    let v = (acos(clamp(d.y, -1.0, 1.0)) / TERRAIN_PI) * f32(eh) - 0.5;\n",
+            "    let fu = floor(u);\n",
+            "    let fv = floor(v);\n",
+            "    let w = i32(ew);\n",
+            "    let h = i32(eh);\n",
+            "    let x0 = (i32(fu) + w) % w;\n",
+            "    let x1 = (x0 + 1) % w;\n",
+            "    let y0 = clamp(i32(fv), 0, h - 1);\n",
+            "    let y1 = clamp(i32(fv) + 1, 0, h - 1);\n",
+            "    let top = mix(textureLoad(terrain_env_tex, vec2<i32>(x0, y0), 0).rgb,\n",
+            "        textureLoad(terrain_env_tex, vec2<i32>(x1, y0), 0).rgb, u - fu);\n",
+            "    let bottom = mix(textureLoad(terrain_env_tex, vec2<i32>(x0, y1), 0).rgb,\n",
+            "        textureLoad(terrain_env_tex, vec2<i32>(x1, y1), 0).rgb, u - fu);\n",
+            "    return mix(top, bottom, v - fv) * terrain.h_params.w * terrain_env_haze();\n",
+            "}\n\n",
+            "fn terrain_env_haze() -> f32 {\n",
+        ),
+    ),
+    (
+        "interpolated HDRI background on a primary miss",
+        "            frame_radiance = frame_radiance + terrain_env_effective(rd);\n",
+        "            frame_radiance = frame_radiance + fused_env_background(rd);\n",
+    ),
     (
         "aerial perspective on the beauty response",
         "        frame_radiance = frame_radiance + sun + ibl;\n",
@@ -1409,6 +1449,29 @@ mod fused_kernel_tests {
     /// gate would. So the edit keeps the base line's STATEMENT verbatim on
     /// the `aer_t == 1` branch, and `fusion_media_along` returns exactly
     /// `1.0` when the density is zero.
+    /// Only the miss-ray background interpolates, and the analytic bake keeps
+    /// the base kernel's own lookup, so the default sky stays byte-identical.
+    #[test]
+    fn only_the_hdri_background_is_interpolated() {
+        let source = fused_kernel().expect("fused kernel assembly");
+        assert_eq!(
+            source
+                .matches("frame_radiance = frame_radiance + fused_env_background(rd);")
+                .count(),
+            1,
+            "the miss ray must use the interpolated background"
+        );
+        assert_eq!(
+            source.matches("fused_env_background(").count(),
+            2,
+            "the helper has one definition and one caller: lighting keeps nearest"
+        );
+        assert!(
+            source.contains("if (ew <= 256u || eh == 0u) {\n        return terrain_env_effective(dir);"),
+            "the 256-wide analytic bake must fall through to the base lookup"
+        );
+    }
+
     #[test]
     fn fog_disabled_aerial_perspective_keeps_the_base_line_statement() {
         let source = fused_kernel().expect("fused kernel assembly");

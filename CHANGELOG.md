@@ -6,6 +6,9 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+### Fixed
+- SPLAT-FUSED: an HDRI `env_map` sky no longer renders as visible blocks. The background interpolates between texels, and the source is kept up to 4096 texels wide instead of 1024. Lighting and the default analytic sky are unchanged. A 4096-wide sky uses 134 MB of the 512 MiB render budget, so large frames may need a smaller `tile`.
+
 ## [1.47.0] - 2026-10-30
 
 ### Added
