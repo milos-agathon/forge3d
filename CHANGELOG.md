@@ -6,6 +6,18 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+### Added
+- SPLAT-FUSED: `render_fused` and `render_fused_sequence` take an equirect HDRI as the sky (`env_map`: `.hdr`, `.rgbe` or `.exr`), rotated about +y by `env_rotation_deg`, in place of the analytic Hosek-Wilkie sky. An environment with no upper-hemisphere radiance is refused (#255).
+- SPLAT-FUSED: both entry points take an in-memory point cloud (`point_positions`, `(N, 3)` world coordinates, with optional `point_colors`, `(N, 3)` uint8 sRGB), so a derived cloud needs no COPC file (#255).
+- `examples/splat_fused_map.py` renders a SPLAT-FUSED map sheet (terrain, splats and LiDAR from one DEM or from the offline fixture) with an HDRI sky, aerial fog, a legend, scale bar, north arrow, optional AOV insets and a signed certificate; the sheet is byte-identical across reruns with the same seed. See "Map-sheet example" in `docs/splat-fused.md` (#255).
+
+### Changed
+- SPLAT-FUSED: `fog_density` now also applies aerial perspective at the primary hit (`L·T + env·(1−T)`), not only along sun rays, so renders with fog look hazier with distance than before. With `fog_density=0` the output is byte-identical to before (#255).
+- SPLAT-FUSED: the signed render certificate now records the render, not only the scene: frame size, tile, sky, environment map (basename and SHA256 of its bytes, never its path) and rotation, plus each view's camera, sun, exposure and seed. `render_fused_sequence` records the same scene inputs as `render_fused`. Certificates of existing renders change accordingly (#255).
+
+### Fixed
+- The Radiance `.hdr` loader honours the `+Y` orientation and flips bottom-to-top files back, which were previously upside down (this affects IBL as well as SPLAT-FUSED). A resolution line with neither `-Y` nor `+Y` is refused instead of guessed at (#255).
+
 ## [1.46.0] - 2026-10-29
 
 ### Added
