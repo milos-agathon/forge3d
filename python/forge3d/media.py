@@ -149,6 +149,8 @@ def render_volumetric_reference(
     """
     if not isinstance(medium, Medium):
         raise TypeError("medium must be forge3d.media.Medium")
+    from ._cache_policy import report_cache_bypass
+    report_cache_bypass(cache, "render_volumetric_reference", "participating_media")
     try:
         return _native_module()._render_volumetric_reference(
             medium._native,
