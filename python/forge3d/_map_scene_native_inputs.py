@@ -164,7 +164,9 @@ def building_world_triangles(projector):
             tx, ty, tz = matrix[:3, 3]
             translation = np.array([tx*scale-span*0.5, tz*scale-span*0.5,
                                     ty-height_range*z_scale*0.5], dtype=np.float32)
-            world = positions @ (matrix[:3, :3] * scale).T + translation
+            # Native packing rotates the local Y-up basis into offscreen Z-up.
+            local = positions @ (matrix[:3, :3] * scale).T
+            world = local[:, [0, 2, 1]] + translation
             result.extend(world[indices].astype(np.float64).tolist())
     return result
 

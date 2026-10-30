@@ -144,7 +144,10 @@ impl CartographyDepth {
         scene
             .queue
             .write_buffer(&self.terrain_uniform, 0, bytemuck::cast_slice(&values));
-        let frame = targets.concordia.as_mut().expect("frame owner");
+        let frame = targets
+            .concordia
+            .as_mut()
+            .ok_or_else(|| anyhow!("CONCORDIA frame state is unavailable"))?;
         let current = frame.current_uniforms;
         let mut base = current;
         base.proj = projection.to_cols_array_2d();
@@ -156,7 +159,7 @@ impl CartographyDepth {
             .write_buffer(&self.frame_uniform, 0, bytemuck::bytes_of(&base));
         frame.current_uniforms = base;
         std::mem::swap(&mut frame.frame_bind_group, &mut self.frame_bind_group);
-        clear_shared_geometry(encoder, targets);
+        clear_shared_geometry(encoder, targets)?;
 
         // Separate existing per-draw uniforms keep queue writes for the later
         // jittered pass from changing this already encoded geometry draw.
@@ -199,7 +202,10 @@ impl CartographyDepth {
             scene.scatter_renderer_sample_count = scatter_cache.0;
             scene.scatter_concordia = scatter_cache.1;
         }
-        let frame = targets.concordia.as_mut().expect("frame owner");
+        let frame = targets
+            .concordia
+            .as_mut()
+            .ok_or_else(|| anyhow!("CONCORDIA frame state is unavailable"))?;
         frame.current_uniforms = current;
         std::mem::swap(&mut frame.frame_bind_group, &mut self.frame_bind_group);
         result?;
@@ -225,8 +231,14 @@ impl CartographyDepth {
     }
 }
 
-pub(super) fn clear_shared_geometry(encoder: &mut wgpu::CommandEncoder, targets: &RenderTargets) {
-    let frame = targets.concordia.as_ref().expect("frame owner");
+pub(super) fn clear_shared_geometry(
+    encoder: &mut wgpu::CommandEncoder,
+    targets: &RenderTargets,
+) -> Result<()> {
+    let frame = targets
+        .concordia
+        .as_ref()
+        .ok_or_else(|| anyhow!("CONCORDIA frame state is unavailable"))?;
     let mut attachments = frame.gbuffer().geometry_attachments(
         &targets.internal_view,
         wgpu::LoadOp::Load,
@@ -241,4 +253,5 @@ pub(super) fn clear_shared_geometry(encoder: &mut wgpu::CommandEncoder, targets:
         timestamp_writes: None,
         occlusion_query_set: None,
     });
+    Ok(())
 }

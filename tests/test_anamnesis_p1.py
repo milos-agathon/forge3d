@@ -88,7 +88,11 @@ def test_p1_rejecting_controls_cover_recompute_and_complete_disk_bound():
     assert "expected_seed_misses = list(_NATIVE_PASSES) * 600" in native_acceptance
     assert 'seed_report["misses"] != expected_seed_misses' in native_acceptance
     assert 'or seed_report["hits"]' in native_acceptance
-    assert 'seed_report["graph_command_submissions"] != 3600' in native_acceptance
+    assert 'seed_report["graph_command_submissions"] != 3000' in native_acceptance
+    assert 'cold_report["misses"] != expected_seed_misses' in native_acceptance
+    assert 'cold_report["graph_command_submissions"] != 3000' in native_acceptance
+    assert '"cold_baseline_source": "independent-cold-modified-sequence"' in native_acceptance
+    assert '"cold": seeded' not in native_acceptance
     assert 'result["matching_frames"] != 600' in native_acceptance
     assert 'result["speedup"] < 20.0' in native_acceptance
     assert "1801" not in native_acceptance
@@ -119,7 +123,8 @@ def test_p1_portability_and_production_lanes_fail_closed():
     physical_consumer = _job(
         ci, "test-anamnesis-portability", "test-anamnesis-production"
     )
-    production = _job(ci, "test-anamnesis-production", "determinism-render")
+    production = _job(ci, "test-anamnesis-production", "test-anamnesis-hermeticity")
+    hermeticity = _job(ci, "test-anamnesis-hermeticity", "test-tessella-gpu")
     physical_runner = (
         "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]"
     )
@@ -128,13 +133,14 @@ def test_p1_portability_and_production_lanes_fail_closed():
     assert "anamnesis-producer" not in physical_seed
     assert "anamnesis-consumer" not in physical_consumer
     assert "runs-on: [self-hosted, Windows, X64, forge3d-gpu, gpu-nvidia]" in production
-    for job in (physical_seed, physical_consumer, production):
+    for job in (physical_seed, physical_consumer, production, hermeticity):
+        assert physical_runner in job
         assert "Prove exact-head checkout" in job
         assert "ANAMNESIS.ABSENT" not in job
     assert "--require-nvidia-vulkan" in physical_seed
     assert '--json "anamnesis-portability-producer-adapter.json"' in physical_seed
     assert "RUNNER_TEMP/anamnesis-portability-producer-adapter.json" not in physical_seed
-    assert "WGPU_BACKEND: dx12" in physical_consumer
+    assert "WGPU_BACKEND: vulkan" in physical_consumer
     assert '--json "anamnesis-portability-consumer-adapter.json"' in physical_consumer
     assert "RUNNER_TEMP/anamnesis-portability-consumer-adapter.json" not in physical_consumer
     assert "anamnesis-portability-result.json" in physical_consumer
@@ -142,11 +148,20 @@ def test_p1_portability_and_production_lanes_fail_closed():
     assert "Win32_ComputerSystemProduct" in physical_consumer
     assert "--machine-id-file" in physical_seed
     assert "--machine-id-file" in physical_consumer
+    assert "--require-distinct-machine" not in physical_consumer
     assert "--runner-name '${{ runner.name }}'" in physical_seed
     assert "--runner-name '${{ runner.name }}'" in physical_consumer
     assert "test_real_gpu_600_frame_acceptance" in production
     assert "test_public_gpu_graph_cache_restores_intermediate_texture" in production
     assert "scripts/assert_junit_zero_skips.py" in production
+    assert "test_public_scene_600_frame_acceptance" in hermeticity
+    assert "test_public_scene_600_frame_fresh_process_acceptance" in hermeticity
+    assert "test_default_resource_key_tracks_material_sources" in hermeticity
+    assert "FORGE3D_ANAMNESIS_FRESH_RESULT_PATH" in hermeticity
+    assert "${{ runner.temp }}/anamnesis-fresh-process-600.json" in hermeticity
+    assert "test_native_production_10000_mutations_match_independent_fresh_frames" in hermeticity
+    assert "test_native_material_vt_cache_bypass_is_reported" in hermeticity
+    assert "test_frozen_label_fields_do_not_change_native_terrain" in hermeticity
 
 
 @pytest.mark.slow

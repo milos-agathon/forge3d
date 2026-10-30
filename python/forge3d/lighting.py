@@ -384,7 +384,8 @@ class RestirDI:
         Returns:
             Rendered image as numpy array
         """
-        _ = cache
+        from ._cache_policy import report_cache_bypass
+        report_cache_bypass(cache, "lighting.render_frame")
         if self._native_restir is None or not hasattr(self._native_module, "restir_render_frame"):
             raise RuntimeError("Native ReSTIR implementation not available")
 

@@ -364,17 +364,17 @@ def _render_frames(
 ) -> None:
     """Render every compiled frame of one flythrough to its PNG path.
 
-    ``certificate_paths`` receives each frame's signed render certificate from
-    that frame's own native render. ``cache`` renders the run as ONE ANAMNESIS
-    sequence: the frame index keys each ``frame.output`` slot and the context
-    is every canonical compiled frame (label ramps, seeds, residency), which
-    ``MapScene.to_dict`` alone does not carry, so any compiled change
-    invalidates the run. Per-frame sequences of the same recipe would prune
-    each other's entries. As in ``MapScene.render``, a certificate needs fresh
-    renders and bypasses the cache.
+    ``certificate_paths`` receives each frame's signed certificate from its
+    own fresh native render. With a cache, the production ANAMNESIS adapter
+    keys terrain and frozen label composition separately. The adapter renders
+    unsupported scene/output combinations freshly; it never returns reference
+    digests for a MapScene. Certificates always bypass replay.
     """
     indices = sorted(frame_scenes)
     if certificate_paths is not None or cache is None:
+        if certificate_paths is not None:
+            from ._cache_policy import report_cache_bypass
+            report_cache_bypass(cache, "render_flythrough", "certificate")
         for index in indices:
             certificate = certificate_paths[index] if certificate_paths is not None else False
             frame_scenes[index].render(str(png_paths[index]), certificate=certificate)
@@ -382,40 +382,16 @@ def _render_frames(
 
     from .anamnesis import render_sequence
 
-    fresh: set[int] = set()
-
-    def render_frame(_recipe: Mapping[str, Any], frame: int) -> bytes:
-        path = png_paths[int(frame)]
-        frame_scenes[int(frame)].render(str(path))
-        fresh.add(int(frame))
-        return path.read_bytes()
-
-    # Destination paths are where bytes land, not what is rendered.
-    cache_recipe = frame_scenes[indices[0]].to_dict()
-    cache_recipe["recipe"]["output"]["path"] = None
-    from ._map_scene_rasters import raster_content_hashes
-
-    frame_context = {str(index): compiled_frames[index].to_json() for index in indices}
-    raster_content = {
-        str(index): identities
-        for index in indices
-        if (identities := raster_content_hashes(frame_scenes[index].recipe))
-    }
-    if raster_content:
-        frame_context["raster_content"] = raster_content
-    context = canonical_json_bytes(frame_context, error_context="CHRONOS cache context")
-    sequence = render_sequence(
-        cache_recipe,
-        frames=indices,
-        cache=cache,
-        render_frame=render_frame,
-        render_frame_fingerprint=b"forge3d.python.chronos.render_flythrough/v1",
-        render_frame_context=context,
-    )
-    for index, blob in zip(indices, sequence.frame_blobs):
-        if index not in fresh:
-            png_paths[index].parent.mkdir(parents=True, exist_ok=True)
-            png_paths[index].write_bytes(blob)
+    sequence = render_sequence(frame_scenes, frames=indices, cache=cache)
+    if sequence.bypass_reason is not None:
+        from ._cache_policy import report_cache_bypass
+        report_cache_bypass(cache, "render_flythrough", sequence.bypass_reason)
+    for scene in frame_scenes.values():
+        scene.last_render_metadata = dict(scene.last_render_metadata or {})
+        scene.last_render_metadata["bypass_reason"] = sequence.bypass_reason
+    for index, blob in zip(indices, sequence.frame_blobs, strict=True):
+        png_paths[index].parent.mkdir(parents=True, exist_ok=True)
+        png_paths[index].write_bytes(blob)
 
 
 def _frame_provenance_name(frame_index: int) -> str:

@@ -44,6 +44,29 @@ def _workflow_data(name: str) -> dict:
     return data
 
 
+def test_anamnesis_public_scene_lane_enables_verified_windows_terrain() -> None:
+    job = _workflow_data("ci.yml")["jobs"]["test-anamnesis-hermeticity"]
+    assert job["runs-on"] == ["self-hosted", "Windows", "X64", "forge3d-gpu", "gpu-nvidia"]
+    assert job["env"]["FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN"] == "1"
+    assert job["env"]["FORGE3D_TEST_INSTALLED_WHEEL"] == "1"
+    steps = job["steps"]
+    hardware = next(step for step in steps if "--require-nvidia-vulkan" in step.get("run", ""))
+    runtime = next(step for step in steps if step.get("name") == "Require public scene terrain runtimes")
+    acceptance = next(step for step in steps if "test_native_production_10000_mutations" in step.get("run", ""))
+    assert steps.index(hardware) < steps.index(runtime) < steps.index(acceptance)
+    for probe in ("_terrain_renderer_runtime_available", "terrain_rendering_available"):
+        assert f"if not {probe}():" in runtime["run"]
+    assert "raise SystemExit" in runtime["run"]
+    assert "exit $LASTEXITCODE" in runtime["run"]
+    assert "test_public_scene_600_frame_acceptance" in acceptance["run"]
+    assert "test_public_scene_600_frame_fresh_process_acceptance" in acceptance["run"]
+    assert "test_native_provenance_feedback_survives_normal_derivatives" in acceptance["run"]
+    assert "assert_junit_zero_skips.py" in acceptance["run"]
+    for step in (hardware, runtime, acceptance):
+        assert "continue-on-error" not in step
+    assert "continue-on-error" not in job
+
+
 def test_paths_filter_literals_are_valid_yaml_without_duplicate_keys() -> None:
     workflow = _workflow("ci.yml")
     steps = re.findall(
@@ -214,6 +237,7 @@ def test_ci_cost_controls_are_scoped_and_retained() -> None:
         ("test-anamnesis-portability-seed", "anamnesis-physical-portable-store"),
         ("test-anamnesis-portability", "anamnesis-portability-evidence"),
         ("test-anamnesis-production", "anamnesis-production-evidence"),
+        ("test-anamnesis-hermeticity", "anamnesis-hermeticity-evidence"),
     ]
     if tessella_enabled:
         physical_artifacts.append(
@@ -666,6 +690,7 @@ def test_physical_selection_truth_table_and_job_conditions() -> None:
         "test-anamnesis-portability-seed": expected_condition("anamnesis"),
         "test-anamnesis-portability": expected_condition("anamnesis"),
         "test-anamnesis-production": expected_condition("anamnesis"),
+        "test-anamnesis-hermeticity": expected_condition("anamnesis"),
     }
     if "test-tessella-gpu" in jobs:
         expected["test-tessella-gpu"] = expected_condition("tessella")
@@ -735,7 +760,23 @@ def test_full_python_lane_records_measured_timings_and_skips(tmp_path) -> None:
 
     workflow = yaml.load(_workflow("test-python-wheel.yml"), Loader=yaml.BaseLoader)
     job = workflow["jobs"]["test"]
-    assert job["timeout-minutes"] == "35"
+    # Owner-approved physical Windows allowance; hosted lanes keep 35 minutes.
+    physical_timeout = "${{ inputs.physical_windows_gpu && 90 || 35 }}"
+    assert job["timeout-minutes"] in ("35", physical_timeout)
+    if job["timeout-minutes"] == physical_timeout:
+        option = workflow["on"]["workflow_call"]["inputs"]["physical_windows_gpu"]
+        assert option["type"] == "boolean" and option["default"] == "false"
+        assert job["runs-on"] == (
+            '${{ inputs.physical_windows_gpu && fromJSON('
+            '\'["self-hosted", "Windows", "X64", "forge3d-gpu", "gpu-nvidia"]\') || inputs.runner }}'
+        )
+        callers = _workflow_data("ci.yml")["jobs"]
+        windows = callers["test-python-full-windows"]["with"]
+        assert windows["physical_windows_gpu"] == "true"
+        assert windows["test_mode"] == "full"
+        for name, caller in callers.items():
+            if name != "test-python-full-windows":
+                assert "physical_windows_gpu" not in caller.get("with", {})
     run = next(step for step in job["steps"] if step.get("name") == "Run full default Python lane")
     assert "--durations=30 -rs --junitxml=python-full-junit.xml" in run["run"]
     record = next(step for step in job["steps"] if "summarize_python_lane.py" in step.get("run", ""))
@@ -747,6 +788,46 @@ def test_full_python_lane_records_measured_timings_and_skips(tmp_path) -> None:
     assert "explicit WARP omission" in text
     assert text.index("2.000s: cpu::error_contract") < text.index("0.010s: globe::constructor")
     assert "ABSENT" in summarize(tmp_path / "missing.xml")
+
+
+def test_full_windows_python_requires_physical_adapter_without_reducing_coverage() -> None:
+    jobs = _workflow_data("ci.yml")["jobs"]
+    windows = jobs["test-python-full-windows"]
+    assert windows["with"]["physical_windows_gpu"] == "true"
+    assert windows["with"]["python_versions"] == '["3.10", "3.11", "3.12", "3.13"]'
+    assert windows["with"]["test_mode"] == "full"
+    assert windows["with"]["restore_lfs"] == "true"
+    assert "test-python-full-windows" in jobs["full-acceptance-summary"]["needs"]
+    assert "continue-on-error" not in windows
+    for name, job in jobs.items():
+        if name != "test-python-full-windows":
+            assert "physical_windows_gpu" not in job.get("with", {})
+
+    workflow = _workflow_data("test-python-wheel.yml")
+    assert workflow["on"]["workflow_call"]["inputs"]["physical_windows_gpu"]["default"] == "false"
+    job = workflow["jobs"]["test"]
+    assert job["runs-on"] == (
+        '${{ inputs.physical_windows_gpu && fromJSON('
+        '\'["self-hosted", "Windows", "X64", "forge3d-gpu", "gpu-nvidia"]\') || inputs.runner }}'
+    )
+    steps = job["steps"]
+    configure = next(step for step in steps if step.get("name") == "Configure physical Windows acceptance")
+    assert configure["if"] == "inputs.physical_windows_gpu"
+    for value in ("FORGE3D_TEST_INSTALLED_WHEEL=1", "FORGE3D_NO_BOOTSTRAP=1",
+                  "FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN=1", "WGPU_BACKEND=vulkan", "WGPU_BACKENDS=vulkan",
+                  "FORGE3D_DETERMINISM_TEST_BACKEND=vulkan"):
+        assert value in configure["run"]
+    probe = next(step for step in steps if step.get("name") == "Require physical NVIDIA Vulkan terrain adapter")
+    assert probe["if"] == "inputs.physical_windows_gpu"
+    assert "--require-nvidia-vulkan" in probe["run"]
+    assert "exit $LASTEXITCODE" in probe["run"]
+    assert "continue-on-error" not in probe
+    full = next(step for step in steps if step.get("name") == "Run full default Python lane")
+    assert steps.index(probe) < steps.index(full)
+    assert full["if"] == "inputs.test_mode == 'full'"
+    assert "scripts/ci_pytest_lane.py --profile full" in full["run"]
+    assert full["run"].count("--deselect=") == 1  # Existing separately required D02 lane.
+    assert "--ignore" not in full["run"] and " -k " not in full["run"]
 
 
 def test_optional_metal_absence_is_outside_full_verdict() -> None:
@@ -864,3 +945,96 @@ def test_d02_reuses_the_full_nvidia_lane_without_build_fanout() -> None:
     for option in ("--durations=30", "-rs", "--junitxml=python-full-junit.xml"):
         assert option in full["run"].split()
     assert "${{ runner.os != 'macOS' && '--deselect=tests/test_raster_styles_gpu.py' || '' }}" in full["run"]
+
+
+def test_python_wheel_checkout_proof_is_native_and_rejects_wrong_head(tmp_path) -> None:
+    import subprocess
+    import sys
+
+    steps = _workflow_data("test-python-wheel.yml")["jobs"]["test"]["steps"]
+    setup = next(step for step in steps if step.get("uses") == "actions/setup-python@v5")
+    proof = next(step for step in steps if step.get("name") == "Prove exact-head checkout")
+    assert proof["shell"] == "python"
+    assert steps.index(setup) < steps.index(proof)
+    assert proof["env"]["EXPECTED_HEAD"] == "${{ inputs.ref }}"
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    script = tmp_path / "checkout proof.py"
+    script.write_text(proof["run"], encoding="utf-8")
+    for expected, cwd, success in ((head, ROOT, True), ("0" * 40, ROOT, False), (head, tmp_path, False)):
+        result = subprocess.run(
+            [sys.executable, str(script)], cwd=cwd,
+            env={**os.environ, "EXPECTED_HEAD": expected, "GIT_CEILING_DIRECTORIES": str(tmp_path.parent)},
+            capture_output=True, text=True,
+        )
+        assert (result.returncode == 0) is success, result.stdout + result.stderr
+    # A Windows runner may resolve bash to WSL, which cannot open the native
+    # Actions script path. No unconditional setup step may depend on it.
+    for step in steps:
+        if step.get("shell") == "bash":
+            assert "runner.os == 'Linux'" in step.get("if", "")
+
+
+def test_python_wheel_job_excludes_user_site_from_child_processes(tmp_path) -> None:
+    import json
+    import subprocess
+    import sys
+
+    job = _workflow_data("test-python-wheel.yml")["jobs"]["test"]
+    baseline = {**os.environ, "PYTHONUSERBASE": str(tmp_path / "user-base")}
+    baseline.pop("PYTHONNOUSERSITE", None)
+    baseline.pop("PYTHONPATH", None)
+    user_site = Path(subprocess.check_output(
+        [sys.executable, "-c", "import site; print(site.getusersitepackages())"],
+        env=baseline, cwd=tmp_path, text=True,
+    ).strip())
+    assert user_site.is_relative_to(tmp_path)
+    user_site.mkdir(parents=True)
+    (user_site / "forge3d_user_site_sentinel.py").write_text("", encoding="utf-8")
+    probe = (
+        "import importlib.util, json, site; "
+        "print(json.dumps([site.ENABLE_USER_SITE, "
+        "importlib.util.find_spec('forge3d_user_site_sentinel') is not None]))"
+    )
+    # The control proves the temporary user package is discoverable; the job's
+    # real environment must prevent discovery in each step and its children.
+    control = subprocess.check_output(
+        [sys.executable, "-c", probe], env=baseline, cwd=tmp_path, text=True,
+    )
+    assert json.loads(control) == [True, True]
+    for step in job["steps"]:
+        environment = {**baseline, **job.get("env", {}), **step.get("env", {})}
+        result = subprocess.check_output(
+            [sys.executable, "-c", probe], env=environment, cwd=tmp_path, text=True,
+        )
+        assert json.loads(result) == [False, False], step.get("name", step.get("uses"))
+
+
+def test_python_wheel_install_stops_before_dependencies_when_wheel_fails() -> None:
+    import subprocess
+    import sys
+    from unittest.mock import patch
+
+    steps = _workflow_data("test-python-wheel.yml")["jobs"]["test"]["steps"]
+    expected_dependencies = {
+        "Install wheel and compatibility dependencies": ["pytest", "numpy"],
+        "Install wheel and full-suite dependencies": ["pytest", "pyyaml", "numpy", "pillow", "mypy", "pyproj", "rasterio"],
+    }
+    for name, dependencies in expected_dependencies.items():
+        step = next(step for step in steps if step.get("name") == name)
+        assert step["shell"] == "python"
+        with patch("subprocess.check_call") as check_call:
+            exec(compile(step["run"], name, "exec"), {})
+            assert [call.args[0] for call in check_call.call_args_list] == [
+                [sys.executable, "scripts/install_compatible_wheel.py", "dist"],
+                [sys.executable, "-m", "pip", "install", *dependencies],
+            ]
+        for failing_call in (1, 2):
+            failure = subprocess.CalledProcessError(42, "installation")
+            with patch("subprocess.check_call", side_effect=[None] * (failing_call - 1) + [failure]) as check_call:
+                try:
+                    exec(compile(step["run"], name, "exec"), {})
+                except subprocess.CalledProcessError as exc:
+                    assert exc.returncode == 42
+                else:
+                    raise AssertionError("Installation failure must stop the workflow step")
+                assert check_call.call_count == failing_call

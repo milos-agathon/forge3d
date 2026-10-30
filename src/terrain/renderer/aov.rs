@@ -911,6 +911,7 @@ impl TerrainScene {
             params,
             decoded,
             presentation_enabled,
+            None,
         )?;
         if media_enabled {
             self.prepare_realtime_media_terrain_trace(

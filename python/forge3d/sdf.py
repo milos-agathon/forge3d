@@ -479,7 +479,8 @@ class HybridRenderer:
         Returns:
             RGBA8 image as numpy array with shape (height, width, 4)
         """
-        _ = cache
+        from ._cache_policy import report_cache_bypass
+        report_cache_bypass(cache, "sdf.render_sdf_scene")
         from . import _degradation
         from . import certificate as _certificate
 

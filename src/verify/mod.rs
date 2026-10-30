@@ -1158,6 +1158,35 @@ mod tests {
     }
 
     #[test]
+    fn terrain_explicit_lod_drape_mutation_invalidates_summaries() {
+        let target = PROVEN_TARGETS
+            .iter()
+            .find(|target| target.module == "terrain_pbr_pom")
+            .copied()
+            .unwrap();
+        assert_eq!(verify_target(target, None).unwrap().proof_status, "proven");
+        let source = crate::shader_sources::terrain();
+        let safe = "let drape = textureSampleLevel(material_drape_tex, material_map_samp, drape_uv, 0.0);";
+        assert_eq!(source.matches(safe).count(), 1);
+        let source = source.replace(
+            safe,
+            "let drape = vec4<f32>(1.0 / (input.tex_coord.x - input.tex_coord.x));",
+        );
+        let mutant = verify_source(
+            target.module,
+            target.path,
+            target.entry,
+            &source,
+            target.contract,
+        );
+        assert_eq!(mutant.proof_status, "unproven");
+        assert!(mutant
+            .alarms
+            .iter()
+            .any(|alarm| alarm.kind == "possible_nan_or_inf"));
+    }
+
+    #[test]
     fn pt_shade_baseline_proven_then_guard_ablation_rejected() {
         let source = pt_shade_guard_harness_source();
         let baseline = verify_source(

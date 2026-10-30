@@ -10,3 +10,33 @@ irrelevant_inputs = [
   "output.directory",
   "output.filename",
 ]
+
+[[terrain_frame_exclusions]]
+field = "labels"
+proof = "Frozen label records are consumed by label planning/composition; terrain consumes only seeds, LOD and residency from the frozen frame."
+test = "test_frozen_label_fields_do_not_change_native_terrain"
+
+[[terrain_frame_exclusions]]
+field = "label_set_hash"
+proof = "This derived digest identifies only frozen label records; those records are independently keyed by label.compile. Valid frames rederive this hash when labels change."
+test = "test_frozen_label_fields_do_not_change_native_terrain"
+
+[[terrain_frame_exclusions]]
+field = "scene_hash"
+proof = "This aggregate digest redundantly includes labels. The terrain key retains every constituent except the listed label-only fields, including the full pixel recipe, seeds, LOD and residency."
+test = "test_frozen_label_fields_do_not_change_native_terrain"
+
+[[terrain_frame_exclusions]]
+field = "scene.labels"
+proof = "Input label records feed the frozen label set and compositor, never terrain uniforms or geometry."
+test = "test_frozen_label_fields_do_not_change_native_terrain"
+
+[[terrain_frame_exclusions]]
+field = "scene.label_fade_frames"
+proof = "Label fade duration affects frozen label alpha and label composition only; terrain does not read it."
+test = "test_frozen_label_fields_do_not_change_native_terrain"
+
+[[terrain_frame_exclusions]]
+field = "scene.scene.layers"
+proof = "Eligible sequences allow only LabelLayer. The native terrain recipe has layers=(), while the complete original frame is retained for validated seeds/LOD/residency and separately keyed label composition."
+test = "test_frozen_label_fields_do_not_change_native_terrain"

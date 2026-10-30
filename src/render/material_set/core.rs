@@ -82,22 +82,27 @@ impl MaterialSet {
         Some([base_color[0], base_color[1], base_color[2]])
     }
 
-    /// Identity of the immutable resources actually uploaded for this material set.
+    /// Identity of the immutable resources actually owned by this material.
+    ///
+    /// Files may change after the OnceCell has uploaded them. Hash the same
+    /// resolved mip chain and sampler used by rendering, including any resize,
+    /// rather than describing a different resource by rereading its source.
     #[cfg(feature = "extension-module")]
     pub(crate) fn anamnesis_bytes(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> std::io::Result<Vec<u8>> {
-        let gpu = self
-            .gpu(device, queue)
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
-        let mut bytes = b"forge3d.terrain.material-set/v2\0".to_vec();
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"forge3d.terrain.material-set/v2\0");
         bytes.extend_from_slice(bytemuck::cast_slice(&self.materials));
         bytes.extend_from_slice(&self.triplanar_scale.to_bits().to_le_bytes());
         bytes.extend_from_slice(&self.normal_strength.to_bits().to_le_bytes());
         bytes.extend_from_slice(&self.blend_sharpness.to_bits().to_le_bytes());
-        bytes.extend_from_slice(&gpu.resident_identity);
+        let gpu = self
+            .gpu(device, queue)
+            .map_err(|error| std::io::Error::other(format!("{error:#}")))?;
+        bytes.extend_from_slice(&gpu.anamnesis_key);
         Ok(bytes)
     }
 }

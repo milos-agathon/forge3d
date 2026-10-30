@@ -621,6 +621,7 @@ def test_e_anamnesis_physical_jobs_are_acceptance_scoped_honestly():
         "test-anamnesis-portability-seed",
         "test-anamnesis-portability",
         "test-anamnesis-production",
+        "test-anamnesis-hermeticity",
     ):
         job = ci_yml.split(f"  {job_name}:", 1)[1].split(
             "\n    runs-on:", 1
@@ -638,12 +639,22 @@ def test_e_anamnesis_physical_jobs_are_acceptance_scoped_honestly():
         "\n  # ============================================================================\n  # Hosted determinism families", 1
     )[0]
     assert "test_real_gpu_600_frame_acceptance" in production
+    hermeticity = ci_yml.split("  test-anamnesis-hermeticity:", 1)[1].split("\n  # ====", 1)[0]
+    for test_name in (
+        "test_private_label_compositor_matches_scene_and_clears_reused_quads",
+        "test_private_label_compositor_reports_real_work_and_releases_allocations",
+        "test_private_label_compositor_rejects_invalid_inputs_before_rendering",
+        "test_prepared_material_upload_owns_pixels_before_context_wait",
+        "test_material_preparation_propagates_context_failure_without_gpu_allocation",
+    ):
+        assert f"tests/test_anamnesis_scene.py::{test_name}" in hermeticity
     aggregate = ci_yml.split("  full-acceptance-summary:", 1)[1]
     assert "anamnesis_physical_selected=" in aggregate
     for job_name in (
         "test-anamnesis-portability-seed",
         "test-anamnesis-portability",
         "test-anamnesis-production",
+        "test-anamnesis-hermeticity",
     ):
         assert (
             f"check_selected \"$anamnesis_physical_selected\" "
@@ -821,6 +832,7 @@ def test_f_pr_core_is_lightweight_and_full_profiles_are_acceptance_only():
         "test-golden-images",
         "test-m06-full-geospatial-viewer",
         "test-anamnesis-production",
+        "test-anamnesis-hermeticity",
         "test-python-full-linux",
         "test-python-full-windows",
         "test-python-full-macos",

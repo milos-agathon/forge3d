@@ -326,6 +326,7 @@ fn fs_visibility_resolve_fullscreen(
         // what keeps `visibility_feedback_records == visible_pixels` exact.
         discard;
     } else {
+        terrain_vt_flush_provenance_feedback();
         atomicAdd(&terrain_frame_counters.material_invocations, 1u);
         terrain_vt_write_surface_feedback(
             surface.tex_coord,
@@ -382,6 +383,7 @@ fn fs_visibility_geometry(
     terrain_explicit_ddy_world = resolve_ddy_world;
     terrain_explicit_gradients = 1u;
     let out = shade_main(input);
+    terrain_vt_flush_provenance_feedback();
     atomicAdd(&terrain_frame_counters.material_invocations, 1u);
     terrain_vt_write_surface_feedback(
         input.tex_coord,

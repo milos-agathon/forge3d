@@ -331,10 +331,25 @@ def test_oblique_zup_sky_uses_authoritative_terrain_camera() -> None:
     )
 
     for source in (forward, aov):
-        assert (
-            "let (camera_eye, camera_view, camera_proj) = "
-            "Self::build_camera_matrices(params);"
-        ) in source
+        if source is forward:
+            camera_selection = source.split(
+                "let (camera_eye, camera_view, camera_proj) =", 1
+            )[1].split("let camera_height", 1)[0]
+            assert camera_selection.strip() == """if let Some(frame) = render_targets.concordia.as_ref() {
+                let view = glam::Mat4::from_cols_array_2d(&frame.current_uniforms.view);
+                (
+                    view.inverse().w_axis.truncate(),
+                    view,
+                    glam::Mat4::from_cols_array_2d(&frame.current_uniforms.proj),
+                )
+            } else {
+                Self::build_camera_matrices(params)
+            };"""
+        else:
+            assert (
+                "let (camera_eye, camera_view, camera_proj) = "
+                "Self::build_camera_matrices(params);"
+            ) in source
         sky_call = source.split("let sky_texture = self.render_sky_texture(", 1)[
             1
         ].split(")?;", 1)[0]

@@ -1016,6 +1016,14 @@ fn pack_instance_transforms(
 ) -> Vec<f32> {
     let mut packed = Vec::with_capacity(transforms_rowmajor.len() * 16);
     let uniform = Mat4::from_scale(Vec3::splat(instance_scale));
+    // Keep the renderer's axis convention without stretching local mesh proportions.
+    // The offscreen renderer maps contract Y-up to Z-up; the viewer stays Y-up.
+    let basis = Mat4::from_cols(
+        render_from_contract.x_axis.truncate().normalize().extend(0.0),
+        render_from_contract.y_axis.truncate().normalize().extend(0.0),
+        render_from_contract.z_axis.truncate().normalize().extend(0.0),
+        glam::Vec4::W,
+    );
     for row_major in transforms_rowmajor {
         let m = row_major_to_mat4(*row_major);
         // Map position through the (possibly non-uniform) contract-to-render transform.
@@ -1028,7 +1036,7 @@ fn pack_instance_transforms(
             m.z_axis,
             glam::Vec4::new(0.0, 0.0, 0.0, 1.0),
         );
-        let render_mat = Mat4::from_translation(render_pos) * uniform * local;
+        let render_mat = Mat4::from_translation(render_pos) * basis * uniform * local;
         packed.extend_from_slice(&render_mat.to_cols_array());
     }
     packed
@@ -1292,6 +1300,29 @@ mod tests {
         assert!((m.w_axis.x - pos.x).abs() < 1e-4);
         assert!((m.w_axis.y - pos.y).abs() < 1e-4);
         assert!((m.w_axis.z - pos.z).abs() < 1e-4);
+
+        // Local Y is height in the scatter contract, which is render Z offscreen.
+        assert!((m.transform_vector3(Vec3::Y) - Vec3::Z * expected).length() < 1e-4);
+        assert!((m.transform_vector3(Vec3::Z) - Vec3::Y * expected).length() < 1e-4);
+    }
+
+    #[test]
+    fn pack_preserves_viewer_y_up_basis() {
+        let local = Mat4::from_rotation_y(0.4);
+        let row_major = local.transpose().to_cols_array();
+        let render_from_contract = Mat4::from_scale_rotation_translation(
+            Vec3::new(3.0, 1.0, 2.0),
+            glam::Quat::IDENTITY,
+            Vec3::new(-50.0, 0.0, 20.0),
+        );
+        let scale = 6.0_f32.sqrt();
+        let packed = pack_instance_transforms(&[row_major], render_from_contract, scale);
+        let actual = Mat4::from_cols_array(packed[..16].try_into().unwrap());
+        for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+            let expected = local.transform_vector3(axis) * scale;
+            assert!((actual.transform_vector3(axis) - expected).length() < 1e-4);
+        }
+        assert!((actual.w_axis.truncate() - Vec3::new(-50.0, 0.0, 20.0)).length() < 1e-4);
     }
 
     #[test]

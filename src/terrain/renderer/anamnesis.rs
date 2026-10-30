@@ -16,6 +16,7 @@ pub(crate) struct TerrainCacheOptions {
     pub(super) shadow_bytes: Vec<u8>,
     pub(super) capability_bytes: Vec<u8>,
     pub(super) engine_bytes: Vec<u8>,
+    pub(super) material_maps: std::collections::BTreeMap<String, Vec<u8>>,
 }
 
 impl TerrainCacheOptions {
@@ -29,51 +30,24 @@ impl TerrainCacheOptions {
         let portable = std::env::var("FORGE3D_ANAMNESIS_COMPATIBILITY_PROFILE")
             .ok()
             .filter(|profile| profile == PORTABLE_PROFILE);
-        let capability_bytes = if let Some(profile) = portable {
-            if !gpu::deterministic_mode() {
-                return Err(anyhow!(
-                    "{PORTABLE_PROFILE} requires FORGE3D_DETERMINISTIC=1"
-                ));
-            }
-            format!("forge3d.anamnesis.compatibility-profile/v1\0{profile}").into_bytes()
-        } else {
-            let limits = context.device.limits();
-            CapabilityFingerprint {
-                granted_features: context
-                    .capabilities
-                    .granted_names()
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect(),
-                limits: std::collections::BTreeMap::from([
-                    (
-                        "max_texture_dimension_2d".into(),
-                        limits.max_texture_dimension_2d as u64,
-                    ),
-                    ("max_buffer_size".into(), limits.max_buffer_size),
-                    ("max_bind_groups".into(), limits.max_bind_groups as u64),
-                    (
-                        "max_storage_buffers_per_shader_stage".into(),
-                        limits.max_storage_buffers_per_shader_stage as u64,
-                    ),
-                    (
-                        "min_uniform_buffer_offset_alignment".into(),
-                        limits.min_uniform_buffer_offset_alignment as u64,
-                    ),
-                    (
-                        "min_storage_buffer_offset_alignment".into(),
-                        limits.min_storage_buffer_offset_alignment as u64,
-                    ),
-                ]),
-                backend: format!("{:?}", context.adapter.get_info().backend).to_lowercase(),
-                dx12_compiler: context.dx12_compiler.into(),
-                naga_capabilities: vec![format!(
-                    "wgpu-validation-default@naga-{}",
-                    env!("FORGE3D_NAGA_VERSION")
-                )],
-            }
-            .canonical_bytes()
+        let limits = context.device.limits();
+        let capabilities = CapabilityFingerprint {
+            granted_features: context
+                .capabilities
+                .granted_names()
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            limits: crate::core::anamnesis::key::device_limits(&limits),
+            backend: format!("{:?}", context.adapter.get_info().backend).to_lowercase(),
+            dx12_compiler: context.dx12_compiler.into(),
+            naga_capabilities: crate::core::anamnesis::key::naga_policy(),
         };
+        let capability_bytes = cache_capability_bytes(
+            &capabilities,
+            portable.as_deref(),
+            gpu::deterministic_mode(),
+        )?;
         Ok(Self {
             root,
             state_bytes,
@@ -81,11 +55,36 @@ impl TerrainCacheOptions {
             shadow_bytes,
             capability_bytes,
             engine_bytes: EngineFingerprint::current().canonical_bytes(),
+            material_maps: Default::default(),
         })
     }
 
     pub(super) fn store(&self) -> std::io::Result<ContentStore> {
         ContentStore::new(&self.root, 512 * 1024 * 1024, true)
+    }
+}
+
+// A requested profile is an additional identity dimension, never authority
+// to discard device identity. Cross-backend reuse is unqualified while the
+// independent physical renders differ; old portable entries must miss.
+fn cache_capability_bytes(
+    capabilities: &CapabilityFingerprint,
+    profile: Option<&str>,
+    deterministic: bool,
+) -> Result<Vec<u8>> {
+    let canonical = capabilities.canonical_bytes();
+    if let Some(profile) = profile {
+        if !deterministic {
+            return Err(anyhow!(
+                "{PORTABLE_PROFILE} requires FORGE3D_DETERMINISTIC=1"
+            ));
+        }
+        let mut bytes =
+            format!("forge3d.anamnesis.compatibility-profile/v1\0{profile}\0").into_bytes();
+        bytes.extend_from_slice(&canonical);
+        Ok(bytes)
+    } else {
+        Ok(canonical)
     }
 }
 
@@ -95,6 +94,19 @@ pub(super) enum BlobKind {
     Prepared = 1,
     ShadowDepth32 = 2,
     Rgba8 = 3,
+    Rgba16Float = 4,
+}
+
+pub(super) fn color_blob_format(format: wgpu::TextureFormat) -> Result<(BlobKind, u32)> {
+    match format {
+        wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => {
+            Ok((BlobKind::Rgba8, 4))
+        }
+        wgpu::TextureFormat::Rgba16Float => Ok((BlobKind::Rgba16Float, 8)),
+        other => Err(anyhow!(
+            "unsupported native terrain cache color format {other:?}"
+        )),
+    }
 }
 
 pub(super) struct PassBlob<'a> {
@@ -147,6 +159,7 @@ pub(super) fn decode_blob(blob: &[u8]) -> Result<PassBlob<'_>> {
         1 => BlobKind::Prepared,
         2 => BlobKind::ShadowDepth32,
         3 => BlobKind::Rgba8,
+        4 => BlobKind::Rgba16Float,
         value => return Err(anyhow!("unknown native terrain blob kind {value}")),
     };
     let payload_len = blob_u64(blob, 24)?;
@@ -191,78 +204,58 @@ pub(super) fn require_blob(
             layers
         ));
     }
+    let color_stride = match expected_kind {
+        BlobKind::Rgba8 => Some(4u64),
+        BlobKind::Rgba16Float => Some(8u64),
+        _ => None,
+    };
+    if let Some(stride) = color_stride {
+        let expected = u64::from(width)
+            .checked_mul(u64::from(height))
+            .and_then(|size| size.checked_mul(u64::from(layers)))
+            .and_then(|size| size.checked_mul(stride))
+            .ok_or_else(|| anyhow!("native terrain color payload size overflow"))?;
+        if decoded.payload.len() as u64 != expected {
+            return Err(anyhow!("native terrain color payload byte length mismatch"));
+        }
+    }
     Ok(decoded.payload)
 }
 
-/// Deterministic lossless RLE for depth32 words. Shadow maps are dominated by
-/// the cleared 1.0 depth value, so this keeps a 600-frame native store bounded
-/// without weakening restoration semantics.
-pub(super) fn encode_depth_rle(bytes: &[u8]) -> Result<Vec<u8>> {
-    if !bytes.len().is_multiple_of(4) {
-        return Err(anyhow!("depth32 payload is not word aligned"));
-    }
-    let mut encoded = Vec::new();
-    let mut words = bytes.chunks_exact(4);
-    let Some(first) = words.next() else {
-        return Ok(encoded);
-    };
-    let mut current = [first[0], first[1], first[2], first[3]];
-    let mut count = 1u32;
-    for word in words {
-        let word = [word[0], word[1], word[2], word[3]];
-        if word == current && count != u32::MAX {
-            count += 1;
-        } else {
-            encoded.extend_from_slice(&count.to_le_bytes());
-            encoded.extend_from_slice(&current);
-            current = word;
-            count = 1;
-        }
-    }
-    encoded.extend_from_slice(&count.to_le_bytes());
-    encoded.extend_from_slice(&current);
-    Ok(encoded)
-}
+const EXTERNAL_STATE_DOMAIN: &[u8] = b"forge3d.terrain.renderer-external-state/v1\0";
 
-// Retained as the independent round-trip oracle for stored depth encoding.
-#[cfg(test)]
-pub(super) fn decode_depth_rle(encoded: &[u8], expected_bytes: usize) -> Result<Vec<u8>> {
-    if !encoded.len().is_multiple_of(8) || !expected_bytes.is_multiple_of(4) {
-        return Err(anyhow!("invalid depth32 RLE alignment"));
-    }
-    let mut decoded = Vec::with_capacity(expected_bytes);
-    for run in encoded.chunks_exact(8) {
-        let count = u32::from_le_bytes([run[0], run[1], run[2], run[3]]);
-        if count == 0 {
-            return Err(anyhow!("depth32 RLE contains a zero-length run"));
-        }
-        let word = &run[4..8];
-        let append = (count as usize)
-            .checked_mul(4)
-            .ok_or_else(|| anyhow!("depth32 RLE run overflow"))?;
-        let new_len = decoded
-            .len()
-            .checked_add(append)
-            .ok_or_else(|| anyhow!("depth32 RLE output overflow"))?;
-        if new_len > expected_bytes {
-            return Err(anyhow!("depth32 RLE expands past its declared extent"));
-        }
-        for _ in 0..count {
-            decoded.extend_from_slice(word);
-        }
-    }
-    if decoded.len() != expected_bytes {
-        return Err(anyhow!(
-            "depth32 RLE length mismatch: expected {expected_bytes}, got {}",
-            decoded.len()
-        ));
-    }
-    Ok(decoded)
+pub(super) fn append_default_external_state(bytes: &mut Vec<u8>) {
+    bytes.extend_from_slice(EXTERNAL_STATE_DOMAIN);
+    bytes.push(0); // A new TerrainScene has no light override or mutable sources.
 }
 
 impl super::TerrainScene {
+    pub(super) fn supports_anamnesis_cache(&self) -> bool {
+        self.anamnesis_cache_bypass_reason().is_none()
+    }
+
+    pub(super) fn anamnesis_cache_bypass_reason(&self) -> Option<&'static str> {
+        #[cfg(feature = "extension-module")]
+        match self.material_vt.lock() {
+            Ok(vt) if !vt.sources.is_empty() => return Some("material_virtual_textures"),
+            Err(_) => return Some("material_vt_state_unavailable"),
+            _ => {}
+        }
+        #[cfg(feature = "enable-gpu-instancing")]
+        if !self.scatter_batches.is_empty() {
+            return Some("scatter");
+        }
+        if self.viewer_heightmap.is_some() {
+            return Some("viewer_heightmap");
+        }
+        if self.height_streaming.is_some() {
+            return Some("height_streaming");
+        }
+        None
+    }
+
     pub(super) fn append_anamnesis_external_state(&self, bytes: &mut Vec<u8>) -> Result<()> {
-        bytes.extend_from_slice(b"forge3d.terrain.renderer-external-state/v1\0");
+        bytes.extend_from_slice(EXTERNAL_STATE_DOMAIN);
         let lights = self
             .light_override
             .lock()
@@ -295,16 +288,52 @@ mod tests {
     use super::*;
 
     #[test]
-    fn depth_rle_is_lossless_and_rejects_bad_runs() {
-        let words = [1.0f32, 1.0, 1.0, 0.25, 0.25, 0.0, 1.0];
-        let bytes = bytemuck::cast_slice(&words);
-        let encoded = encode_depth_rle(bytes).unwrap();
-        assert!(encoded.len() < bytes.len() + 24);
-        assert_eq!(decode_depth_rle(&encoded, bytes.len()).unwrap(), bytes);
-
-        let mut zero_run = encoded;
-        zero_run[..4].copy_from_slice(&0u32.to_le_bytes());
-        assert!(decode_depth_rle(&zero_run, bytes.len()).is_err());
+    fn unqualified_portable_profile_retains_device_identity() {
+        let base = CapabilityFingerprint {
+            granted_features: vec![],
+            limits: [("max_texture_dimension_2d".into(), 8192)].into(),
+            backend: "vulkan".into(),
+            dx12_compiler: "fxc".into(),
+            naga_capabilities: vec![],
+        };
+        let bytes = cache_capability_bytes(&base, Some(PORTABLE_PROFILE), true).unwrap();
+        assert!(bytes.ends_with(&base.canonical_bytes()));
+        for changed in [
+            CapabilityFingerprint {
+                backend: "dx12".into(),
+                ..base.clone()
+            },
+            CapabilityFingerprint {
+                dx12_compiler: "dxc".into(),
+                ..base.clone()
+            },
+            CapabilityFingerprint {
+                limits: [("max_texture_dimension_2d".into(), 4096)].into(),
+                ..base.clone()
+            },
+            CapabilityFingerprint {
+                granted_features: vec!["timestamp-query".into()],
+                ..base.clone()
+            },
+            CapabilityFingerprint {
+                naga_capabilities: vec!["float64".into()],
+                ..base.clone()
+            },
+        ] {
+            assert_ne!(
+                bytes,
+                cache_capability_bytes(&changed, Some(PORTABLE_PROFILE), true).unwrap()
+            );
+        }
+        assert_ne!(
+            bytes,
+            format!("forge3d.anamnesis.compatibility-profile/v1\0{PORTABLE_PROFILE}").into_bytes()
+        );
+        assert_eq!(
+            cache_capability_bytes(&base, None, false).unwrap(),
+            base.canonical_bytes()
+        );
+        assert!(cache_capability_bytes(&base, Some(PORTABLE_PROFILE), false).is_err());
     }
 
     #[test]
@@ -315,5 +344,13 @@ mod tests {
             &[1; 8]
         );
         assert!(require_blob(&blob, BlobKind::Rgba8, 1, 2, 1).is_err());
+        let hdr = encode_blob(BlobKind::Rgba16Float, 2, 1, 1, &[1; 16]);
+        assert_eq!(
+            require_blob(&hdr, BlobKind::Rgba16Float, 2, 1, 1).unwrap(),
+            &[1; 16]
+        );
+        assert!(require_blob(&hdr, BlobKind::Rgba8, 2, 1, 1).is_err());
+        let truncated = encode_blob(BlobKind::Rgba16Float, 2, 1, 1, &[1; 8]);
+        assert!(require_blob(&truncated, BlobKind::Rgba16Float, 2, 1, 1).is_err());
     }
 }

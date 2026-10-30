@@ -80,16 +80,6 @@ pub(crate) fn scatter_source() -> Result<String> {
         "let ndotl = max(dot(n, -l), 0.0);",
         "let ndotl = max(dot(n, l), 0.0);",
     )?;
-    source = replace_once(
-        source,
-        "world_pos.z * T.world_to_uv_scale_bias.y",
-        "world_pos.y * T.world_to_uv_scale_bias.y",
-    )?;
-    source = replace_once(
-        source,
-        "return world_pos.y - terrain_height;",
-        "return world_pos.z - terrain_height;",
-    )?;
     source = replace_once(source,
         "let direct_shadow = mix(0.20, 1.0, shadow_visibility);",
         "let direct_shadow = mix(0.20, 1.0, shadow_visibility) * concordia_cloud_visibility(in.world_pos);",
@@ -120,6 +110,19 @@ fn fs_concordia(in: VsOut) -> ConcordiaSurface {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ordinary_scatter_coordinate_shader_validates() {
+        let source = include_str!("../../../shaders/mesh_instanced.wgsl");
+        let module = naga::front::wgsl::parse_str(source)
+            .unwrap_or_else(|error| panic!("{}", error.emit_to_string(source)));
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .expect("ordinary scatter shader validates");
+    }
 
     #[test]
     fn concordia_terrain_and_scatter_have_the_same_geometry_outputs() {

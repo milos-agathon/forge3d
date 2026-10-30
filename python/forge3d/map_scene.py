@@ -1737,12 +1737,36 @@ class _TerrainRenderResources:
 
     def __init__(self, f3d: Any) -> None:
         self._f3d = f3d
-        self.session = f3d.Session(window=False)
-        self.renderer = f3d.TerrainRenderer(self.session)
+        self._session = None
+        self._renderer = None
         self.material_set = f3d.MaterialSet.terrain_default()
         self._ibl_cache: dict[Any, Any] = {}
 
-    def env_maps(self, hdr_path: str, cache_key: Any) -> Any:
+    @property
+    def session(self) -> Any:
+        if self._session is None:
+            self._session = self._f3d.Session(window=False)
+        return self._session
+
+    @property
+    def renderer(self) -> Any:
+        if self._renderer is None:
+            self._renderer = self._f3d.TerrainRenderer(self.session)
+        return self._renderer
+
+    def anamnesis_resource_fingerprint(self, environment: Any, *, context_ready: Any = None) -> bytes | None:
+        if self._renderer is None:
+            return self._f3d.TerrainRenderer._anamnesis_default_resource_fingerprint(
+                self.material_set, environment, context_ready,
+            )
+        if context_ready is not None:
+            context_ready.result()
+        return self._renderer._anamnesis_resource_fingerprint(self.material_set, environment)
+
+    def env_maps(self, hdr_path: str) -> Any:
+        # Same-path edits can preserve both size and mtime. A retained IBL
+        # must belong to the decoded source actually requested for this frame.
+        cache_key = hashlib.sha256(Path(hdr_path).read_bytes()).digest()
         env_maps = self._ibl_cache.get(cache_key)
         if env_maps is None:
             env_maps = self._f3d.IBL.from_hdr(hdr_path, intensity=1.0)
@@ -1751,6 +1775,31 @@ class _TerrainRenderResources:
 
 
 _ACTIVE_TERRAIN_RESOURCES = threading.local()
+
+
+def _terrain_resources_for_recipe(recipe: "SceneRecipe") -> tuple[Any, Any]:
+    import forge3d as f3d
+
+    holder = getattr(_ACTIVE_TERRAIN_RESOURCES, "holder", None)
+    hdr_path, delete_hdr = _native_ibl_path(recipe)
+    try:
+        if holder:
+            resources = holder[0]
+        else:
+            resources = _TerrainRenderResources(f3d)
+            if holder is not None:
+                holder.append(resources)
+        return resources, resources.env_maps(hdr_path)
+    except BaseException:
+        if holder is not None:
+            holder.clear()
+        raise
+    finally:
+        if delete_hdr:
+            try:
+                Path(hdr_path).unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 @contextlib.contextmanager
@@ -1892,15 +1941,9 @@ def _render_terrain_renderer_result_impl(
     if params is None:
         return None
 
-    hdr_path, delete_hdr = _native_ibl_path(recipe)
+    resources, env_maps = _terrain_resources_for_recipe(recipe)
     holder = getattr(_ACTIVE_TERRAIN_RESOURCES, "holder", None)
     try:
-        if holder:
-            resources = holder[0]
-        else:
-            resources = _TerrainRenderResources(f3d)
-            if holder is not None:
-                holder.append(resources)
         renderer = resources.renderer
         if requested_effects and not callable(getattr(renderer, "render_interactive", None)):
             _mapscene_pipeline_block(
@@ -1910,17 +1953,6 @@ def _render_terrain_renderer_result_impl(
         if native_point_batches and not json.loads(renderer.interactive_pipeline_info()).get("compiled_features",{}).get("weighted_oit"):
             _mapscene_pipeline_block(requested_effects,"transparent point commands require the compiled weighted-oit feature")
         material_set = resources.material_set
-        if delete_hdr:
-            # The generated minimal HDR gets a fresh temp path per call; key
-            # the IBL cache on its (constant) content instead.
-            ibl_key = "forge3d:generated-minimal-ibl"
-        else:
-            try:
-                stat = os.stat(hdr_path)
-                ibl_key = (hdr_path, stat.st_mtime_ns, stat.st_size)
-            except OSError:
-                ibl_key = hdr_path
-        env_maps = resources.env_maps(hdr_path, ibl_key)
         _mapscene_register_vt_sources(renderer, recipe)
         sample_count = max(1, int(output.samples))
         output_format = str(output.format).lower()
@@ -2085,13 +2117,6 @@ def _render_terrain_renderer_result_impl(
         if holder is not None:
             holder.clear()
         raise
-    finally:
-        if delete_hdr:
-            try:
-                Path(hdr_path).unlink(missing_ok=True)
-            except Exception:
-                pass
-
     return _MapSceneNativeRenderResult(
         rgba=rgba,
         aov_frame=aov_frame,
@@ -3198,7 +3223,9 @@ def _fade_label_run(base: Any, opaque: Any, alpha: float) -> Any:
 
 
 def _mapscene_native_label_batches(
-    recipe: "SceneRecipe", plans: Mapping[str, Any], width: int, height: int,
+    recipe: "SceneRecipe", plans: Mapping[str, Any], width: int, height: int, *,
+    atlas_sources: Mapping[str, tuple[Path, Path, bool]] | None = None,
+    atlas_data: Mapping[str, tuple[Any, Mapping[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
     """Compile immutable accepted glyphs into upload-only native commands.
 
@@ -3214,21 +3241,27 @@ def _mapscene_native_label_batches(
         plan = plans.get(layer_id)
         if plan is None or not plan.accepted:
             continue
-        atlas_png, atlas_json = default_latin_atlas_paths()
-        atlas_payload = _metadata_dict(layer.glyph_atlas)
-        image_path = atlas_payload.get("image_path")
-        metrics_path = atlas_payload.get("metrics_path") or atlas_payload.get("source_path")
-        custom_atlas_bound = bool(
-            image_path
-            and metrics_path
-            and Path(str(image_path)).exists()
-            and Path(str(metrics_path)).exists()
-        )
-        if custom_atlas_bound:
-            atlas_png, atlas_json = Path(str(image_path)), Path(str(metrics_path))
 
-        atlas = load_png_rgba(atlas_png)
-        metrics = load_atlas_metrics(atlas_json)
+        if atlas_sources is not None:
+            atlas_png, atlas_json, custom_atlas_bound = atlas_sources[layer_id]
+        else:
+            atlas_png, atlas_json = default_latin_atlas_paths()
+            atlas_payload = _metadata_dict(layer.glyph_atlas)
+            image_path = atlas_payload.get("image_path")
+            metrics_path = atlas_payload.get("metrics_path") or atlas_payload.get("source_path")
+            custom_atlas_bound = bool(
+                image_path
+                and metrics_path
+                and Path(str(image_path)).exists()
+                and Path(str(metrics_path)).exists()
+            )
+            if custom_atlas_bound:
+                atlas_png, atlas_json = Path(str(image_path)), Path(str(metrics_path))
+
+        if atlas_data is None:
+            atlas, metrics = load_png_rgba(atlas_png), load_atlas_metrics(atlas_json)
+        else:
+            atlas, metrics = atlas_data[layer_id]
         glyphs_by_id = metrics.get("glyphs_by_id")
         if not isinstance(glyphs_by_id, Mapping) or not glyphs_by_id:
             raise MapSceneTextLayoutError({
@@ -3430,7 +3463,12 @@ def _mapscene_native_label_batches(
     return batches
 
 
-def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapping[str, Any]) -> tuple[Any, bool]:
+def _composite_native_label_layers(
+    base: Any, recipe: "SceneRecipe", plans: Mapping[str, Any], *,
+    atlas_sources: Mapping[str, tuple[Path, Path, bool]] | None = None,
+    scene_factory: Any | None = None,
+    atlas_data: Mapping[str, tuple[Any, Mapping[str, Any]]] | None = None,
+) -> tuple[Any, bool]:
     scene_cls = _native_scene_class()
     if scene_cls is None:
         return base, False
@@ -3441,8 +3479,10 @@ def _composite_native_label_layers(base: Any, recipe: "SceneRecipe", plans: Mapp
     rendered_any = False
     required = ("set_raster_overlay", "set_native_text_atlas", "enable_native_text",
                 "add_native_text_rect_uv_halo", "render_rgba")
-    for batch in _mapscene_native_label_batches(recipe, plans, int(width), int(height)):
-        native_scene = scene_cls(int(width), int(height))
+    for batch in _mapscene_native_label_batches(recipe, plans, int(width), int(height),
+                                               atlas_sources=atlas_sources, atlas_data=atlas_data):
+        native_scene = (scene_cls(int(width), int(height)) if scene_factory is None else
+                        scene_factory(scene_cls, int(width), int(height)))
         if not all(hasattr(native_scene, name) for name in required):
             return composited, rendered_any
         if hasattr(native_scene, "disable_terrain"):
@@ -3715,11 +3755,8 @@ def _terrain_scatter_building_batches_for_recipe(
         local[:, 0] -= center_x
         local[:, 2] -= center_z
         if shared_frame:
-            # pack_instance_transforms maps translation into terrain Z-up,
-            # while its local basis is already render-space. Author the mesh
-            # in that same basis for the shared opaque/depth/shadow frame.
-            local = local[:, [0, 2, 1]]
-            normals = normals[:, [0, 2, 1]]
+            # Native packing maps the Y-up local mesh into terrain Z-up.
+            # Retain the shared frame's winding under that axis reflection.
             indices = indices[:, [0, 2, 1]]
         row, col = source.contract_to_pixel(center_x, center_z)
         base_y = source.sample_scaled_height(row, col)
@@ -4203,7 +4240,6 @@ def _render_native_offscreen_result(
     landmark_metadata = {}
     if requested_effects:
         from ._map_scene_native_inputs import is_cartographic_landmark
-        from ._map_scene_validation import diagnostic_block
         incompatible = []
         volumetrics = _mapscene_lighting_extras(_metadata_dict(recipe.lighting.settings)).get("volumetrics")
         if volumetrics is not None and volumetrics.enabled and volumetrics.density_volumes:
@@ -6077,6 +6113,19 @@ class MapScene:
             ))
         output = self.recipe.output
         target = path or (output.path if output is not None else None)
+        bypass_reason = None
+        if cache is not None:
+            bypass_reason = next((reason for disabled, reason in (
+                (not target, "scene_output_missing"),
+                (emit_provenance, "scene_provenance"),
+                (provenance_signing_key is not None, "scene_provenance_signing"),
+                (bool(certificate), "certificate"),
+                (output is None, "scene_output_missing"),
+                (output is not None and str(output.format).lower() != "png", "scene_output_format"),
+                (output is not None and int(output.bit_depth) != 8, "scene_output_bit_depth"),
+                (output is not None and bool(output.aovs), "scene_aov"),
+                (output is not None and bool(output.hdr), "scene_hdr"),
+            ) if disabled), None)
         cache_eligible = bool(
             cache is not None
             and target
@@ -6096,67 +6145,47 @@ class MapScene:
             from .anamnesis import render_sequence
             from ._canonical_json import canonical_json_bytes
 
-            rendered: dict[str, ValidationReport] = {}
             from ._map_scene_rasters import raster_content_hashes
 
+            # This path-free discriminator isolates previous manifests for
+            # different scenes. It is not the pixel identity: the shared scene
+            # adapter keys owned height samples, IBL/resources and raster bytes.
             key_scene = copy.deepcopy(self.to_dict())
             raster_content = raster_content_hashes(self.recipe)
             if raster_content:
                 key_scene["raster_content"] = raster_content
-            # Match ANAMNESIS's destination-only output fields while the
-            # MapScene output is nested under recipe.
             for name in ("path", "directory", "filename"):
                 key_scene["recipe"]["output"].pop(name, None)
-            frame = self._compiled_plan_for_current_recipe().frame
-            render_frame_context = canonical_json_bytes(
-                (
-                    {"scene": key_scene, "chronos_frame": frame.to_json()}
-                    if frame is not None
-                    else key_scene
-                ),
-                error_context="MapScene ANAMNESIS callback context",
+            compiled = self._compiled_plan_for_current_recipe()
+            frame = compiled.frame
+            discriminator = canonical_json_bytes(
+                {"scene": key_scene, "chronos_frame": frame.to_json()} if frame is not None else key_scene,
+                error_context="MapScene cache directory discriminator",
             )
-            # A short folder-name collision only changes the previous-manifest
-            # prediction and forces recomputation; full Merkle keys guard blobs.
-            scene_root = Path(cache) / hashlib.sha256(render_frame_context).hexdigest()[:16]
-
-            def render_frame(_recipe: Mapping[str, Any], _frame: int) -> bytes:
-                report = self._render_impl(
-                    str(target),
-                    emit_provenance=False,
-                    provenance_signing_key=None,
-                )
-                rendered["report"] = report
-                return Path(str(target)).read_bytes()
-
-            sequence = render_sequence(
-                key_scene,
-                frames=[0],
-                cache=scene_root,
-                render_frame=render_frame,
-                # Invalidate prior label-visibility images, including the
-                # effects-off cache that used shared building occlusion.
-                render_frame_fingerprint=(b"forge3d.python.mapscene.render/concordia-2" if _mapscene_native_effects(self.recipe)
-                    else b"forge3d.python.mapscene.render/v3"),
-                render_frame_context=render_frame_context,
-            )
-            report = rendered.get("report")
-            if report is None:
-                Path(str(target)).parent.mkdir(parents=True, exist_ok=True)
-                Path(str(target)).write_bytes(sequence.frame_blobs[0])
-                report = self._compiled_plan_for_current_recipe().validation_report
-                self.last_render_path = str(target)
-                self.last_render_backend = "anamnesis-cache"
-                self.last_render_metadata = {
-                    "cache_hit": True,
-                    "cache_report": sequence.cache_report.to_dict(),
-                    "frame_sha256": sequence.frame_hashes[0],
-                }
+            scene_root = Path(cache) / hashlib.sha256(discriminator).hexdigest()[:16]
+            sequence = render_sequence(self, frames=[0], cache=scene_root)
+            native_result = getattr(sequence, "_scene_native_results", {}).get(0)
+            if native_result is not None:
+                report = self._finalize_native_result(str(target), compiled, native_result)
             else:
-                self.last_render_metadata = dict(self.last_render_metadata or {})
-                self.last_render_metadata["cache_hit"] = False
-                self.last_render_metadata["cache_report"] = sequence.cache_report.to_dict()
-                self.last_render_metadata["frame_sha256"] = sequence.frame_hashes[0]
+                # A validated cached terminal frame, a label-only update, or a
+                # conservative fresh path has already produced these PNG bytes.
+                target_path = Path(str(target))
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                target_path.write_bytes(sequence.frame_blobs[0])
+                backend, metadata, observed_report = getattr(sequence, "_scene_render_records", {}).get(0, (None, {}, None))
+                report = observed_report or compiled.validation_report
+                self.last_validation_report = report
+                self.last_render_backend = backend or "anamnesis-cache"
+                self.last_render_metadata = metadata
+                self.last_render_path = str(target)
+            self.last_render_metadata = dict(self.last_render_metadata or {})
+            self.last_render_metadata.update({
+                "cache_hit": "frame.output" in sequence.cache_report.hits,
+                "cache_report": sequence.cache_report.to_dict(),
+                "frame_sha256": sequence.frame_hashes[0],
+                "bypass_reason": sequence.bypass_reason,
+            })
             return report
 
         from . import certificate as _certificate
@@ -6177,6 +6206,9 @@ class MapScene:
             sha = _certificate.emit_render_certificate(certificate)
             if sha is not None:
                 self.last_render_metadata["certificate_payload_sha256"] = sha
+        if cache is not None:
+            self.last_render_metadata = dict(self.last_render_metadata or {})
+            self.last_render_metadata.update(cache_hit=False, bypass_reason=bypass_reason)
         return report
 
     def render_passes(
@@ -6272,12 +6304,6 @@ class MapScene:
                 raise RuntimeError("MapScene.render blocked by warning diagnostics")
             raise RuntimeError("MapScene.render blocked by blocking diagnostics")
 
-        from .helpers.offscreen import save_png_deterministic
-
-        target_path = Path(target)
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        output = self.recipe.output
-        sample_count = int(output.samples if output is not None else 1)
         native_result = _render_native_offscreen_result(
             self.recipe, compiled, emit_provenance=emit_provenance
         )
@@ -6291,6 +6317,23 @@ class MapScene:
                     required_native=", ".join(required_native_symbols("terrain")),
                 )
             )
+        return self._finalize_native_result(
+            str(target), compiled, native_result,
+            emit_provenance=emit_provenance, provenance_signing_key=provenance_signing_key,
+        )
+
+    def _finalize_native_result(
+        self, target: str, compiled: CompiledScenePlan, native_result: _MapSceneNativeRenderResult,
+        *, emit_provenance: bool = False, provenance_signing_key: bytes | None = None,
+    ) -> ValidationReport:
+        """Publish observed native pixels using the ordinary metadata contract."""
+        from .helpers.offscreen import save_png_deterministic
+        report = compiled.validation_report
+        self.last_validation_report = report
+        target_path = Path(target)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        output = self.recipe.output
+        sample_count = int(output.samples if output is not None else 1)
         rgba = native_result.rgba
         backend = "gpu_terrain"
         native_metadata = dict(native_result.metadata)

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from anamnesis_packed_store import metadata_entries, metadata, write_metadata, read_blob, write_blob
 
 import json
 
@@ -37,20 +38,49 @@ def test_adversarial_key_pairs_are_distinct():
     assert _key(b"wgsl=same", caps=caps_all) != _key(b"wgsl=same", caps=caps_restricted)
 
 
+@pytest.mark.parametrize("container", [bytes, bytearray, list, tuple])
+def test_native_key_preserves_python_parity_and_byte_sequence_inputs(container, monkeypatch):
+    import forge3d.anamnesis as anamnesis
+    from forge3d._native import get_native_module
+
+    native = get_native_module()
+    assert native is not None
+    inputs = [("z@1", leaf_key(b"z")), ("a@0", leaf_key(b"a"))]
+    pipeline, uniforms, caps, engine = b"pipeline\0\xff", b"uniform\0padding", b"caps", b"engine"
+    monkeypatch.setattr(anamnesis, "get_native_module", lambda: None)
+    expected = pass_key("terrain.render", pipeline, uniforms, inputs, caps, engine)
+    assert native.anamnesis_pass_key(
+        "terrain.render", container(pipeline), container(uniforms), inputs,
+        container(caps), container(engine),
+    ) == expected
+
+
+def test_sequence_descriptor_templates_preserve_exact_canonical_bytes(tmp_path):
+    from forge3d.anamnesis import _pass_descriptor
+
+    state = {"backend": "unit-cpu", "seed": 7, "sampler": {"accumulation_frame_index": None}}
+    render_sequence(
+        {"anamnesis_state": state, "layers": [{"kind": "label", "text": "x"}]},
+        frames=[-3, 0, 19, 100000], cache=tmp_path,
+        capabilities={"backend": "unit-cpu", "granted": [], "limits": {}},
+     reference_only=True)
+    entries = metadata_entries(tmp_path)
+    assert entries
+    for entry_metadata in entries.values():
+        metadata = entry_metadata
+        material = metadata["derivation"]["material"]
+        frame = metadata["frame"]
+        expected = _pass_descriptor(material["label"], None if frame < 0 else frame, state)
+        assert bytes.fromhex(material["pipeline_descriptor_hex"]) == expected
+
+
 def test_corrupt_blob_is_quarantined_then_recomputed(tmp_path):
     recipe = {"terrain": {"dem": [0, 1]}, "output": {"samples": 1}}
     render_sequence(recipe, frames=[0], cache=tmp_path, reference_only=True)
-    output_entry = None
-    for meta_path in tmp_path.glob("??/*/meta.json"):
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        if meta.get("pass_label") == "frame.output":
-            output_entry = meta_path.parent
-            break
-    assert output_entry is not None
-    blob_path = output_entry / "blob"
-    blob = bytearray(blob_path.read_bytes())
+    output_key = next(key for key, meta in metadata_entries(tmp_path).items() if meta["pass_label"] == "frame.output")
+    blob = bytearray(read_blob(tmp_path, output_key))
     blob[0] ^= 0x01
-    blob_path.write_bytes(blob)
+    write_blob(tmp_path, output_key, blob)
 
     result = verify(tmp_path)
     assert result["quarantined"] == 1
@@ -62,17 +92,10 @@ def test_corrupt_blob_is_quarantined_then_recomputed(tmp_path):
 def test_corrupt_metadata_cannot_bypass_blob_integrity(tmp_path):
     recipe = {"terrain": {"dem": [2, 3]}, "output": {"samples": 1}}
     render_sequence(recipe, frames=[0], cache=tmp_path, verify_reads=False, reference_only=True)
-    output_entry = None
-    for meta_path in tmp_path.glob("??/*/meta.json"):
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        if meta.get("pass_label") == "frame.output":
-            output_entry = meta_path.parent
-            break
-    assert output_entry is not None
-    meta_path = output_entry / "meta.json"
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    output_key = next(key for key, meta in metadata_entries(tmp_path).items() if meta["pass_label"] == "frame.output")
+    meta = metadata(tmp_path, output_key)
     meta["derivation"]["material"]["uniform_hex"] = "00"
-    meta_path.write_text(json.dumps(meta, sort_keys=True), encoding="utf-8")
+    write_metadata(tmp_path, output_key, meta)
 
     with pytest.raises(RuntimeError, match="prediction mismatch"):
         render_sequence(recipe, frames=[0], cache=tmp_path, verify_reads=False, reference_only=True)

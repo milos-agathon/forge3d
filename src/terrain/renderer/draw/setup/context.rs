@@ -6,6 +6,22 @@ use crate::core::resource_tracker::{
     tracked_create_buffer_init, tracked_create_texture, TrackedBuffer, TrackedTexture,
 };
 
+fn material_map_image(
+    path: &str,
+    snapshots: Option<&std::collections::BTreeMap<String, Vec<u8>>>,
+) -> Result<image::DynamicImage> {
+    // Cached renders decode exactly the bytes used for their key.
+    match snapshots {
+        Some(snapshots) => {
+            let bytes = snapshots.get(path)
+                .ok_or_else(|| anyhow!("Missing terrain material snapshot '{path}'"))?;
+            let format = image::ImageFormat::from_path(path)?;
+            Ok(image::load_from_memory_with_format(bytes, format)?)
+        }
+        None => Ok(image::open(path)?),
+    }
+}
+
 pub(in crate::terrain::renderer) struct UploadedHeightInputs {
     pub(in crate::terrain::renderer) width: u32,
     pub(in crate::terrain::renderer) height: u32,
@@ -253,6 +269,7 @@ impl TerrainScene {
         params: &crate::terrain::render_params::TerrainRenderParams,
         decoded: &crate::terrain::render_params::DecodedTerrainSettings,
         offline_hdr_output: bool,
+        snapshots: Option<&std::collections::BTreeMap<String, Vec<u8>>>,
     ) -> Result<PreparedMaterials> {
         let gpu_materials = if params.terrain_shading_model == "lambert_physical" {
             material_set.gpu_physical(self.device.as_ref(), self.queue.as_ref())
@@ -262,13 +279,14 @@ impl TerrainScene {
         .map_err(|err| {
             PyRuntimeError::new_err(format!("Failed to prepare material textures: {err:#}"))
         })?;
-        let material_maps = self.prepare_material_map_resources(&decoded.materials)?;
+        let material_maps = self.prepare_material_map_resources(&decoded.materials, snapshots)?;
         let detail_map = if decoded.detail.enabled && decoded.detail.detail_strength > 0.0 {
             Some(
                 self.upload_material_map_texture(
                     decoded.detail.detail_normal_path.as_deref(),
                     [128, 128, 255, 255],
                     "terrain.detail_normal",
+                    snapshots,
                 )
                 .map_err(|err| anyhow!("detail_normal_path: {err:#}"))?,
             )
@@ -348,26 +366,31 @@ impl TerrainScene {
     fn prepare_material_map_resources(
         &self,
         materials: &crate::terrain::render_params::MaterialLayerSettingsNative,
+        snapshots: Option<&std::collections::BTreeMap<String, Vec<u8>>>,
     ) -> Result<MaterialMapResources> {
         let (albedo_texture, albedo_view) = self.upload_material_map_texture(
             materials.albedo_path.as_deref(),
             [0, 0, 0, 0],
             "terrain.material_maps.albedo",
+            snapshots,
         )?;
         let (normal_texture, normal_view) = self.upload_material_map_texture(
             materials.normal_path.as_deref(),
             [128, 128, 255, 255],
             "terrain.material_maps.normal",
+            snapshots,
         )?;
         let (roughness_texture, roughness_view) = self.upload_material_map_texture(
             materials.roughness_path.as_deref(),
             [255, 255, 255, 255],
             "terrain.material_maps.roughness",
+            snapshots,
         )?;
         let (mask_texture, mask_view) = self.upload_material_map_texture(
             materials.mask_path.as_deref(),
             [255, 255, 255, 255],
             "terrain.material_maps.mask",
+            snapshots,
         )?;
         let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("terrain.material_maps.sampler"),
@@ -397,9 +420,10 @@ impl TerrainScene {
         path: Option<&str>,
         fallback_rgba: [u8; 4],
         label: &'static str,
+        snapshots: Option<&std::collections::BTreeMap<String, Vec<u8>>>,
     ) -> Result<(TrackedTexture, wgpu::TextureView)> {
         let (width, height, pixels) = if let Some(path) = path {
-            let image = image::open(path)
+            let image = material_map_image(path, snapshots)
                 .map_err(|err| anyhow!("Failed to load terrain material map '{}': {err}", path))?;
             let rgba = image.to_rgba8();
             let (width, height) = rgba.dimensions();
@@ -528,4 +552,19 @@ fn pad_rgba8_rows(width: u32, height: u32, pixels: &[u8]) -> (Vec<u8>, u32) {
         padded[dst..dst + row_bytes].copy_from_slice(&pixels[src..src + row_bytes]);
     }
     (padded, padded_row_bytes as u32)
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    #[test]
+    fn material_map_decode_uses_owned_snapshot_without_reopening_source() {
+        let path = "missing-source.png";
+        let pixels = image::RgbaImage::from_pixel(1, 1, image::Rgba([10, 20, 30, 255]));
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        pixels.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+        let snapshots = [(path.to_string(), bytes.into_inner())].into_iter().collect();
+        let decoded = super::material_map_image(path, Some(&snapshots)).unwrap();
+        assert_eq!(decoded.to_rgba8(), pixels);
+        assert!(super::material_map_image("absent.png", Some(&snapshots)).is_err());
+    }
 }

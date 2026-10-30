@@ -101,6 +101,8 @@ pub struct TerrainRenderParams {
     pub(crate) clamp: Py<PyAny>,
     pub(crate) python_object: Py<PyAny>,
     pub(crate) media: Option<Py<crate::media_py::PyMedium>>,
+    // Immutable identity of values decoded at construction; python_object stays live.
+    pub(crate) anamnesis_input_snapshot: Option<Vec<u8>>,
     pub(crate) decoded: DecodedTerrainSettings,
     pub(crate) water_optics: WaterOpticsSettingsNative,
 }

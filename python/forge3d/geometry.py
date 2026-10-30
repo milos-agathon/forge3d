@@ -334,7 +334,8 @@ def instance_mesh_gpu_render(
     - In environments without GPU support, prefer the CPU ``instance_mesh`` and external rendering.
     """
     _forge3d = _ensure_native()
-    _ = cache
+    from ._cache_policy import report_cache_bypass
+    report_cache_bypass(cache, "geometry.instance_mesh_gpu_render")
     fn = getattr(_forge3d, "geometry_instance_mesh_gpu_render_py", None)
     if fn is None:
         raise RuntimeError(

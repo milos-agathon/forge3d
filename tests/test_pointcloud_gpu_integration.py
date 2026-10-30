@@ -183,7 +183,7 @@ class TestPointCloudGpuIntegration:
         cx, cy, cz = dataset.bounds.center()
         camera = (cx, cy + 500.0, cz + 500.0)
 
-        renderer = pc.PointCloudRenderer(point_budget=100_000, max_depth=6)
+        renderer = pc.PointCloudRenderer(point_budget=dataset.total_points, max_depth=6)
         visible = renderer.get_visible_nodes(dataset, camera)
 
         assert len(visible) > 0

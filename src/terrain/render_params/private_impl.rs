@@ -88,6 +88,15 @@ impl TerrainRenderParams {
             None => None,
         };
 
+        // Preserve the public Python reference and rendering behavior. Unknown
+        // custom input types remain renderable but cannot safely enter the cache.
+        let anamnesis_input_snapshot = py
+            .import_bound("forge3d._anamnesis_params")
+            .and_then(|module| module.getattr("input_snapshot"))
+            .and_then(|snapshot| snapshot.call1((&params,)))
+            .and_then(|snapshot| snapshot.extract::<Vec<u8>>())
+            .ok();
+
         Ok(Self {
             size_px: core.size_px,
             render_scale: core.render_scale,
@@ -140,6 +149,7 @@ impl TerrainRenderParams {
             clamp: clamp.unbind(),
             python_object: params.into_py(py),
             media,
+            anamnesis_input_snapshot,
             decoded,
             water_optics,
         })

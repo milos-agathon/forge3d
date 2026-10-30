@@ -6,7 +6,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
-## [1.46.0] - 2026-10-24
+## [1.47.0] - Unreleased
 
 ### Added
 - NEPHELE participating media coupled to terrain (#172). `forge3d.media.Medium` validates one canonical medium (RGB absorption and scattering, density, isotropic or Henyey-Greenstein phase) that the reference path tracer and real-time terrain rendering share; `Medium.grid3d` describes a bounded heterogeneous density grid.
@@ -26,6 +26,21 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - External media inputs and previous-frame history now have content and producer identities in the render cache, preventing missing-input errors and stale media reuse.
 - NEPHELE render certificates identify the registered shader modules used by each pass, rather than their pipeline labels.
 - Slow GPUs, such as software Vulkan on hosted Linux, no longer crash when one submission takes longer than 5 seconds. Waits for all GPU work in the native library now last until the device has really finished; on the GL backend they keep wgpu's own wait, because GL defers freeing objects still in use. Some waits are unchanged: waits for one specific submission in the vector code and the fence tracker (`src/core/fence_tracker.rs`), the frozen offline reference/hybrid path-tracer sources, the `policies` benchmark binary (`bench/upload_policies/policies.rs`), and three resource-tracker unit tests. Previously, wgpu 0.19's `Maintain::Wait` gave up after 5 seconds and then freed command buffers and buffers the device was still using.
+
+## [1.46.0] - 2026-10-29
+
+### Added
+- MapScene native terrain effects and refreshed production render certificates (#272, #273).
+- Content-addressed render caching with packed storage, fresh-process reuse, and cache integrity controls (#274).
+
+### Fixed
+- Validate tile and point-cloud inputs, animation times, style filters, mesh and building geometry, raster alignment, F3DZ page coordinates, and MapScene bundle/cache identities (#263–#271).
+- Restore raster diagnostics, propagate missing native terrain-frame errors, and correct GIS exports and CRS capability refresh behavior (#275).
+
+### Changed
+- Run the full Windows Python acceptance matrix on a verified physical NVIDIA/Vulkan adapter while retaining Python 3.10–3.13 and the existing required test coverage (#275).
+- The fresh-process ANAMNESIS acceptance gate requires 10× cold-to-incremental speedup (measured 11.7–14.3×); same-process gates keep 20×, and the fresh-process 20× target moves to 1.47.
+- Cache storage uses schema v2; older cache entries are misses and are recomputed. Reuse requires matching backend and device profiles; cross-backend reuse is not qualified (#274).
 
 ## [1.45.0] - 2026-10-19
 

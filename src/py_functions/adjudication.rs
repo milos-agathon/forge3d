@@ -72,32 +72,10 @@ pub(crate) fn render_adjudication_pair(
                         .into_iter()
                         .map(str::to_string)
                         .collect(),
-                    limits: std::collections::BTreeMap::from([
-                        (
-                            "max_texture_dimension_2d".into(),
-                            limits.max_texture_dimension_2d as u64,
-                        ),
-                        ("max_buffer_size".into(), limits.max_buffer_size),
-                        ("max_bind_groups".into(), limits.max_bind_groups as u64),
-                        (
-                            "max_storage_buffers_per_shader_stage".into(),
-                            limits.max_storage_buffers_per_shader_stage as u64,
-                        ),
-                        (
-                            "min_uniform_buffer_offset_alignment".into(),
-                            limits.min_uniform_buffer_offset_alignment as u64,
-                        ),
-                        (
-                            "min_storage_buffer_offset_alignment".into(),
-                            limits.min_storage_buffer_offset_alignment as u64,
-                        ),
-                    ]),
+                    limits: crate::core::anamnesis::key::device_limits(&limits),
                     backend: format!("{:?}", g.adapter.get_info().backend).to_lowercase(),
                     dx12_compiler: g.dx12_compiler.into(),
-                    naga_capabilities: vec![format!(
-                        "wgpu-validation-default@naga-{}",
-                        env!("FORGE3D_NAGA_VERSION")
-                    )],
+                    naga_capabilities: crate::core::anamnesis::key::naga_policy(),
                 };
                 Ok(crate::offscreen::adjudication_raster::RasterCacheOptions {
                     root: path,
