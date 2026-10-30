@@ -205,6 +205,9 @@ def test_default_run_nonblank_and_deterministic(tmp_path):
     import os
 
     env = os.environ.copy()
+    # Run the example against the forge3d under test, not the in-repo package.
+    if REPO not in Path(f3d.__file__).resolve().parents:
+        env["FORGE3D_TEST_INSTALLED_WHEEL"] = "1"
     out1 = tmp_path / "run1"
     out2 = tmp_path / "run2"
     for out in (out1, out2):
