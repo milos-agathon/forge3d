@@ -47,19 +47,21 @@
       "mesh_instanced_terrain_fallback": 4,
       "mesh_instanced_terrain_uniforms": 32,
       "mesh_instanced_uniforms": 240,
+      "nephele.media.light_transmittance.fallback": 8,
+      "nephele.media.tonemap.identity_lut": 32,
       "orbis.globe.background.uniform": 208,
       "orbis.globe.earth-texture": 4,
       "p5.hzb.params": 4,
       "p5.hzb.pyramid": 60044,
-      "src/terrain/renderer/constructor.rs:583": 4,
-      "src/terrain/renderer/constructor.rs:584": 1024,
-      "src/terrain/renderer/constructor.rs:585": 1,
-      "src/terrain/renderer/constructor.rs:586": 4,
-      "src/terrain/renderer/constructor.rs:587": 1048576,
-      "src/terrain/renderer/constructor.rs:588": 1048576,
-      "src/terrain/renderer/constructor.rs:593": 4,
-      "src/terrain/renderer/constructor.rs:598": 16,
-      "src/terrain/renderer/constructor.rs:599": 8,
+      "src/terrain/renderer/constructor.rs:669": 4,
+      "src/terrain/renderer/constructor.rs:670": 1024,
+      "src/terrain/renderer/constructor.rs:671": 1,
+      "src/terrain/renderer/constructor.rs:672": 4,
+      "src/terrain/renderer/constructor.rs:673": 1048576,
+      "src/terrain/renderer/constructor.rs:674": 1048576,
+      "src/terrain/renderer/constructor.rs:679": 4,
+      "src/terrain/renderer/constructor.rs:684": 16,
+      "src/terrain/renderer/constructor.rs:685": 8,
       "src/terrain/scatter.rs:1152": 16384,
       "ssao.blur.settings": 16,
       "ssao.comp.uniform": 16,
@@ -93,7 +95,7 @@
       "terrain.aether.scattering.fallback": 8,
       "terrain.ao_debug_fallback": 4,
       "terrain.depth.render_target": 45056,
-      "terrain.fog.uniform_buffer": 96,
+      "terrain.fog.uniform_buffer": 128,
       "terrain.height-page-table.disabled": 96,
       "terrain.height_curve_lut": 1024,
       "terrain.heightmap": 256,
@@ -116,7 +118,7 @@
       "terrain.reflection_probes.grid_uniform_buffer": 80,
       "terrain.scatter.hlod.instance_buffer": 64,
       "terrain.scatter.instance_buffer": 16384,
-      "terrain.shading_buffer": 176,
+      "terrain.shading_buffer": 192,
       "terrain.shadow.cascade_0.uniforms": 112,
       "terrain.shadow.csm_uniforms": 864,
       "terrain.shadow.scatter.hlod.instance_buffer": 64,
@@ -132,7 +134,7 @@
       "vt_page_table_fallback": 64,
       "vt_uniforms": 160
     },
-    "peak_device_local_bytes": 52778058,
+    "peak_device_local_bytes": 52778146,
     "peak_host_visible_bytes": 1024
   },
   "capabilities": {
@@ -171,18 +173,18 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "8e0b5431d500",
-    "version": "1.46.0",
+    "git_sha": "9e616b313435",
+    "version": "1.47.0",
     "wgsl_module_hashes": {
       "concordia.ao_filter.shader": "b78182a96a1e3913a29f7d6af1baf83a00b1ccceee6109b6c67cfc6a3e08c8ad",
       "concordia.compose.shader": "7a4be4fae4608d5bf09c510aa59c6314536e68e88f0123a771d3ce5a8da9c462",
-      "concordia.geometry.shader": "366187b4a23d6b4a189f514003188130ff3afd9495eb672f883336a339c48151",
+      "concordia.geometry.shader": "5c81a83571c63a39c123ccb55f33da093ed4ef3e5faa0b8b2021ea1081fffb45",
       "concordia.gtao.shader": "a17a39c8baf66585c6d892574488a81cb0bc8a100263da51fe53008713589ed0",
       "concordia.hzb.shader": "2f04dffe097070463bad16139fb185f7383135dabdb67f2aa37285be69f3e990",
       "concordia.scatter.shader": "4cf71b6e2eb469aab514f6596f6d4c55e277e7f23ada5ac2fd5c8370b13195b1",
       "concordia.taa.shader": "59e5f02dc3e1d9cd81ea10076170c4cc36179e8fa22a36efaa0d81e5ed6cd925",
       "terrain.offline.tonemap.pipeline": "621a5f156ac352a671a78e65d7599e5ef974efdc8426829f8975d16af668fe7a",
-      "terrain.shadow_depth.shader": "0e96b377bb089fcf83499ebaedee708ee3cf2adf2330b68ac6b848bcc7992f15"
+      "terrain.shadow_depth.shader": "228860457ad33e87fa6b6523a947453b1bdd65f09e6795746556b2cae94fc5b3"
     }
   },
   "inputs": {
@@ -195,62 +197,62 @@
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0030720001086592674,
       "label": "concordia.resources"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.37273600697517395,
+      "gpu_ms": 1.0076160430908203,
       "label": "concordia.shadows"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 3.7939200401306152,
+      "gpu_ms": 1.6465920209884644,
       "label": "concordia.geometry"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.sky"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 3.7744638919830322,
+      "gpu_ms": 1.5964159965515137,
       "label": "terrain.main"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.05939200147986412,
+      "gpu_ms": 0.17203199863433838,
       "label": "concordia.depth_pyramid"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.05734400078654289,
+      "gpu_ms": 0.17715199291706085,
       "label": "concordia.ao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.048128001391887665,
+      "gpu_ms": 0.14950400590896606,
       "label": "p5.ssao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 4.890624046325684,
+      "gpu_ms": 0.15462400019168854,
       "label": "concordia.ssgi"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 4.881408214569092,
+      "gpu_ms": 0.12902399897575378,
       "label": "p5.ssgi"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.008191999979317188,
+      "gpu_ms": 0.026623999699950218,
       "label": "concordia.temporal"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.009216000325977802,
+      "gpu_ms": 0.023552000522613525,
       "label": "concordia.output_transform"
     }
   ],
@@ -258,7 +260,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "3418cd560549dff865df22da034535b46e2fd3c2b3665e81a45dfe57dd2e5a423d6da523c5a74c29ca5bdc36676afc627a180eb11415d13034ed4de0e5f6d309",
+    "sig": "5c8fd497b425a0d99d593fa6151f4a263beca4eca4878485676568a637ab41301a5962c43055cbf724f2daddc943564c9e4651c0813d13f089e4c14fcbe2ce03",
     "signed_fields": [
       "adapter",
       "allocations",
