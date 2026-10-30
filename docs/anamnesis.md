@@ -120,11 +120,12 @@ legacy RGBA8 blobs remain readable. The updated declaration revision prevents
 reuse of the former RGBA8-only encoding for an HDR texture.
 
 Material virtual textures (active layers or registered sources), moment
-shadows, multi-attachment AOV, mutable scatter, viewer heightmaps and streaming
-conservatively render fresh without opening the cache. The last report adds
+shadows, multi-attachment AOV, mutable scatter, viewer heightmaps, streaming and
+participating media conservatively render fresh without opening the cache. The last report adds
 `bypass_reason: str | None`: `material_virtual_textures`, `moment_shadows`,
-`render_with_aov`, `scatter`, `viewer_heightmap`, `height_streaming`, or
-`certificate`. A poisoned VT-state lock reports `material_vt_state_unavailable`.
+`render_with_aov`, `scatter`, `viewer_heightmap`, `height_streaming`,
+`participating_media` (NEPHELE `TerrainRenderParams.media`), or `certificate`.
+A poisoned VT-state lock reports `material_vt_state_unavailable`.
 `None` means the request was eligible or no cache was requested. Reasons reset
 on every one-shot call. The interactive viewer is explicitly out of scope.
 

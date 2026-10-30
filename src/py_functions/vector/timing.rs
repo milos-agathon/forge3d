@@ -117,7 +117,7 @@ impl VectorPassTiming {
         slice.map_async(wgpu::MapMode::Read, move |result| {
             sender.send(result).ok();
         });
-        live.device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&live.device);
         let Some(Ok(())) = pollster::block_on(receiver.receive()) else {
             return false;
         };

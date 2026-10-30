@@ -1,0 +1,17 @@
+# NEPHELE CI memory exception contract — 2026-10-23
+
+The approved 58-file batch is applied and pushed at `eea9a1cd311de92b7f26a211367737415fa4338c`. Both requested provenance labels are corrected to merged versions, with approved content hashes unchanged. Its exact-head wheel and installed binary match; 67 CPU tests pass with zero skips under `FORGE3D_NO_BOOTSTRAP=1 FORGE3D_TEST_INSTALLED_WHEEL=1`; CPU Gates 1–2 and all 356 Naga assemblies pass, with zero unresolved sources or compute comparison-sampling calls. Formatting, clippy acceptance and 46 IR contracts pass; one pre-existing debug helper remains ignored.
+
+[CI run 39900951382](https://github.com/milos-agathon/forge3d/actions/runs/39900951382) failed Fast Contract because its existing workflow-wide assertion allows only the hosted NEPHELE physical exclusion. The NEPHELE fast command also contains Milos's expressly approved memory-test deselection. The same static test runs in that command, so this head cannot reach the physical capture successfully. Fast Contract reported 631 passed, 1 failed, 29 skipped in 96.13 seconds; that hosted result is not a zero-skip physical claim. Preflight and shared DEM fixture preparation passed. The Windows wheel build was still active at diagnosis.
+
+The proposed patch changes only the existing assertion block. It permits the two exact existing cases and binds the memory exception to one NEPHELE installed-wheel fast step. It preserves the one hosted physical exclusion, all six required physical gates, the zero-skip check, and every other assertion. It adds no test deselection. The production test file remains unchanged pending approval.
+
+Old Git-byte SHA-256: `a1486925d016bec941303efabc94362a6331a986f568d9dee0893060759dffca`. Proposed new Git-byte SHA-256: `aadeab15b5b3097b6dd78c1f3a3d5d6b2034d159ea26dfc9edffbf552eb34a85`. Patch SHA-256: `bc1ecba988c63e436b35194d378ccbaed6f8b9a2326e78315901205fed8fa447`. Exact old/new text is in the JSON and patch.
+
+The proposed test passes against the actual workflow. It rejects an arbitrary extra deselection, a duplicate memory exception, moving the exception outside its fast step, and changing the case. These checks run in memory without applying the proposal or constructing GPU objects. Physical image metrics and the 1500-square frame-time measurement remain unavailable. Historical CPU forecasts and physical baselines remain in the integration audit. D3D12, Metal and WASM are ABSENT.
+
+Approval is required by the release prompt's instruction “Any edit to an existing test assertion” and the user's protected-value rule. This file was outside the approved 58-file batch. No physics or threshold change is proposed. Proposed steering improvement, not applied: include the workflow honesty assertion whenever adding an explicitly authorized CI exclusion, and verify source labels by comparing Git blob bytes.
+
+## Final disposition recorded 2026-10-24
+
+This proposed assertion exception was rejected by Milos and was never applied. The CI deselection was removed instead, and `tests/test_no_silent_degradation.py` remains unchanged. Run [40075114543](https://github.com/milos-agathon/forge3d/actions/runs/40075114543) records `test_600mib_host_visible_raises_named_budget_error` as passed in `fast-junit.xml` (661 passed, zero failed/errors/skipped). The proposal JSON, patch and reproducer below are historical evidence of the rejected approach; they do not authorize or implement an exception in the current workflow.

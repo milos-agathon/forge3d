@@ -1,0 +1,146 @@
+{
+  "schema": "nephele.release-preparation/1",
+  "date": "2026-10-24",
+  "base_head": "024c7803d17814c447637208cb4535112c9ac166",
+  "main_head": "d6b9e556586cceddb9c08f16ffc35f7d71fb4d88",
+  "main_already_merged": true,
+  "source_sha256_lf": {
+    "src/terrain/renderer/media.rs": "f70a99eb3e29c631bde25953a480ff0bedd3ba78e046591fd54e3605c092596e",
+    "src/terrain/renderer/draw/execute.rs": "30915861158a7b05d7179fdfae1bc530693589e5f97b30c78a475695c0bb4ca9",
+    "docs/audits/nephele-dem-frame-time-2026-10-22.py": "1a1dcb4471b4f65fe9e37f157aef49ec54682a6c8a2501990b265eff3be3ea09",
+    "CHANGELOG.md": "b4d0b7a089669110ef99ebb8227c715f49279330c3f6304b9be1bae66cdaead1"
+  },
+  "checks": {
+    "fmt-final": {
+      "exit_code": 0,
+      "seconds": 0.3759643
+    },
+    "clippy-final": {
+      "seconds": 35.5948742,
+      "TEMP": "D:/forge3d/.worktrees/nephele-146-release/.release-evidence/2026-10-24/release-prep/temp",
+      "command": "cargo forge3d-clippy-acceptance",
+      "exit_code": 0,
+      "TMP": "D:/forge3d/.worktrees/nephele-146-release/.release-evidence/2026-10-24/release-prep/temp",
+      "CARGO_TARGET_DIR": "D:/forge3d/.worktrees/nephele-146-release/target"
+    },
+    "provenance-final": {
+      "features": "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+      "exit_code": 0,
+      "seconds": 59.0010634,
+      "source_line_endings": "CRLF"
+    },
+    "registry-tests": {
+      "features": "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+      "exit_code": 0,
+      "seconds": 3.4745629
+    },
+    "tonemap-tests": {
+      "features": "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+      "seconds": 25.2301243,
+      "exit_code": 0
+    }
+  },
+  "shader_validation": {
+    "assemblies": 356,
+    "unresolved": [],
+    "compute_comparison_calls": 0,
+    "pins": {
+      "PINNED_DETERMINISM_SOURCE_HASH": {
+        "configured": "0xd90456ee98b56d96",
+        "matching_assemblies": []
+      },
+      "PINNED_HYBRID_KERNEL_SOURCE_HASH": {
+        "configured": "0x32c0583bcf1af865",
+        "matching_assemblies": [
+          "src/path_tracing/hybrid_compute/setup.rs:13:new_with_source_and_scene<-src/path_tracing/hybrid_compute/setup.rs:5:new_with_source",
+          "src/path_tracing/hybrid_compute/setup.rs:25:create_labeled_shader_module<-src/path_tracing/hybrid_compute/setup.rs:13:new_with_source_and_scene<-src/path_tracing/hybrid_compute/setup.rs:5:new_with_source",
+          "src/core/shader_registry.rs:144:create_shader_module<-src/path_tracing/hybrid_compute/setup.rs:25:create_labeled_shader_module<-src/path_tracing/hybrid_compute/setup.rs:13:new_with_source_and_scene<-src/path_tracing/hybrid_compute/setup.rs:5:new_with_source"
+        ]
+      },
+      "PINNED_TERRAIN_SOURCE_HASH": {
+        "configured": "0x17adc1fb40ed8189",
+        "matching_assemblies": [
+          "src/terrain/renderer/orbis_capture.rs:353:create_shader_module",
+          "src/terrain/renderer/pipeline_cache.rs:161:create_labeled_shader_module",
+          "src/terrain/renderer/pipeline_cache.rs:235:create_labeled_shader_module",
+          "src/terrain/renderer/pipeline_cache.rs:314:create_labeled_shader_module",
+          "src/terrain/renderer/pipeline_cache.rs:757:create_labeled_shader_module",
+          "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:161:create_labeled_shader_module",
+          "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:235:create_labeled_shader_module",
+          "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:314:create_labeled_shader_module",
+          "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/pipeline_cache.rs:757:create_labeled_shader_module"
+        ]
+      }
+    },
+    "trace_assemblies": [
+      {
+        "assembly": "src/terrain/renderer/media.rs:1928:create_labeled_shader_module",
+        "fnv64": "0xcf62804a9054a070",
+        "sha256": "e381395ec6f91cacbbad9ff193aece9c6c698fb1d8bbbdbeebd6d6bbfd7c7025"
+      },
+      {
+        "assembly": "src/core/shader_registry.rs:144:create_shader_module<-src/terrain/renderer/media.rs:1928:create_labeled_shader_module",
+        "fnv64": "0xcf62804a9054a070",
+        "sha256": "e381395ec6f91cacbbad9ff193aece9c6c698fb1d8bbbdbeebd6d6bbfd7c7025"
+      }
+    ],
+    "seconds": 337.89575670001796
+  },
+  "protected": {
+    "f32_sites": 1936,
+    "f32_sha256": "8f9f378ce8e27a98e9b99961073ae70128584485778adf1dc2c597c464c0cee7",
+    "protected_files_unchanged": {
+      "src/verify/ir/engine.rs": "40507a136d6898e15087f6ca3b7bfc25632376ed41cfef8cd56e4155335109ce",
+      "tests/shader_proofs_ledger.toml": "eb9b0527dab184343c57cba5f14d91e52204a4f034138c84fd28930cca6da6a5",
+      "tests/test_world_coord_f32_gate.py": "1a457a49a54b94501040988b228bc15450c1b7b982aefa6186cc69b19a440234",
+      "tests/test_no_silent_degradation.py": "a1486925d016bec941303efabc94362a6331a986f568d9dee0893060759dffca",
+      "tests/nephele/gate4-policy.json": "69c476c1a20ea5f5471d519b281ff0418b273bd60a84b8b7c9f718de82f349fb"
+    },
+    "fixture_gate_assertion_and_workflow_diffs_empty": true,
+    "versions": {
+      "pyproject.toml": "1.46.0",
+      "Cargo.toml": "1.46.0",
+      "python/forge3d/__init__.py": "1.46.0"
+    }
+  },
+  "owner_performance_decision": {
+    "owner": "Milos",
+    "date": "2026-10-24",
+    "exact_words": "Accept and document it: merge with the slowdown stated in the CHANGELOG. I'll then write the remaining merge-prep instructions: the certificate fix, CHANGELOG, roadmap, full CI, and a stop before merge.",
+    "accepted_measurements": {
+      "first_completed_frame_ms": 76151.00359998178,
+      "unchanged_completed_frame_ms": 328.48060003016144,
+      "DEM_shape": [
+        1500,
+        1500
+      ],
+      "viewport": [
+        1920,
+        1080
+      ],
+      "adapter": "NVIDIA RTX 3070 / Vulkan"
+    },
+    "decision": "Accept the measured first/unchanged frame costs for integration, with the slowdown explicitly disclosed in CHANGELOG.",
+    "next_stage": "Await the owner's remaining merge-prep instructions for certificate remediation, CHANGELOG, roadmap, full CI and a stop before merge.",
+    "merge_now": false
+  },
+  "baseline_physical_run": "https://github.com/milos-agathon/forge3d/actions/runs/40075114543",
+  "baseline_certificate_degradations": {
+    "first_frame": 9,
+    "unchanged_frame": 3
+  },
+  "benchmark_certificate_guard_cpu": "empty accepted; any degradation rejected for either timed frame",
+  "next_required": [
+    "exact-head wheel build/install and CPU suites",
+    "scope=nephele on final head, clean certificates and all six gates",
+    "scope=full on same head, green Full Acceptance Summary including NEPHELE",
+    "STOP for Milos merge instruction"
+  ],
+  "local_GPU_executed": false,
+  "D3D12": "ABSENT",
+  "Metal": "ABSENT",
+  "WASM": "ABSENT",
+  "merge_tag_publish_performed": false,
+  "protected_value_change": false,
+  "source_scanning_test_line_endings": "Normalizes CRLF; passed when compiled from actual CRLF source"
+}

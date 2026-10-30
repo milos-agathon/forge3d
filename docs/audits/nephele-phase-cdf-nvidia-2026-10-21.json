@@ -1,0 +1,98 @@
+{
+  "measurement_kind": "Observed NVIDIA CI capture, read-only CPU evaluation of existing gate functions",
+  "candidate_source_revision": "68cc04e9ab87de3d90e92e76a8690e016e5d759b",
+  "ci_run_id": 39580065706,
+  "ci_run_url": "https://github.com/milos-agathon/forge3d/actions/runs/39580065706",
+  "ci_conclusion": "failure",
+  "full_acceptance_summary": "failure",
+  "adapter": "NVIDIA GeForce RTX 3070",
+  "backend": "Vulkan",
+  "driver": "NVIDIA 610.60",
+  "physical_test_counts": {
+    "passed": 4,
+    "failed": 2,
+    "skipped": 0
+  },
+  "physical_tests": [
+    {
+      "name": "gate1_estimator_majorant_rr",
+      "outcome": "passed"
+    },
+    {
+      "name": "gate2_energy",
+      "outcome": "passed"
+    },
+    {
+      "name": "gate3_realtime_reference",
+      "outcome": "failed"
+    },
+    {
+      "name": "gate4_terrain_coupling",
+      "outcome": "failed"
+    },
+    {
+      "name": "gate5_compute_shadow_ridgeline",
+      "outcome": "passed"
+    },
+    {
+      "name": "gate6_determinism_memory",
+      "outcome": "passed"
+    }
+  ],
+  "gate3": {
+    "metrics": {
+      "sky_cloud_delta_e_pass_fraction": 0.7127659574468085,
+      "godray_roi_ssim": 0.9916001251541653
+    },
+    "failures": [
+      "sky/cloud DeltaE2000 < 2.5 on >= 95% of pixels"
+    ]
+  },
+  "gate4": {
+    "metrics": {
+      "shadow_delta_e_pass_fraction": 0.7109826589595376,
+      "medium_ablation_changed_fraction": 0.3215661103979461,
+      "terrain_occlusion_ablation_ssim": 0.9894866614716061,
+      "shadow_pixels": 1557,
+      "terrain_occlusion_mean_linear_luminance_change": 0.019629758417801648,
+      "terrain_occlusion_reference_mean_linear_luminance_change": 0.03731673831968643,
+      "terrain_occlusion_response_relative_error": 0.4739690738875221,
+      "terrain_occlusion_maximum_relative_error": 0.2
+    },
+    "failures": [
+      "cloud-shadow terrain DeltaE2000 < 2 on >= 95% of pixels",
+      "terrain occlusion response matches accepted reference within 20%"
+    ]
+  },
+  "unchanged_fixture_base_revision": "ac7390968bcba2b393ad4fbea58716f6dc1acd59",
+  "unchanged_fixture_sha256": {
+    "tests/nephele/fixture/cloud-shadow-mask.npy": "4cdbf4a232a521157e1428a5d72423f2e82352b206e0b6865c574972af69cd4e",
+    "tests/nephele/fixture/godray-roi-mask.npy": "bfa5e46e8cf884a271cac6ffd1d1b8a58a173d48e7c26a6752c1ac5a30fe2d20",
+    "tests/nephele/fixture/reference-cloud-shadow-aov.npy": "2ed192c66493e0151142623f2d88eed35ccfaacd427eb947f6ff7917a5d58667",
+    "tests/nephele/fixture/reference-in-scatter.npy": "34b4d583b6dd726366c4c8ebad0ce15f4a43363bafab6f1ca0a0e813a2910e5e",
+    "tests/nephele/fixture/reference-media-lighting-visibility.npy": "1d9ab6bb4e88dbeb5f2f31196cdfc885181cba7744097e1b4aa33f64d8273159",
+    "tests/nephele/fixture/reference-optical-depth.npy": "f5bf53a7bf3b0932edad06de18ab4623f241bb4c83b20b3402add7c3132c02b6",
+    "tests/nephele/fixture/reference-rgb.npy": "d0a5ff2c46e746f76fe726873821b569324eb59c9cba87bd9be07a5e7dfcf5dd",
+    "tests/nephele/fixture/reference-terrain-hit.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    "tests/nephele/fixture/reference-terrain-slice.npy": "3d743b53af51a536ee462a89fa59cf4a1c41d9a1b1607e8901e87619eafcc1e5",
+    "tests/nephele/fixture/reference-transmittance.npy": "25fe0d4176f8a8bc9df05faccc3a353a8583aa57d69d18182f80bc2f67e57d20",
+    "tests/nephele/fixture/shaft-mask.npy": "dae7955e935586a3f85022cfc7bed9f0b3491ece6f44544cdc80c8f9bbe29177",
+    "tests/nephele/fixture/sky-cloud-mask.npy": "288e3868f1a06922441af4da195b5db590a5386e647cfc394c7be52f52b5a7b2",
+    "tests/nephele/fixture/terrain-dem.npy": "4ae0b3517e1e7a7e09ab4a572f5b1c06cfff60074e640ed593638810ec9d36cf",
+    "tests/nephele/fixture/terrain-mask.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7"
+  },
+  "evidence_sha256": {
+    "run-a.json": "40e46d3d57e3921c46abee0db5d7be4faffdd9cdaed3ce4399d87f9b05354985",
+    "run-b.json": "ef79b837cbda4c7bd7dede088e752043102492f4b6eac103ef6657b57abde2ae",
+    "junit.xml": "b802d72c2963937cefab47a89148956534007645739473d59a0acc8627fcb97e",
+    "realtime-rgb.npy": "b0a85054a34eb603812566fb7afe196f0456d537f52695e815813cc5a849b2ed",
+    "terrain-occlusion-disabled-rgb.npy": "3ef43a25be99361937aa09aa9314c2f22f9f2e7f6d0f068772b069060171e420"
+  },
+  "owner_scope_decision": {
+    "date": "2026-10-21",
+    "answer": "Keep the current bounded scope",
+    "effect": "No coupled environment/multiple-scattering expansion; existing physical failures block release."
+  },
+  "release_status": "Not merged, tagged or published in this task; no full CI dispatched on the failing candidate.",
+  "local_gpu_tests": "NOT_RUN"
+}

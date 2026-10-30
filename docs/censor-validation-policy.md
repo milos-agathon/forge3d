@@ -88,3 +88,16 @@ with matching `absent` evidence records an explicit summary/annotation and
 omits the hardware controls; it is not GPU success. Probe crashes and
 inconsistent or missing evidence remain failures. The required physical
 NVIDIA lane and its zero-skip evidence requirements are unchanged.
+
+## NEPHELE physical test routing
+
+Milos approved OD-6 option beta on 2026-09-30: the hosted generic
+`test-python-slow` job passes `--deselect=tests/test_nephele_physical.py` at its
+single invocation in `ci.yml`. This exact file contains only the six physical
+G1–G6 tests and their shared fixture; hosted runners cannot supply their
+Windows NVIDIA Vulkan artifacts. No exclusion is implemented in the lane
+wrapper. The full slow-profile command collects `test*` and `gate*`, and physical
+tests fail closed when artifacts are missing. The Windows NVIDIA physical lane
+remains required for NEPHELE acceptance, with all six cases and the zero-skip
+JUnit check. `tests/test_no_silent_degradation.py` locks the sole exclusion site
+and the six-case inventory.

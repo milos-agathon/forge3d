@@ -152,7 +152,7 @@ fn gpu_bin_and_raster_match_cpu_analytic_oracle() {
         resolved.output_bytes,
     );
     context.queue.submit(Some(encoder.finish()));
-    context.device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&context.device);
     let validation = pollster::block_on(context.device.pop_error_scope());
     assert!(validation.is_none(), "GPU validation error: {validation:?}");
 
@@ -207,7 +207,7 @@ fn map_bytes(device: &wgpu::Device, buffer: &wgpu::Buffer) -> Vec<u8> {
     slice.map_async(wgpu::MapMode::Read, move |result| {
         sender.send(result).ok();
     });
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     pollster::block_on(receiver.receive())
         .expect("map callback")
         .expect("map success");

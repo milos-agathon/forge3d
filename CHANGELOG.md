@@ -6,16 +6,31 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.47.0] - Unreleased
+
 ### Added
+- NEPHELE participating media coupled to terrain (#172). `forge3d.media.Medium` validates one canonical medium (RGB absorption and scattering, density, isotropic or Henyey-Greenstein phase) that the reference path tracer and real-time terrain rendering share; `Medium.grid3d` describes a bounded heterogeneous density grid.
+- `forge3d.media.render_volumetric_reference` path-traces a medium over a heightmap as the reference the real-time path is measured against.
+- `TerrainRenderParams.media` attaches a medium to terrain renders (`None` keeps the previous path), with transmittance, in-scatter, cloud-shadow and optical-depth AOVs and capture diagnostics.
+- `terrain_shading_model="lambert_physical"` opts terrain into physically based Lambert shading; `"stylized"` remains the default.
+- `ViewerHandle.set_media(...)` attaches or removes a medium in the interactive viewer, with uniform ambient sky radiance and a configurable froxel depth-slice count.
 - SPLAT-FUSED: `render_fused` and `render_fused_sequence` take an equirect HDRI as the sky (`env_map`: `.hdr`, `.rgbe` or `.exr`), rotated about +y by `env_rotation_deg`, in place of the analytic Hosek-Wilkie sky. An environment with no upper-hemisphere radiance is refused (#255).
 - SPLAT-FUSED: both entry points take an in-memory point cloud (`point_positions`, `(N, 3)` world coordinates, with optional `point_colors`, `(N, 3)` uint8 sRGB), so a derived cloud needs no COPC file (#255).
 - `examples/splat_fused_map.py` renders a SPLAT-FUSED map sheet (terrain, splats and LiDAR from one DEM or from the offline fixture) with an HDRI sky, aerial fog, a legend, scale bar, north arrow, optional AOV insets and a signed certificate; the sheet is byte-identical across reruns with the same seed. See "Map-sheet example" in `docs/splat-fused.md` (#255).
 
 ### Changed
+- NEPHELE's G4b reference now uses the open-surface full-transport estimate of 0.02187741965233074 with a ±20% tolerance, approved by Milos on 2026-10-22. The medium exists on both sides of the open terrain surface; terrain blocks light only when a ray crosses that surface, with the same medium domain in both ablation arms.
+- NEPHELE directional multiple scattering solves to an exact fixed point of the stored f16 values, with no order cap. This is expensive: on the original 1500×1500 Gore Range DEM at 1920×1080, an RTX 3070 using Vulkan took 76.151 s for the first completed frame and 328.481 ms for an unchanged frame. These are individual observations, including output readback. The full directional solve reruns whenever the camera changes, and on every frame with a live rendered sky. Camera-move latency for density-grid media has not been measured; unchanged-frame timing does not describe the cost of moving the camera. Milos accepted this performance limitation for integration.
+- Viewer volumetric density volumes reject unknown presets instead of silently rendering `valley_fog`; use `valley_fog`, `plume` or `localized_haze`.
 - SPLAT-FUSED: `fog_density` now also applies aerial perspective at the primary hit (`L·T + env·(1−T)`), not only along sun rays, so renders with fog look hazier with distance than before. With `fog_density=0` the output is byte-identical to before (#255).
 - SPLAT-FUSED: the signed render certificate now records the render, not only the scene: frame size, tile, sky, environment map (basename and SHA256 of its bytes, never its path) and rotation, plus each view's camera, sun, exposure and seed. `render_fused_sequence` records the same scene inputs as `render_fused`. Certificates of existing renders change accordingly (#255).
 
 ### Fixed
+- NEPHELE checks convergence using the packed f16 bits actually stored, including overflow and monotonicity checks, so rounding cannot keep an already converged solve running.
+- Terrain AOV rendering follows the compiled pass order, including directional media injection before terrain shading when the graph requires it.
+- External media inputs and previous-frame history now have content and producer identities in the render cache, preventing missing-input errors and stale media reuse.
+- NEPHELE render certificates identify the registered shader modules used by each pass, rather than their pipeline labels.
+- Slow GPUs, such as software Vulkan on hosted Linux, no longer crash when one submission takes longer than 5 seconds. Waits for all GPU work in the native library now last until the device has really finished; on the GL backend they keep wgpu's own wait, because GL defers freeing objects still in use. Some waits are unchanged: waits for one specific submission in the vector code and the fence tracker (`src/core/fence_tracker.rs`), the frozen offline reference/hybrid path-tracer sources, the `policies` benchmark binary (`bench/upload_policies/policies.rs`), and three resource-tracker unit tests. Previously, wgpu 0.19's `Maintain::Wait` gave up after 5 seconds and then freed command buffers and buffers the device was still using.
 - The Radiance `.hdr` loader honours the `+Y` orientation and flips bottom-to-top files back, which were previously upside down (this affects IBL as well as SPLAT-FUSED). A resolution line with neither `-Y` nor `+Y` is refused instead of guessed at (#255).
 
 ## [1.46.0] - 2026-10-29

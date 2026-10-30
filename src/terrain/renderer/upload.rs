@@ -137,7 +137,16 @@ impl TerrainScene {
                     },
                     0.0,
                 ],
-                params7: [detail.detail_strength, 0.0, 0.0, 0.0],
+                params7: [
+                    detail.detail_strength,
+                    if params.terrain_shading_model == "lambert_physical" {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                    0.0,
+                    0.0,
+                ],
             },
             lut: None,
         };
@@ -353,10 +362,12 @@ impl TerrainScene {
         let mut uniforms = Vec::with_capacity(48);
         uniforms.extend_from_slice(&view.to_cols_array());
         uniforms.extend_from_slice(&proj.to_cols_array());
+        let light_direction =
+            media::terrain_light_direction(&params.camera_mode, decoded.light.direction);
         uniforms.extend_from_slice(&[
-            decoded.light.direction[0],
-            decoded.light.direction[1],
-            decoded.light.direction[2],
+            light_direction.x,
+            light_direction.y,
+            light_direction.z,
             decoded.light.intensity,
         ]);
 
@@ -369,7 +380,9 @@ impl TerrainScene {
         };
         uniforms.extend_from_slice(&[spacing, spacing, params.z_scale, params.render_scale]);
 
-        let camera_mode = if is_mesh_mode || is_clipmap_mode {
+        let camera_mode = if is_yup_camera_mode(&params.camera_mode) {
+            2.0
+        } else if is_mesh_mode || is_clipmap_mode {
             1.0
         } else {
             0.0
@@ -390,8 +403,23 @@ impl TerrainScene {
         }
         let phi_rad = params.cam_phi_deg.to_radians();
         let theta_rad = params.cam_theta_deg.to_radians();
+        let target = glam::Vec3::from_array(params.cam_target);
+        let aspect = params.size_px.0 as f32 / params.size_px.1 as f32;
 
-        let (eye_offset, up) = if is_zup_camera_mode(&params.camera_mode) {
+        if !is_zup_camera_mode(&params.camera_mode) {
+            return crate::terrain::camera::build_orbit_view_proj(
+                target,
+                params.cam_radius,
+                params.cam_phi_deg,
+                params.cam_theta_deg,
+                params.fov_y_deg,
+                aspect,
+                params.clip.0,
+                params.clip.1,
+            );
+        }
+
+        let (eye_offset, up) = {
             // Z-up orbit for terrain that lives in the XY plane with heights
             // along +Z (mesh mode): theta stays "0 looks straight down", phi
             // is the azimuth within the terrain plane. Near-vertical views
@@ -408,20 +436,9 @@ impl TerrainScene {
                 glam::Vec3::Z
             };
             (offset, up)
-        } else {
-            (
-                glam::Vec3::new(
-                    params.cam_radius * theta_rad.sin() * phi_rad.cos(),
-                    params.cam_radius * theta_rad.cos(),
-                    params.cam_radius * theta_rad.sin() * phi_rad.sin(),
-                ),
-                glam::Vec3::Y,
-            )
         };
 
-        let target = glam::Vec3::from_array(params.cam_target);
         let eye = target + eye_offset;
-        let aspect = params.size_px.0 as f32 / params.size_px.1 as f32;
         let proj = glam::Mat4::perspective_rh(
             params.fov_y_deg.to_radians(),
             aspect,
@@ -472,7 +489,7 @@ impl TerrainScene {
             (0.0, 0.0, 0.0)
         };
 
-        let mut uniforms = Vec::with_capacity(44);
+        let mut uniforms = Vec::with_capacity(48);
         uniforms.extend_from_slice(&[
             decoded.triplanar.scale,
             decoded.triplanar.blend_sharpness,
@@ -569,6 +586,18 @@ impl TerrainScene {
         let power = params.height_curve_power.max(0.01);
         let lambert_k = params.lambert_contrast.clamp(0.0, 1.0);
         uniforms.extend_from_slice(&[mode_f, strength, power, lambert_k]);
+
+        let physical_base_color = if params.terrain_shading_model == "lambert_physical" {
+            material_set.single_untextured_base_color()
+        } else {
+            None
+        };
+        match physical_base_color {
+            Some([red, green, blue]) => {
+                uniforms.extend_from_slice(&[red, green, blue, 1.0]);
+            }
+            None => uniforms.extend_from_slice(&[0.0, 0.0, 0.0, 0.0]),
+        }
 
         Ok(uniforms)
     }

@@ -74,6 +74,7 @@ _DOCUMENTED_CHOICES = {"camera_mode": ("screen", "mesh", "mesh:zup")}
 _EXPLICIT_OPTIONAL_CONTROLS = {
     "vt_store": "store-backed material_virtual_textures bypass",
     "sky.lut_handle": "opaque parameter_identity_unavailable bypass",
+    "media": "participating_media bypass (NEPHELE renders uncached)",
 }
 
 
@@ -354,6 +355,8 @@ def _optional_bypass_controls(config, root, heights, mask, ibl, material):
     store = root / "optional-material.f3dvt"
     # Use the production packer to create a complete, small, three-family
     # store. No hand-written header or synthetic page payload is accepted.
+    from forge3d.media import Medium
+
     print("ANAMNESIS optional controls: packing the real VT store", flush=True)
     packed = subprocess.run([
         "cargo", "run", "--quiet", "--release", "--bin", "forge3d-vtpack", "--",
@@ -371,6 +374,7 @@ def _optional_bypass_controls(config, root, heights, mask, ibl, material):
     cases = (
         ("sky.lut_handle", replace(config, sky=sky), "parameter_identity_unavailable"),
         ("vt_store", replace(config, vt_store=f3d.open_vt_store(store), vt=vt), "material_virtual_textures"),
+        ("media", replace(config, media=Medium((0.01, 0.01, 0.01), (0.02, 0.02, 0.02), 1.0), camera_mode="mesh:yup"), "participating_media"),
     )
     controls = []
     for name, changed, reason in cases:

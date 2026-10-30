@@ -938,7 +938,7 @@ mod tests {
 
         manager.resolve_queries(&mut encoder);
         queue.submit(std::iter::once(encoder.finish()));
-        device.poll(Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
 
         let results = manager.get_results_blocking().expect("get results");
         assert_eq!(results.len(), 1, "expected exactly one timed scope");
@@ -969,7 +969,7 @@ mod tests {
         manager.end_scope_with_draws(&mut encoder2, scope2, 1);
         manager.resolve_queries(&mut encoder2);
         queue.submit(std::iter::once(encoder2.finish()));
-        device.poll(Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
 
         let results2 = manager
             .get_results_blocking()
@@ -1035,7 +1035,7 @@ mod tests {
         let scope = manager.begin_scope(&mut encoder, "batch.empty_scope");
         manager.end_scope(&mut encoder, scope);
         manager.submit(encoder);
-        device.poll(Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         let ready = manager.try_get_results().unwrap();
         assert_eq!(ready.len(), 1);
         assert_eq!(ready[0].name, "batch.empty_scope");
@@ -1100,7 +1100,7 @@ mod tests {
         manager.submitted.front_mut().unwrap().start_mapping();
         let cancelled = manager.submitted.pop_front().unwrap();
         drop(cancelled);
-        device.poll(Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
         let scope = manager.begin_scope(&mut encoder, "batch.after_cancel");
         manager.end_scope(&mut encoder, scope);
@@ -1115,7 +1115,7 @@ mod tests {
         let batch = manager.submitted.front_mut().unwrap();
         batch.start_mapping();
         batch.readback.unmap(); // Real cancellation delivers an error callback.
-        device.poll(Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         assert!(manager.try_get_results().is_err());
         assert!(manager.submitted.is_empty());
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
@@ -1176,7 +1176,7 @@ mod tests {
         assert!(unsupported.try_get_results().unwrap().is_empty());
         assert!(unsupported.get_results_blocking().unwrap().is_empty());
         drop(unsupported);
-        unsupported_device.poll(Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&unsupported_device);
         drop(unsupported_queue);
         drop(unsupported_device);
 
@@ -1221,7 +1221,7 @@ mod tests {
         drop(manager);
         drop(src);
         drop(dst);
-        device.poll(Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         std::mem::forget(device);
         std::mem::forget(queue);
     }

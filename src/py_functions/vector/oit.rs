@@ -106,7 +106,7 @@ pub(crate) fn vector_render_oit_py(
         timing.resolve(&mut compose_encoder);
 
         scene.queue.submit(Some(compose_encoder.finish()));
-        scene.device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&scene.device);
         let result = read_rgba_texture_to_py(
             py,
             &scene.device,
@@ -284,7 +284,7 @@ pub(crate) fn vector_render_oit_edl_py(
         timing.resolve(&mut edl_encoder);
 
         scene.queue.submit(Some(edl_encoder.finish()));
-        scene.device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&scene.device);
         drop(final_tex);
         let result = read_rgba_texture_to_py(
             py,

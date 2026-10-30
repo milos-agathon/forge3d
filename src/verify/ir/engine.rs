@@ -9,10 +9,9 @@ const FNV1A_PRIME: u64 = 0x0000_0100_0000_01b3;
 pub(super) const PINNED_DETERMINISM_SOURCE_HASH: u64 = 0xd904_56ee_98b5_6d96;
 pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0x32c0_583b_cf1a_f865;
 // Updated from the assembled terrain module whenever its source changes.
-// Reviewed for the approved 1.46 release: deferred VT provenance is inert in
-// the existing VT-disabled contract; explicit drape LOD 0 retains bounded
-// [0,1] texels. Full-tile screen UVs retain their finite [0,2] bounds.
-pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0x763e_8cde_24b5_c5a6;
+// Combined NEPHELE directional transport with the approved 1.46 terrain
+// source (deferred VT provenance inert; full-tile screen UVs bounded [0,2]).
+pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0x4ec8_3f84_a064_89a3;
 
 #[derive(Clone, Copy)]
 pub(super) enum FunctionRef {

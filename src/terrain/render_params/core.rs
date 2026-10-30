@@ -76,6 +76,7 @@ pub struct TerrainRenderParams {
     pub camera_mode: String,
     pub culling: String,
     pub shading: String,
+    pub terrain_shading_model: String,
     pub vt_store_path: Option<String>,
     pub prefetch_horizon_ms: f32,
     pub vt_upload_budget_bytes: u64,
@@ -99,6 +100,7 @@ pub struct TerrainRenderParams {
     pub(crate) sampling: Py<PyAny>,
     pub(crate) clamp: Py<PyAny>,
     pub(crate) python_object: Py<PyAny>,
+    pub(crate) media: Option<Py<crate::media_py::PyMedium>>,
     // Immutable identity of values decoded at construction; python_object stays live.
     pub(crate) anamnesis_input_snapshot: Option<Vec<u8>>,
     pub(crate) decoded: DecodedTerrainSettings,

@@ -122,7 +122,11 @@ impl TerrainScene {
                 self._height_curve_identity_texture
                     .create_view(&Default::default())
             });
-        self.ensure_pipeline_sample_count(1, is_clipmap_camera_mode(&params.camera_mode))?;
+        self.ensure_pipeline_sample_count(
+            1,
+            is_clipmap_camera_mode(&params.camera_mode),
+            wgpu::TextureFormat::Rgba16Float,
+        )?;
         let mut targets = self.create_render_targets_for_format(
             params,
             params.msaa_samples,
@@ -318,6 +322,9 @@ impl TerrainScene {
                 &height_inputs,
                 &materials,
                 &ibl,
+                media::ibl_mean_radiance(env_maps),
+                env_maps.hdr_image().map(AsRef::as_ref),
+                env_maps.intensity.max(0.0),
                 &curve_view,
                 &mut targets,
                 &shadow,
@@ -343,6 +350,9 @@ impl TerrainScene {
             &materials,
             &uniform_buffer,
             &ibl,
+            media::ibl_mean_radiance(env_maps),
+            env_maps.hdr_image().map(AsRef::as_ref),
+            env_maps.intensity.max(0.0),
             &curve_view,
             &targets,
             &shadow,

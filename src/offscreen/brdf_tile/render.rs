@@ -38,7 +38,7 @@ pub(super) fn render_brdf_tile(
     timestamps.resolve(&mut encoder);
 
     queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
 
     // CENSOR: certify what actually executed — the shader module bound by this
     // render and the pass's live GPU duration (0.0 only when TIMESTAMP_QUERY is

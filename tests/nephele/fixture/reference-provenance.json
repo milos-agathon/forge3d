@@ -1,0 +1,66 @@
+{
+  "algorithm": "integrated-hybrid-terrain-spectral-ratio-delta-tracking-surface-env-mis-v3",
+  "camera_contract": {
+    "forward": [
+      4.2862541960175804e-08,
+      -0.196116104722023,
+      -0.9805806875228882
+    ],
+    "fov_y": 45.0,
+    "look_at": [
+      0.0,
+      15.0,
+      0.0
+    ],
+    "origin": [
+      -2.185569428547751e-06,
+      24.999998092651367,
+      50.0
+    ],
+    "right": [
+      1.0,
+      -0.0,
+      4.371138828673793e-08
+    ],
+    "up": [
+      8.572507148585373e-09,
+      0.9805806875228882,
+      -0.196116104722023
+    ]
+  },
+  "crop": [
+    0,
+    0,
+    64,
+    64
+  ],
+  "diagnostics": {
+    "adapter": "NVIDIA GeForce RTX 3070",
+    "backend": "Vulkan",
+    "density_device_local_bytes": 0,
+    "driver": "NVIDIA 610.60",
+    "energy_accounting_residual": null,
+    "executed_multi_scatter": true,
+    "froxel_device_local_bytes": 0,
+    "host_visible_bytes": 270336,
+    "majorant_device_local_bytes": 0,
+    "majorant_proof": "TrilinearConvexHull",
+    "majorant_valid": true,
+    "multiple_scatter_luminance": null,
+    "sample_count": 2621440,
+    "single_scatter_luminance": null,
+    "source_revision": "6a4ae50a4c3c01b390b1222468632e88d1db6ca0",
+    "staging_readback_bytes": 0,
+    "step_count": 29772270,
+    "temporal_history_decision": "not_applicable",
+    "temporal_history_reason": "independent reference samples do not reuse temporal history"
+  },
+  "full_viewport": [
+    64,
+    64
+  ],
+  "samples_per_pixel": 640,
+  "schema": "forge3d.nephele.reference_provenance/3",
+  "seed": 1313165384,
+  "source_revision": "6a4ae50a4c3c01b390b1222468632e88d1db6ca0"
+}

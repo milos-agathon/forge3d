@@ -525,7 +525,7 @@ impl HdrOffscreenPipeline {
         );
 
         queue.submit(Some(encoder.finish()));
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
 
         // Map and read the buffer
         let buffer_slice = staging_buffer.slice(..);
@@ -533,7 +533,7 @@ impl HdrOffscreenPipeline {
         buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
             sender.send(result).unwrap();
         });
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         receiver
             .recv()
             .unwrap()

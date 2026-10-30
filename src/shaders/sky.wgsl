@@ -416,6 +416,20 @@ struct CameraUniforms {
 
 @group(1) @binding(0) var<uniform> camera: CameraUniforms;
 
+fn sky_output_direction(pixel: vec2<u32>, dims: vec2<u32>) -> vec3<f32> {
+    let uv = det_div2(vec2<f32>(pixel) + 0.5, vec2<f32>(dims));
+    if (sky_params.model_pad.y != 0u) {
+        let phi = det_barrier((uv.x - 0.5) * 2.0) * PI;
+        let theta = uv.y * PI;
+        return det_normalize3(vec3<f32>(det_cos(phi) * det_sin(theta), det_cos(theta), det_sin(phi) * det_sin(theta)));
+    }
+    let ndc = vec2<f32>(det_barrier(uv.x * 2.0) - 1.0, 1.0 - det_barrier(uv.y * 2.0));
+    let clip_pos = vec4<f32>(ndc, 1.0, 1.0);
+    let view_pos = det_mat4_mul_vec4(camera.inv_proj, clip_pos);
+    let view_dir_vs = det_normalize3(det_div3(view_pos.xyz, vec3<f32>(view_pos.w)));
+    return det_normalize3((det_mat4_mul_vec4(camera.inv_view, vec4<f32>(view_dir_vs, 0.0))).xyz);
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn cs_render_sky(@builtin(global_invocation_id) global_id: vec3<u32>) {
     det_seed(f32(global_id.x));
@@ -426,17 +440,7 @@ fn cs_render_sky(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
-    // Compute view ray direction
-    let uv = det_div2(vec2<f32>(pixel) + 0.5, vec2<f32>(dims));
-    let ndc = vec2<f32>(det_barrier(uv.x * 2.0) - 1.0, 1.0 - det_barrier(uv.y * 2.0));
-
-    // Reconstruct view direction
-    let clip_pos = vec4<f32>(ndc, 1.0, 1.0);
-    let view_pos = det_mat4_mul_vec4(camera.inv_proj, clip_pos);
-    let view_dir_vs = det_normalize3(det_div3(view_pos.xyz, vec3<f32>(view_pos.w)));
-
-    // Transform to world space
-    let view_dir_ws = det_normalize3((det_mat4_mul_vec4(camera.inv_view, vec4<f32>(view_dir_vs, 0.0))).xyz);
+    let view_dir_ws = sky_output_direction(pixel, dims);
 
     // Evaluate sky
     let sky_color = eval_sky(view_dir_ws, sky_params);
