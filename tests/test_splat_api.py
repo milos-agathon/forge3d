@@ -300,6 +300,31 @@ def test_render_fused_rejects_missing_and_malformed_inputs(tmp_path):
         splat.render_fused(terrain=flat, camera=camera, brdf="velvet")
     with pytest.raises(Exception, match="kappa"):
         splat.render_fused(terrain=flat, camera=camera, kappa=0.0)
+    # In-memory point arrays: pairing, shape, finiteness and colour format.
+    with pytest.raises(ValueError, match="point_colors.*without point_positions"):
+        splat.render_fused(terrain=flat, camera=camera, point_colors=np.zeros((4, 3), np.uint8))
+    with pytest.raises(ValueError, match="point_positions"):
+        splat.render_fused(camera=camera, point_positions=np.zeros((4, 2), np.float32))
+    with pytest.raises(ValueError, match="point_positions"):
+        splat.render_fused(camera=camera, point_positions=np.zeros(4, np.float32))
+    with pytest.raises(ValueError, match="point_positions"):
+        splat.render_fused(camera=camera, point_positions=np.zeros((0, 3), np.float32))
+    with pytest.raises(ValueError, match="finite"):
+        splat.render_fused(
+            camera=camera, point_positions=np.full((3, 3), np.nan, np.float32)
+        )
+    with pytest.raises(ValueError, match="point_colors"):
+        splat.render_fused(
+            camera=camera,
+            point_positions=np.zeros((4, 3), np.float32),
+            point_colors=np.zeros((5, 3), np.uint8),
+        )
+    with pytest.raises(ValueError, match="uint8"):
+        splat.render_fused(
+            camera=camera,
+            point_positions=np.zeros((4, 3), np.float32),
+            point_colors=np.zeros((4, 3), np.float32),
+        )
     # A point page store is not a splat source (and vice versa).
     m = manifest()
     cloud = splat.load_gaussian_splats(FIXTURE_DIR / m["splat_file"])
@@ -307,6 +332,27 @@ def test_render_fused_rejects_missing_and_malformed_inputs(tmp_path):
     cloud.write_page_store(str(store), 4096)
     with pytest.raises(ValueError, match="splat page store"):
         splat.render_fused(pointcloud=store, camera=camera)
+
+
+def test_render_fused_env_map_validation(tmp_path):
+    """env_map must name an existing equirect HDRI; rotation needs an env."""
+    camera = splat.FusedCamera(origin=(0, 5, 10), look_at=(0, 0, 0))
+    flat = np.zeros((4, 4), np.float32)
+    # A wrong extension is rejected even when the file exists.
+    png = tmp_path / "sky.png"
+    png.write_bytes(b"not an hdri")
+    with pytest.raises(ValueError, match=r"\.hdr, \.rgbe or \.exr"):
+        splat.render_fused(terrain=flat, camera=camera, env_map=png)
+    # A correct extension with no file on disk is FileNotFoundError.
+    with pytest.raises(FileNotFoundError):
+        splat.render_fused(terrain=flat, camera=camera, env_map=tmp_path / "missing.hdr")
+    # Rotation without an environment is a silent no-op -> reject it.
+    with pytest.raises(ValueError, match="without env_map"):
+        splat.render_fused(terrain=flat, camera=camera, env_rotation_deg=15.0)
+    # The same contract holds on the sequence entry point.
+    views = [splat.FusedView(camera=camera)]
+    with pytest.raises(ValueError, match=r"\.hdr, \.rgbe or \.exr"):
+        splat.render_fused_sequence(terrain=flat, views=views, env_map=png)
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +385,45 @@ def test_render_fused_returns_rgba_image():
     np.testing.assert_array_equal(image, again)
     other_seed = splat.render_fused(**kwargs, samples=8, width=80, height=64, seed=8)
     assert (image != other_seed).any()
+
+
+def _write_tiny_hdr(path: Path) -> None:
+    """Write a minimal uncompressed Radiance HDR (old-style scanlines).
+
+    Upper hemisphere is a blue sky, lower a dark ground, so the file has a
+    non-zero median luminance to normalise against.
+    """
+    width, height = 16, 8
+    header = b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n" + f"-Y {height} +X {width}\n".encode()
+    body = bytearray()
+    for y in range(height):  # row 0 is the zenith in -Y +X orientation
+        for x in range(width):
+            if y < height // 2:
+                body += bytes((60, 110, 255, 128))  # sky
+            else:
+                body += bytes((40, 34, 26, 120))  # ground
+    path.write_bytes(bytes(header) + bytes(body))
+
+
+def test_render_fused_env_map_is_applied(tmp_path):
+    """The env_map kwarg must reach the renderer, not be silently dropped."""
+    if not gpu_available():
+        pytest.skip("no usable GPU adapter for the fused render")
+    hdr = tmp_path / "sky.hdr"
+    _write_tiny_hdr(hdr)
+    kwargs = scene_kwargs(manifest())
+    base = splat.render_fused(**kwargs, samples=8, width=80, height=64, seed=7)
+    with_env = splat.render_fused(
+        **kwargs, samples=8, width=80, height=64, seed=7, env_map=hdr
+    )
+    # Swapping the Hosek-Wilkie bake for the HDRI changes the background, so
+    # the bytes must differ (a silently ignored kwarg would match `base`).
+    assert (base != with_env).any(), "env_map had no effect on the render"
+    # And the HDRI path is just as deterministic as the analytic sky.
+    again = splat.render_fused(
+        **kwargs, samples=8, width=80, height=64, seed=7, env_map=hdr
+    )
+    np.testing.assert_array_equal(with_env, again)
 
 
 def test_render_fused_aovs_shapes_and_contents(fused_result):
@@ -429,10 +514,90 @@ def test_render_fused_single_representations_and_options():
     )
     assert set(np.unique(lidar_only.hit_kind).tolist()) == {splat.HIT_MISS, splat.HIT_LIDAR}
 
+    # In-memory point arrays page like a file-backed cloud: the same grid
+    # rendered twice is byte-identical, and its returns are real LiDAR hits.
+    xs = np.linspace(-4.0, 4.0, 20, dtype=np.float32)
+    gx, gz = np.meshgrid(xs, xs)
+    positions = np.stack([gx, np.full_like(gx, 0.6), gz], axis=-1).reshape(-1, 3)
+    colors = np.tile(np.array([[214, 74, 58]], np.uint8), (positions.shape[0], 1))
+    array_camera = splat.FusedCamera(origin=(0.0, 3.0, 8.0), look_at=(0.0, 0.6, 0.0))
+    arrays_scene = dict(
+        camera=array_camera,
+        samples=4,
+        width=64,
+        height=48,
+        point_positions=positions,
+        point_colors=colors,
+        return_aovs=True,
+    )
+    arrays_only = splat.render_fused(terrain=np.zeros((17, 17), np.float32), **arrays_scene)
+    kinds = set(np.unique(arrays_only.hit_kind).tolist())
+    assert splat.HIT_LIDAR in kinds, "no LiDAR pixels from the in-memory swath"
+    assert kinds <= {splat.HIT_MISS, splat.HIT_TERRAIN, splat.HIT_LIDAR}
+    assert arrays_only.stats["logical_primitives"] == positions.shape[0]
+    again = splat.render_fused(terrain=np.zeros((17, 17), np.float32), **arrays_scene)
+    np.testing.assert_array_equal(arrays_only.rgba, again.rgba)
+
+    # The sequence entry point takes the same in-memory cloud: the single
+    # view of a one-view sequence must equal the standalone render.
+    view = splat.FusedView(camera=array_camera)
+    sequence = splat.render_fused_sequence(
+        terrain=np.zeros((17, 17), np.float32),
+        views=[view],
+        samples=4,
+        width=64,
+        height=48,
+        point_positions=positions,
+        point_colors=colors,
+        return_aovs=True,
+    )
+    sequence_only = sequence[0]
+    sequence_kinds = set(np.unique(sequence_only.hit_kind).tolist())
+    assert splat.HIT_LIDAR in sequence_kinds, "no LiDAR pixels in the sequence"
+    np.testing.assert_array_equal(arrays_only.rgba, sequence_only.rgba)
+    # The same validation applies here.
+    with pytest.raises(ValueError, match="point_colors.*without point_positions"):
+        splat.render_fused_sequence(
+            terrain=np.zeros((17, 17), np.float32),
+            views=[view],
+            point_colors=colors,
+        )
+
     # Fog attenuates the sun beam: with density the direct AOV dims.
     foggy = splat.render_fused(terrain=kwargs["terrain"], fog_density=0.02, **common)
     lit = (terrain_only.transmittance[..., 0] > 0.99) & (terrain_only.hit_kind == splat.HIT_TERRAIN)
     assert foggy.direct[lit].mean() < 0.9 * terrain_only.direct[lit].mean()
+    # The AERIAL branch, isolated.
+    #
+    # The shadow-ray fog already changes the beauty on its own — it
+    # attenuates the sun term — so comparing a foggy render with a fog-free
+    # one proves nothing about the aerial splice. Render with the sun term at
+    # ZERO instead: the shadow-ray fog then has nothing to attenuate, and the
+    # only thing left that can move the radiance is the aerial perspective.
+    # Delete that splice and these two renders are identical, which is
+    # exactly the regression this assertion has to catch.
+    no_sun = dict(common, sun_intensity=0.0)
+    clear = splat.render_fused(terrain=kwargs["terrain"], **no_sun)
+    aerial = splat.render_fused(terrain=kwargs["terrain"], fog_density=0.02, **no_sun)
+    terrain = clear.hit_kind == splat.HIT_TERRAIN
+    assert terrain.sum() > 100, "no terrain pixels to compare"
+    delta = np.abs(aerial.radiance - clear.radiance).sum(axis=-1)
+    assert delta[terrain].max() > 1e-6, "the aerial perspective did not change the radiance"
+    assert not np.array_equal(clear.rgba, aerial.rgba), (
+        "the aerial perspective did not change the beauty"
+    )
+    # The aerial weight is 1 - transmittance, and the transmittance falls with
+    # the distance to the hit, so the change must grow with the depth AOV.
+    depth = clear.depth[terrain]
+    change = delta[terrain]
+    far = depth >= np.percentile(depth, 75)
+    near = depth <= np.percentile(depth, 25)
+    assert change[far].mean() > change[near].mean(), (
+        "the aerial perspective did not grow with the depth"
+    )
+    # The fog-off path is the base line: same scene, same bytes, every time.
+    again_clear = splat.render_fused(terrain=kwargs["terrain"], **no_sun)
+    np.testing.assert_array_equal(clear.rgba, again_clear.rgba)
     # The working set must fit the pool under the exact policy.
     with pytest.raises(f3d.MemoryBudgetExceeded, match="residency pool"):
         splat.render_fused(
@@ -500,6 +665,137 @@ def test_render_fused_emits_a_signed_certificate(tmp_path):
         entry["label"] for entry in live["passes"]
     ]
     assert cert_module.payload_sha256(written)
+
+
+def test_signed_inputs_identify_the_env_map_without_leaking_the_path(tmp_path):
+    """The certificate must name the HDRI by CONTENT, not by local path.
+
+    A signed payload that carries an absolute path leaks the machine's
+    directory layout and is not comparable across machines; one that carries
+    only the path cannot tell two different files that share a name. So the
+    recorded identity is the basename plus the SHA256 of the bytes, and the
+    rotation that changes the pixels is recorded too.
+    """
+    if not gpu_available():
+        pytest.skip("no usable GPU adapter for the fused render")
+    from forge3d.diagnostics import render_certificate
+
+    hdr = tmp_path / "sky.hdr"
+    _write_tiny_hdr(hdr)
+    kwargs = scene_kwargs(manifest())
+    splat.render_fused(
+        **kwargs,
+        samples=4,
+        width=48,
+        height=48,
+        env_map=hdr,
+        env_rotation_deg=30.0,
+    )
+    live = render_certificate(sign=False)
+    recorded = live["inputs"]["fused.env_map"]
+
+    # No machine-specific path leaks into the signed inputs.
+    assert str(tmp_path) not in recorded
+    assert not any(str(tmp_path) in value for value in live["inputs"].values())
+    # The identity names the file and pins its CONTENT.
+    assert recorded.startswith("sky.hdr#")
+    digest = recorded.split("#", 1)[1]
+    assert len(digest) == 64 and all(c in "0123456789abcdef" for c in digest)
+    # The rotation changes the pixels, so it must be part of the signed input.
+    assert float(live["inputs"]["fused.env_rotation_deg"]) == 30.0
+
+    # Two different files with the SAME name must not share an identity.
+    other_dir = tmp_path / "elsewhere"
+    other_dir.mkdir()
+    other = other_dir / "sky.hdr"
+    _write_tiny_hdr(other)
+    other.write_bytes(other.read_bytes() + b"\x00" * 7)
+    splat.render_fused(
+        **kwargs, samples=4, width=48, height=48, env_map=other
+    )
+    assert render_certificate(sign=False)["inputs"]["fused.env_map"] != recorded
+
+    # And a different rotation must change the signed inputs.
+    splat.render_fused(
+        **kwargs,
+        samples=4,
+        width=48,
+        height=48,
+        env_map=hdr,
+        env_rotation_deg=90.0,
+    )
+    rotated = render_certificate(sign=False)["inputs"]
+    assert float(rotated["fused.env_rotation_deg"]) == 90.0
+    assert rotated["fused.env_map"] == recorded
+
+
+def test_the_certificate_identifies_the_render():
+    """Two renders that differ must not share a signed payload.
+
+    The certificate records the scene, but a render is also its frame size,
+    camera, sun, exposure and seed. Without those, two different images
+    from one scene would carry the same signed inputs.
+    """
+    if not gpu_available():
+        pytest.skip("no usable GPU adapter for the fused render")
+    from forge3d.diagnostics import render_certificate
+
+    kwargs = scene_kwargs(manifest())
+    common = dict(samples=2, width=48, height=48, seed=7)
+
+    def inputs(**over):
+        splat.render_fused(**{**kwargs, **common, **over})
+        return dict(render_certificate(sign=False)["inputs"])
+
+    base = inputs()
+    assert base["fused.width"] == "48"
+    assert base["fused.height"] == "48"
+    assert base["fused.tile"] == "none"
+    assert base["fused.sky_intensity"] != ""
+
+    # The frame size.
+    assert inputs(width=64)["fused.width"] != base["fused.width"]
+    # The camera.
+    moved = splat.FusedCamera(origin=(9.0, 52.0, 46.0), look_at=kwargs["camera"].look_at)
+    assert inputs(camera=moved)["fused.cam_origin"] != base["fused.cam_origin"]
+    # The sun.
+    assert inputs(sun_azimuth_deg=10.0)["fused.sun_azimuth_deg"] != base[
+        "fused.sun_azimuth_deg"
+    ]
+    # The exposure and the seed.
+    assert inputs(exposure=9.0)["fused.exposure"] != base["fused.exposure"]
+    assert inputs(seed=999)["fused.seed"] != base["fused.seed"]
+
+
+def test_the_sequence_certificate_records_every_view():
+    """A sequence's views differ from each other, so each must be named."""
+    if not gpu_available():
+        pytest.skip("no usable GPU adapter for the fused render")
+    from forge3d.diagnostics import render_certificate
+
+    kwargs = scene_kwargs(manifest())
+    camera = kwargs["camera"]
+    other = splat.FusedCamera(origin=(9.0, 52.0, 46.0), look_at=camera.look_at)
+    splat.render_fused_sequence(
+        splats=kwargs["splats"],
+        pointcloud=kwargs["pointcloud"],
+        terrain=kwargs["terrain"],
+        views=[
+            splat.FusedView(camera=camera, seed=1),
+            splat.FusedView(camera=other, seed=2),
+        ],
+        samples=2,
+        width=48,
+        height=48,
+    )
+    recorded = render_certificate(sign=False)["inputs"]
+    assert recorded["fused.views"] == "2"
+    assert recorded["fused.view0.seed"] == "1"
+    assert recorded["fused.view1.seed"] == "2"
+    assert recorded["fused.view0.cam_origin"] != recorded["fused.view1.cam_origin"]
+    # The shared part is named once.
+    assert recorded["fused.width"] == "48"
+    assert recorded["fused.sky_intensity"] != ""
 
 
 def test_render_fused_reference_emits_a_certificate():
@@ -585,9 +881,6 @@ def test_transformed_applies_a_similarity_without_mutating_the_source():
             cloud.transformed(bad["scale"], (1.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
     with pytest.raises(ValueError, match="rotation"):
         cloud.transformed(1.0, (0.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
-def _srgb_to_linear(c):
-    c = np.asarray(c, dtype=np.float64) / 255.0
-    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
 
 
 def _linear_to_srgb_u8(v):

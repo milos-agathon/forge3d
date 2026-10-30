@@ -1892,5 +1892,44 @@
     ],
     "source_commit": "3c6b5665ae827f25698fe350929444461d4164ae",
     "review": "2026-10-22: Milos explicitly approved this exact transition and commit/push for PR #272. Five new u32 viewport-dimension conversions set inverse resolution, SSAO projection scale, and temporal pixel translation. Fourteen existing conversions move between TAA, height-AO and shadow helpers or change only their surrounding initializer context. No absolute world-coordinate narrowing or scanner exemption is introduced. Reversing the exact 19 added and 14 removed occurrence-locked sites restores the unchanged 1856-site parent inventory and every preceding freeze."
+  },
+  "splat_fused_env_map": {
+   "base_commit": "d6b9e556",
+   "base_count": 1861,
+   "base_digest": "a2a5794b463106a295bf326ade34c081cb780eaa6d5b99a7fdbd17d7c8fbf0cf",
+   "result_count": 1865,
+   "result_digest": "ea4107298699b4ff56aa1d80a3317fe86dda35de354e3ec0900e501ef0e92fb7",
+   "added": [
+    [
+     "src/path_tracing/hybrid_compute/render_fused.rs",
+     "env_from_hdr_image",
+     "as_f32",
+     1,
+     "let radiance = [ (sums[ti * 3] * inv).max(0.0) as f32, (sums[ti * 3 + 1] * inv).max(0.0) as f32, (sums[ti * 3 + 2] * inv).max(0.0) as f32, ]"
+    ],
+    [
+     "src/path_tracing/hybrid_compute/render_fused.rs",
+     "env_from_hdr_image",
+     "as_f32",
+     2,
+     "let radiance = [ (sums[ti * 3] * inv).max(0.0) as f32, (sums[ti * 3 + 1] * inv).max(0.0) as f32, (sums[ti * 3 + 2] * inv).max(0.0) as f32, ]"
+    ],
+    [
+     "src/path_tracing/hybrid_compute/render_fused.rs",
+     "env_from_hdr_image",
+     "as_f32",
+     3,
+     "let radiance = [ (sums[ti * 3] * inv).max(0.0) as f32, (sums[ti * 3 + 1] * inv).max(0.0) as f32, (sums[ti * 3 + 2] * inv).max(0.0) as f32, ]"
+    ],
+    [
+     "src/path_tracing/hybrid_compute/render_fused.rs",
+     "env_from_hdr_image",
+     "as_f32",
+     4,
+     "*value = (f64::from(*value) * scale).clamp(0.0, clamp) as f32"
+    ]
+   ],
+   "removed": [],
+   "review": "2026-10-19: SPLAT-FUSED HDRI env-map path (env_from_hdr_image). Four additions, none narrowing an absolute world coordinate: three narrow the accumulated HDR sky radiance (sums[ti*3..]*inv, a per-texel half-float range normalisation of the baked environment map) and one narrows the same clamped radiance scalar when the env texture is uploaded (*value * scale). All four operate on environment-map radiance and texture values, never on a camera, terrain or splat position; world positions continue to cross f64 -> f32 only through Anchor::to_render_f32. The base is the production inventory of d6b9e556, the commit this branch was rebased onto; the four env-map sites bridge it to 1865. The four sites were approved in the 2026-10-22 review (5617567760); the rebased base and result were confirmed by the world-coordinate gate at that head. Both digests are in scan order, so they are not numerically comparable with this file's chain digests; the gate normalises the base the way the chain does and checks that it hashes to concordia's recorded result."
   }
 }

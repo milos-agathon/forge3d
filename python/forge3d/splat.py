@@ -441,14 +441,21 @@ def _resolve_camera(camera: Any) -> FusedCamera:
 
 
 def _scene_kwargs(
-    splats: Any, pointcloud: Any, terrain: Any
+    splats: Any, pointcloud: Any, terrain: Any, has_points: bool = False
 ) -> Tuple[Dict[str, Any], Optional[FusedTerrain]]:
     cloud, stores = _resolve_splats(splats)
     clouds = _resolve_pointclouds(pointcloud)
     resolved_terrain = _resolve_terrain(terrain)
-    if cloud is None and not stores and not clouds and resolved_terrain is None:
+    if (
+        cloud is None
+        and not stores
+        and not clouds
+        and resolved_terrain is None
+        and not has_points
+    ):
         raise ValueError(
-            "render_fused needs at least one representation: splats, pointcloud or terrain"
+            "render_fused needs at least one representation: splats, pointcloud, "
+            "point_positions or terrain"
         )
     kwargs: Dict[str, Any] = {
         "splats": cloud,
@@ -473,10 +480,65 @@ def _certificate_arg(certificate: Any) -> Any:
     return os.fspath(certificate)
 
 
+def _point_array_kwargs(
+    point_positions: Any, point_colors: Any
+) -> Dict[str, Any]:
+    """Validate an in-memory point set into native-call kwargs.
+
+    Shared by :func:`render_fused` and :func:`render_fused_sequence`: both
+    take the same in-memory cloud, so the contract is checked once, here.
+    """
+    if point_positions is None:
+        if point_colors is not None:
+            raise ValueError("point_colors was given without point_positions")
+        return {}
+    pos = np.asarray(point_positions, dtype=np.float32)
+    if pos.ndim != 2 or pos.shape[1] != 3 or pos.shape[0] < 1:
+        raise ValueError(
+            f"point_positions must be (N, 3) with N >= 1, got shape {pos.shape}"
+        )
+    if not np.isfinite(pos).all():
+        raise ValueError("point_positions must be finite world coordinates")
+    out: Dict[str, Any] = {"point_positions": pos}
+    if point_colors is not None:
+        col = np.asarray(point_colors)
+        if col.ndim != 2 or col.shape[0] != pos.shape[0] or col.shape[1] != 3:
+            raise ValueError(
+                f"point_colors shape {col.shape} must be ({pos.shape[0]}, 3) "
+                "to match point_positions"
+            )
+        if col.dtype != np.uint8:
+            raise ValueError(
+                f"point_colors must be uint8 sRGB bytes of shape (N, 3), "
+                f"got dtype {col.dtype}"
+            )
+        out["point_colors"] = col
+    return out
+
+
+def _env_kwargs(
+    env_map: "str | os.PathLike[str] | None", env_rotation_deg: float
+) -> Dict[str, Any]:
+    """Validate the HDRI environment arguments into native-call kwargs."""
+    if env_map is None:
+        if env_rotation_deg:
+            raise ValueError("env_rotation_deg was given without env_map")
+        return {}
+    path = os.fspath(env_map)
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in (".hdr", ".rgbe", ".exr"):
+        raise ValueError(f"env_map must be a .hdr, .rgbe or .exr file, got '{path}'")
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"env_map not found: {path}")
+    return {"env_map": path, "env_rotation_deg": float(env_rotation_deg)}
+
+
 def render_fused(
     *,
     splats: Any = None,
     pointcloud: Any = None,
+    point_positions: Any = None,
+    point_colors: Any = None,
     terrain: Any = None,
     camera: Any,
     samples: int = 64,
@@ -492,6 +554,8 @@ def render_fused(
     sky_turbidity: float = 2.5,
     sky_ground_albedo: float = 0.2,
     sky_intensity: float = 0.35,
+    env_map: "str | os.PathLike[str] | None" = None,
+    env_rotation_deg: float = 0.0,
     kappa: float = 4.0,
     lidar_radius: float = 0.2,
     lidar_opacity: float = 1.0,
@@ -524,6 +588,11 @@ def render_fused(
         pointcloud: a COPC path, a point page store path, a
             :class:`FusedPointCloud` (path + f64 origin + z-up flag), or a
             list of those.
+        point_positions, point_colors: an in-memory point set in world space
+            (y-up): ``(N, 3)`` float32 positions and optional ``(N, 3)``
+            uint8 sRGB colours — e.g. a scan swath sampled from a DEM —
+            paginated exactly like a file-backed point cloud, without a file.
+            ``point_colors`` without ``point_positions`` is an error.
         terrain: a 2-D height array or a :class:`FusedTerrain`.
         camera: a :class:`FusedCamera` or a mapping with ``origin``,
             ``look_at`` and optional ``up`` / ``fov_y_deg``.
@@ -534,6 +603,16 @@ def render_fused(
         sun_*: direction (azimuth measured in the xz plane from +x toward +z,
             elevation above the horizon), intensity and colour of the sun.
         sky_*: Hosek-Wilkie sky turbidity, ground albedo and intensity.
+        env_map: path to an equirect HDRI (``.hdr`` / ``.rgbe`` / ``.exr``)
+            whose sky replaces the Hosek-Wilkie bake: downsampled to at most
+            1024 texels wide, exposure-normalised so its median upper-hemisphere
+            luminance is 1 (then ``sky_intensity`` scales it as usual), and
+            clamped so its own sun disc reads as a bright blob instead of an
+            IBL firefly. ``sky_turbidity`` / ``sky_ground_albedo`` are ignored
+            when an HDRI is given; the analytic ``sun_*`` still lights the
+            surfaces. ``None`` keeps the Hosek-Wilkie sky.
+        env_rotation_deg: rotation of the HDRI about +y in degrees (the sun
+            azimuth convention), to place its sun where the scene wants it.
         kappa: splat extinction scale — the optical depth of a fully opaque
             splat through its centre (``T = exp(-kappa * rho)``).
         lidar_radius, lidar_opacity: sphelet radius (world units) and peak
@@ -601,7 +680,11 @@ def render_fused(
     if width < 1 or height < 1:
         raise ValueError(f"width and height must be >= 1, got {width}x{height}")
     cam = _resolve_camera(camera)
-    scene, resolved_terrain = _scene_kwargs(splats, pointcloud, terrain)
+    env_kwargs = _env_kwargs(env_map, env_rotation_deg)
+    arrays_kwargs: Dict[str, Any] = _point_array_kwargs(point_positions, point_colors)
+    scene, resolved_terrain = _scene_kwargs(
+        splats, pointcloud, terrain, has_points=point_positions is not None
+    )
     spp = min(int(samples), 4) if samples_per_frame is None else int(samples_per_frame)
     if not 1 <= spp <= 64:
         raise ValueError(f"samples_per_frame must be in 1..=64, got {spp}")
@@ -658,6 +741,8 @@ def render_fused(
         certificate=_certificate_arg(certificate),
         cache=None,
         **tile_kwargs,
+        **arrays_kwargs,
+        **env_kwargs,
         **scene,
     )
     return _fused_result(out, return_aovs)
@@ -706,6 +791,8 @@ def render_fused_sequence(
     *,
     splats: Any = None,
     pointcloud: Any = None,
+    point_positions: Any = None,
+    point_colors: Any = None,
     terrain: Any = None,
     views: Sequence[FusedView],
     samples: int = 64,
@@ -715,6 +802,8 @@ def render_fused_sequence(
     sky_turbidity: float = 2.5,
     sky_ground_albedo: float = 0.2,
     sky_intensity: float = 0.35,
+    env_map: "str | os.PathLike[str] | None" = None,
+    env_rotation_deg: float = 0.0,
     kappa: float = 4.0,
     lidar_radius: float = 0.2,
     lidar_opacity: float = 1.0,
@@ -782,7 +871,11 @@ def render_fused_sequence(
                 seed=int(view.seed),
             )
         )
-    scene, resolved_terrain = _scene_kwargs(splats, pointcloud, terrain)
+    scene, resolved_terrain = _scene_kwargs(
+        splats, pointcloud, terrain, has_points=point_positions is not None
+    )
+    env_kwargs = _env_kwargs(env_map, env_rotation_deg)
+    arrays_kwargs: Dict[str, Any] = _point_array_kwargs(point_positions, point_colors)
     spp = min(int(samples), 4) if samples_per_frame is None else int(samples_per_frame)
     if not 1 <= spp <= 64:
         raise ValueError(f"samples_per_frame must be in 1..=64, got {spp}")
@@ -830,6 +923,8 @@ def render_fused_sequence(
         certificate=_certificate_arg(certificate),
         cache=None,
         **tile_kwargs,
+        **arrays_kwargs,
+        **env_kwargs,
         **scene,
     )
     return [_fused_result(out, return_aovs) for out in outs]

@@ -286,6 +286,7 @@ __pycache__/
 
 # Whitelist doc/gallery images that must be in the repo
 !docs/assets/highres.png
+!docs/assets/splat-fused-map.webp
 !tests/golden/
 !tests/golden/terrain/
 !tests/golden/terrain/*.png
@@ -415,8 +416,10 @@ examples/**/*.py
 !examples/c05_qgis.py
 !examples/c05_qgis_3d.py
 !examples/c05_report.py
+!examples/splat_fused_map.py
 tests/test_*example*.py
 tests/test_*examples*.py
+!tests/test_splat_fused_map_example.py
 .superpowers/
 scripts/*
 !scripts/aether_acceptance_evidence.py
