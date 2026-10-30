@@ -178,7 +178,7 @@ impl HarnessPipeline {
         } else {
             queue.submit(Some(encoder.finish()));
         }
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         if let Some(timer) = timing {
             if !timer.record_into_certificate() {
                 crate::core::certificate::record_pass("dupla.dd_harness", 0.0, 1);
@@ -190,7 +190,7 @@ impl HarnessPipeline {
         slice.map_async(wgpu::MapMode::Read, move |result| {
             let _ = sender.send(result);
         });
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         receiver
             .recv()
             .map_err(|error| RenderError::readback(format!("DD map callback failed: {error}")))?

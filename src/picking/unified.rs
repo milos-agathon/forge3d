@@ -226,7 +226,7 @@ impl UnifiedPickingSystem {
         slice.map_async(wgpu::MapMode::Read, move |result| {
             sender.send(result).ok();
         });
-        self.device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&self.device);
         pollster::block_on(receiver.receive())
             .ok_or_else(|| "visibility picking callback dropped".to_string())?
             .map_err(|error| format!("visibility picking map failed: {error}"))?;

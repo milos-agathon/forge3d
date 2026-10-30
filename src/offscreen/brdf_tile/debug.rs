@@ -67,14 +67,14 @@ pub(super) fn read_debug_dot_products(
     });
     encoder.copy_buffer_to_buffer(debug_buffer, 0, &debug_staging, 0, 16);
     queue.submit(Some(encoder.finish()));
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
 
     let slice = debug_staging.slice(..);
     let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
     slice.map_async(wgpu::MapMode::Read, move |result| {
         sender.send(result).ok();
     });
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
 
     if let Some(Ok(())) = pollster::block_on(receiver.receive()) {
         let data = slice.get_mapped_range();

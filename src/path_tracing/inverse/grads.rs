@@ -208,7 +208,7 @@ pub fn read_buffer(
     queue.submit([enc.finish()]);
     let slice = staging.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     let out = slice.get_mapped_range().to_vec();
     staging.unmap();
     Ok(out)
@@ -262,7 +262,7 @@ pub fn read_texture(
     queue.submit([enc.finish()]);
     let slice = staging.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     let out = {
         let data = slice.get_mapped_range();
         let mut rows = Vec::with_capacity(unpadded as usize * height as usize);

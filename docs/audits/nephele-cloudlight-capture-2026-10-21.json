@@ -1,0 +1,73 @@
+{
+  "head_sha": "d5507249a2327d183edf0bb3ff11dcb83a773333",
+  "gate_verifier_result": "Diagnostic measurements; consult the CI run for its acceptance verdict",
+  "frozen_input_files_byte_identical": [
+    "atmosphere.json",
+    "camera.json",
+    "cloud-shadow-mask.npy",
+    "crop.json",
+    "exposure.json",
+    "godray-roi-mask.npy",
+    "material.json",
+    "medium.json",
+    "reference-cloud-shadow-aov.npy",
+    "reference-in-scatter.npy",
+    "reference-media-lighting-visibility.npy",
+    "reference-optical-depth.npy",
+    "reference-provenance.json",
+    "reference-rgb.npy",
+    "reference-terrain-hit.npy",
+    "reference-terrain-slice.npy",
+    "reference-transmittance.npy",
+    "shaft-mask.npy",
+    "sky-cloud-mask.npy",
+    "sun.json",
+    "terrain-dem.npy",
+    "terrain-mask.npy",
+    "terrain.json",
+    "tonemap.json"
+  ],
+  "sky_fraction_delta_e2000_lt_2_5": 0.9416863672182821,
+  "godray_ssim": 0.9899707204281153,
+  "g4a_fraction_delta_e2000_lt_2": 0.6730892742453436,
+  "shadow_mean_lab_error": [
+    0.5385527980303026,
+    -0.12888457449381988,
+    -1.1317755239337215
+  ],
+  "sky_mean_lab_error": [
+    -0.5860053817444129,
+    -0.04108337761109029,
+    -0.3791987854007554
+  ],
+  "ablation_ssim": 0.9875536573999094,
+  "delta_realtime_mean_linear_luminance": 0.018602208951602937,
+  "approved_reference_delta": 0.03731673831968643,
+  "ablation_change_ratio": 0.4984950397390264,
+  "ablation_relative_error": 0.5015049602609736,
+  "sky_mean_added_linear_rgb": [
+    -0.0035192083298630716,
+    -0.003077544476156462,
+    -0.0025454861068809763
+  ],
+  "shadow_mean_added_linear_rgb": [
+    0.016698331265929425,
+    0.015903053167056914,
+    0.014423688622991567
+  ],
+  "optical_depth_byte_identical": true,
+  "transmittance_byte_identical": true,
+  "input_sha256": {
+    "reference-rgb": "d0a5ff2c46e746f76fe726873821b569324eb59c9cba87bd9be07a5e7dfcf5dd",
+    "realtime-rgb": "f96e539e5a6cd0e2b1ead748c4b02fd01c4befdbeb6dd516aec249481a4e513f",
+    "terrain-occlusion-disabled-rgb": "7c713e60ed32c46c9c2e41a75847df02c67e1ffe82ed103b11e536d1dbfd56fd",
+    "sky-cloud-mask": "288e3868f1a06922441af4da195b5db590a5386e647cfc394c7be52f52b5a7b2",
+    "cloud-shadow-mask": "4cdbf4a232a521157e1428a5d72423f2e82352b206e0b6865c574972af69cd4e",
+    "terrain-mask": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    "godray-roi-mask": "bfa5e46e8cf884a271cac6ffd1d1b8a58a173d48e7c26a6752c1ac5a30fe2d20"
+  },
+  "accepted_reference_report_sha256": "bd5bbcd1d77ca2d875c45ff81c205c7662a7cdeb5bc03ef2dbcd11e412d50eef",
+  "reference_policy_sha256": "0c742788fa0a4a6b0cf2cfc97fd540916128b0e7a6c1b7ac1716947738c76f69",
+  "measurement_tool_sha256": "7fe9d5d6ab872fc419d0ca84a24606ae91f587ef762779acb409f1fa47456bd6",
+  "measurement_tool_hash_convention": "LF-normalized Git source text"
+}

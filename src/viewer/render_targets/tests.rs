@@ -322,6 +322,7 @@ fn viewport_resize_is_transactional_and_renders_viewer_frames() {
     let mut terrain = crate::viewer::terrain::ViewerTerrainScene::new(
         viewer.device.clone(),
         viewer.queue.clone(),
+        viewer.adapter.clone(),
         viewer.config.format,
     )
     .unwrap();

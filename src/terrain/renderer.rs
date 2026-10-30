@@ -29,13 +29,14 @@ use crate::lighting::LightBuffer;
 
 mod anamnesis;
 mod aov;
-mod atmosphere;
+pub(crate) mod atmosphere;
 mod bind_groups;
 mod constructor;
 mod core;
 mod draw;
 mod geometry;
 mod height_ao;
+pub(crate) use super::realtime_media as media;
 pub(crate) mod interactive;
 mod msaa;
 mod offline;
@@ -46,7 +47,7 @@ mod orbis_globe_background;
 mod pipeline_cache;
 mod probes;
 mod py_api;
-mod render_graph;
+pub(crate) mod render_graph;
 mod resources;
 mod runtime_contract;
 #[cfg(feature = "enable-gpu-instancing")]
@@ -60,6 +61,7 @@ pub(crate) mod virtual_texture;
 pub(crate) mod visibility_buffer;
 mod water_reflection;
 
+pub(crate) use self::core::is_yup_camera_mode;
 pub(crate) use self::core::is_north_up_camera_mode;
 pub use self::core::{TerrainRenderer, TerrainScene, ViewerTerrainData};
 #[cfg(feature = "enable-globe")]

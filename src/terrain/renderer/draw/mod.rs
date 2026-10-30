@@ -8,14 +8,45 @@ use std::collections::BTreeMap;
 use std::io::Error as IoError;
 
 mod execute;
+mod leaf_keys;
 mod setup;
 
 pub(in crate::terrain::renderer) use setup::{
-    PreparedMaterials, RenderTargets, UploadedHeightInputs,
+    terrain_internal_color_format, PreparedMaterials, RenderTargets, UploadedHeightInputs,
 };
 
 fn io_error(error: impl std::fmt::Display) -> IoError {
     IoError::other(error.to_string())
+}
+
+fn observe_shadow_transition(
+    label: &str,
+    barriers: &[&crate::core::framegraph_impl::ResourceBarrier],
+    shadow: ResourceHandle,
+    observed: &mut bool,
+) -> Result<()> {
+    *observed |= barriers.iter().any(|barrier| barrier.resource == shadow);
+    if !*observed {
+        return Err(anyhow!("{label} lost its compiled shadow transition"));
+    }
+    Ok(())
+}
+
+fn validate_resolve_transition(
+    graph: &crate::core::framegraph_impl::RendererGraphPlan,
+    handles: &super::render_graph::TerrainGraphHandles,
+    barriers: &[&crate::core::framegraph_impl::ResourceBarrier],
+) -> Result<()> {
+    let source = handles.media.map_or(handles.beauty, |media| media.composite);
+    let resource = graph.resource(source).ok_or_else(|| anyhow!("terrain.resolve has no compiled input"))?;
+    // SampledTexture does not model a storage-write transition. The media
+    // composite is already ordered before resolve by its declared read edge.
+    if resource.desc.resource_type != crate::core::framegraph_impl::ResourceType::SampledTexture
+        && !barriers.iter().any(|barrier| barrier.resource == source)
+    {
+        return Err(anyhow!("terrain.resolve lost its compiled beauty transition"));
+    }
+    Ok(())
 }
 
 fn restore_texture(
@@ -71,6 +102,11 @@ impl TerrainScene {
         let mut timing = self.take_render_timing();
         let decoded = params.decoded();
         self.ensure_shadow_atlas(&decoded.shadow)?;
+        let media_graph = self.realtime_media_graph_config(params.size_px)?;
+        let media_enabled = media_graph.enabled;
+        // ANAMNESIS stores the legacy LDR forward/resolve blobs. Media owns
+        // persistent temporal resources, so it executes without that cache.
+        let cache = if media_enabled { None } else { cache };
 
         self.prepare_frame_lighting(decoded)?;
         let mut height_inputs = self.upload_height_inputs(heightmap, water_mask, params)?;
@@ -113,9 +149,20 @@ impl TerrainScene {
             material_set,
             params,
             decoded,
-            false,
+            media_enabled,
             cache.map(|options| &options.material_maps),
         )?;
+        if media_enabled {
+            self.prepare_realtime_media_terrain_trace(
+                &params.camera_mode,
+                &height_inputs.heightmap_data,
+                (height_inputs.width, height_inputs.height),
+                height_inputs.terrain_data_hash,
+                params.terrain_span,
+                params.z_scale,
+                materials.terrain_trace_albedo,
+            )?;
+        }
         let uniforms = self.build_uniforms(
             params,
             decoded,
@@ -162,21 +209,26 @@ impl TerrainScene {
                     .create_view(&wgpu::TextureViewDescriptor::default())
             });
         let requested_msaa = params.msaa_samples.max(1);
-        let effective_msaa =
-            select_effective_msaa(requested_msaa, self.color_format, &self.adapter);
+        let render_format = terrain_internal_color_format(media_enabled, self.color_format);
+        let effective_msaa = select_effective_msaa(requested_msaa, render_format, &self.adapter);
         if effective_msaa != requested_msaa {
             log::warn!(
                 "MSAA: requested {} not supported for {:?}; using {}",
                 requested_msaa,
-                self.color_format,
+                render_format,
                 effective_msaa
             );
         }
         self.ensure_pipeline_sample_count(
             effective_msaa,
             is_clipmap_camera_mode(&params.camera_mode),
+            render_format,
         )?;
-        let render_targets = self.create_render_targets(params, requested_msaa, effective_msaa)?;
+        let render_targets = if media_enabled {
+            self.create_realtime_media_render_targets(params)?
+        } else {
+            self.create_render_targets(params, requested_msaa, effective_msaa)?
+        };
         let (color_blob_kind, color_stride) =
             super::anamnesis::color_blob_format(self.color_format)?;
 
@@ -224,8 +276,9 @@ impl TerrainScene {
             height_inputs.height,
             shadow_width,
             shadow_layers,
-            self.color_format,
+            render_format,
             false,
+            media_graph,
             super::render_graph::TerrainPassDeclarations {
                 prepare: prepare_declaration,
                 shadow: shadow_declaration,
@@ -235,7 +288,10 @@ impl TerrainScene {
             },
             cache.is_some(),
         )?;
-        debug_assert_eq!(graph_bundle.plan.labels.len(), 4);
+        debug_assert_eq!(
+            graph_bundle.plan.labels.len(),
+            if media_enabled { 8 } else { 4 }
+        );
         let handles = graph_bundle.handles;
         let scheduler_plan = graph_bundle.plan.clone();
         let mut execution = graph_bundle
@@ -246,6 +302,13 @@ impl TerrainScene {
         execution.bind_texture(handles.shadow, self.csm_renderer.shadow_maps.clone())?;
         execution.bind_texture(handles.beauty, render_targets.internal_texture.clone())?;
         execution.bind_texture(handles.resolved, render_targets.resolved_texture.clone())?;
+        if let Some(media_handles) = handles.media {
+            self.bind_realtime_media_graph_resources(
+                &mut execution,
+                media_handles,
+                render_targets._depth_texture.clone(),
+            )?;
+        }
 
         let mut scheduler = match cache {
             Some(options) => GraphScheduler::new(
@@ -260,8 +323,11 @@ impl TerrainScene {
         let source_key = cache
             .map(|options| leaf_key(&options.height_bytes))
             .unwrap_or_else(|| leaf_key(bytemuck::cast_slice(&height_inputs.heightmap_data)));
-        let leaf_keys = BTreeMap::from([(handles.height, source_key)]);
+        let leaf_keys = leaf_keys::terrain_graph_leaf_keys(
+            &handles, source_key, self.realtime_media_graph_input_keys()?,
+        )?;
         let mut shadow_setup = None;
+        let mut shadow_transition_observed = false;
         let mut material_vt_started = false;
         let mut hzb_frame_staged = false;
         let mut visibility_frame_staged = false;
@@ -331,11 +397,8 @@ impl TerrainScene {
                             capture_output,
                         },
                     ) => {
-                        if barriers.is_empty() {
-                            return Err(anyhow!(
-                                "terrain.forward lost its compiled shadow transition"
-                            ));
-                        }
+                        observe_shadow_transition("terrain.forward", barriers, handles.shadow,
+                            &mut shadow_transition_observed)?;
                         let setup = shadow_setup.as_ref().ok_or_else(|| {
                             anyhow!("terrain.forward has no materialized shadow state")
                         })?;
@@ -385,6 +448,9 @@ impl TerrainScene {
                                 &materials,
                                 &uniform_buffer,
                                 &ibl_bind_group,
+                                media::ibl_mean_radiance(env_maps),
+                                env_maps.hdr_image().map(AsRef::as_ref),
+                                env_maps.intensity.max(0.0),
                                 &height_curve_view,
                                 &render_targets,
                                 setup,
@@ -476,6 +542,61 @@ impl TerrainScene {
                         })?;
                         Ok(GraphPassOutcome::Restored)
                     }
+                    ("nephele.media.cloudlight", GraphPassAction::Execute { .. }) => {
+                        execution.run_pass("nephele.media.cloudlight", |context| {
+                            let encoder=context.encoder();
+                            let scope=ts_begin(&mut timing,encoder,"nephele.media.cloudlight");
+                            self.encode_attached_surface_cloudlight(encoder, params, decoded, env_maps)?;
+                            ts_end(&mut timing,encoder,scope,0);
+                            Ok::<(), crate::core::error::RenderError>(())
+                        })?;
+                        Ok(GraphPassOutcome::Executed(Vec::new()))
+                    }
+                    ("nephele.media.inject", GraphPassAction::Execute { barriers, .. }) => {
+                        observe_shadow_transition("nephele.media.inject", barriers, handles.shadow,
+                            &mut shadow_transition_observed)?;
+                        execution.run_pass("nephele.media.inject", |context| {
+                            self.encode_attached_realtime_media_inject_for_terrain(
+                                context.encoder(),
+                                params,
+                                decoded,
+                            )?
+                            .ok_or_else(|| {
+                                anyhow!("media graph executed without attached resources")
+                            })?;
+                            Ok::<_, anyhow::Error>(())
+                        })?;
+                        Ok(GraphPassOutcome::Executed(Vec::new()))
+                    }
+                    ("nephele.media.integrate", GraphPassAction::Execute { .. }) => {
+                        execution.run_pass("nephele.media.integrate", |context| {
+                            self.encode_attached_realtime_media_integrate(
+                                context.encoder(),
+                                &render_targets.depth_view,
+                            )?;
+                            Ok::<_, anyhow::Error>(())
+                        })?;
+                        Ok(GraphPassOutcome::Executed(Vec::new()))
+                    }
+                    ("nephele.media.composite", GraphPassAction::Execute { .. }) => {
+                        execution.run_pass("nephele.media.composite", |context| {
+                            self.encode_attached_realtime_media_composite(
+                                context.encoder(),
+                                &render_targets.internal_view,
+                            )
+                        })?;
+                        Ok(GraphPassOutcome::Executed(Vec::new()))
+                    }
+                    ("nephele.media.history.commit", GraphPassAction::Execute { .. }) => {
+                        execution.run_pass("nephele.media.history.commit", |context| {
+                            self.commit_attached_realtime_media_history(
+                                context.encoder(),
+                                &render_targets._depth_texture,
+                            )?;
+                            Ok::<_, anyhow::Error>(())
+                        })?;
+                        Ok(GraphPassOutcome::Executed(Vec::new()))
+                    }
                     (
                         "terrain.resolve",
                         GraphPassAction::Execute {
@@ -483,15 +604,20 @@ impl TerrainScene {
                             capture_output,
                         },
                     ) => {
-                        if barriers.is_empty() {
-                            return Err(anyhow!(
-                                "terrain.resolve lost its compiled beauty transition"
-                            ));
-                        }
+                        validate_resolve_transition(&scheduler_plan, &handles, barriers)?;
                         execution.run_pass("terrain.resolve", |context| {
                             let encoder = context.encoder();
                             let scope = ts_begin(&mut timing, encoder, "terrain.resolve");
-                            self.resolve_output(encoder, params, decoded, &render_targets)?;
+                            if media_enabled {
+                                self.resolve_realtime_media_output(
+                                    encoder,
+                                    params,
+                                    decoded,
+                                    &render_targets,
+                                )?;
+                            } else {
+                                self.resolve_output(encoder, params, decoded, &render_targets)?;
+                            }
                             ts_end(&mut timing, encoder, scope, 1);
                             if material_vt_started {
                                 self.stage_material_vt_feedback_readback(encoder)?;

@@ -1,0 +1,45 @@
+{
+  "status": "PROPOSED ONLY; STOP FOR OWNER APPROVAL",
+  "head_sha": "eea9a1cd311de92b7f26a211367737415fa4338c",
+  "run": "https://github.com/milos-agathon/forge3d/actions/runs/39900951382",
+  "job": "Fast Contract",
+  "failure": "Existing assertion at tests/test_no_silent_degradation.py:919 forbids the already owner-approved 600 MiB test deselection in the NEPHELE fast step.",
+  "path": "tests/test_no_silent_degradation.py",
+  "old_git_sha256": "a1486925d016bec941303efabc94362a6331a986f568d9dee0893060759dffca",
+  "new_git_sha256": "aadeab15b5b3097b6dd78c1f3a3d5d6b2034d159ea26dfc9edffbf552eb34a85",
+  "patch_sha256": "bc1ecba988c63e436b35194d378ccbaed6f8b9a2326e78315901205fed8fa447",
+  "exact_old": "    assert re.findall(r\"--(?:deselect|ignore(?:-glob)?)(?:=|\\s+)(\\S+)\", workflow) == [\n        \"tests/test_nephele_physical.py\"\n    ]",
+  "exact_new": "    # Milos's existing memory-case exception belongs only to the installed\n    # NEPHELE fast step; every other deselection remains forbidden.\n    budget_case = \"tests/test_budget_enforce.py::test_600mib_host_visible_raises_named_budget_error\"\n    budget_option = \"--deselect=\" + budget_case\n    assert re.findall(r\"--(?:deselect|ignore(?:-glob)?)(?:=|\\s+)(\\S+)\", workflow) == [\n        \"tests/test_nephele_physical.py\", budget_case\n    ]\n    gpu = _workflow_job(workflow, \"test-nephele-gpu\")\n    assert workflow.count(budget_option) == gpu.count(budget_option) == 1\n    assert re.findall(r\"--(?:deselect|ignore(?:-glob)?)(?:=|\\s+)(\\S+)\", gpu) == [budget_case]\n    fast_step = gpu.split(\"      - name: Run installed-wheel fast validation without skips\\n\", 1)[1].split(\"\\n      - \", 1)[0]\n    assert \"scripts/ci_pytest_lane.py --profile fast \" + budget_option in fast_step\n    assert re.findall(r\"--(?:deselect|ignore(?:-glob)?)(?:=|\\s+)(\\S+)\", fast_step) == [budget_case]",
+  "verification": {
+    "current_workflow_proposed_test_pass": true,
+    "duration_seconds": 0.10375789998215623,
+    "mutations_rejected": [
+      "extra arbitrary deselection",
+      "duplicate memory exception",
+      "memory exception outside fast step",
+      "changed memory case"
+    ],
+    "local_GPU_executed": false
+  },
+  "existing_workflow_deselections": [
+    "tests/test_nephele_physical.py",
+    "tests/test_budget_enforce.py::test_600mib_host_visible_raises_named_budget_error"
+  ],
+  "new_deselections_added": [],
+  "physical_capture": "NOT_EXECUTED",
+  "DEM_1500_frame_time": "NOT_MEASURED",
+  "final_disposition": {
+    "date": "2026-10-24",
+    "status": "rejected-not-applied",
+    "correction": "Removed CI deselection instead; no existing test assertion change",
+    "proof_run": "https://github.com/milos-agathon/forge3d/actions/runs/40075114543",
+    "named_memory_case": "passed",
+    "fast_junit": {
+      "passed": 661,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "reproducer_scope": "Historical proposal; not a current-workflow acceptance command"
+  }
+}

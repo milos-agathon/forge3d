@@ -65,6 +65,7 @@ impl PreparedMaterialSet {
     fn new(
         materials: &[crate::core::material::PbrMaterial],
         texture_paths: &[Option<String>],
+        encode_untextured_linear: bool,
     ) -> Self {
         let mut layer_count = materials.len();
         if layer_count == 0 {
@@ -183,6 +184,7 @@ impl PreparedMaterialSet {
                 target_width,
                 target_height,
                 mip_level_count,
+                encode_untextured_linear,
             );
             layer_pixels.push(mip_chain);
         }
@@ -230,7 +232,7 @@ impl MaterialSet {
     /// Prepare the same owned pixels while the ordinary device initializes.
     pub(crate) fn prepare_material_upload(&self) -> Option<PreparedMaterialSet> {
         self.gpu_cache.get().is_none().then(||
-            PreparedMaterialSet::new(&self.materials, &self._texture_paths))
+            PreparedMaterialSet::new(&self.materials, &self._texture_paths, false))
     }
 
     pub(crate) fn upload_prepared_material(
@@ -249,7 +251,26 @@ impl MaterialSet {
         self.gpu_cache
             .get_or_try_init(|| {
                 let gpu =
-                    GpuMaterialSet::new(device, queue, PreparedMaterialSet::new(&self.materials, &self._texture_paths))?;
+                    GpuMaterialSet::new(device, queue, PreparedMaterialSet::new(&self.materials, &self._texture_paths, false))?;
+                Ok(Arc::new(gpu))
+            })
+            .map(Arc::clone)
+    }
+
+    /// Physical terrain encodes untextured linear reflectance into the sRGB
+    /// texture, so it keeps a separate upload from the stylized path.
+    pub(crate) fn gpu_physical(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<Arc<GpuMaterialSet>> {
+        self.physical_gpu_cache
+            .get_or_try_init(|| {
+                let gpu = GpuMaterialSet::new(
+                    device,
+                    queue,
+                    PreparedMaterialSet::new(&self.materials, &self._texture_paths, true),
+                )?;
                 Ok(Arc::new(gpu))
             })
             .map(Arc::clone)

@@ -567,7 +567,7 @@ impl OrbisPendingCapture {
                 && self.frames[1].submission_serial > self.frames[0].submission_serial,
             "ORBIS capture lacks two distinct successful render submissions"
         );
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         let validation = self.pop_validation_errors(device);
         if !validation.is_empty() {
             return Err(anyhow!("ORBIS GPU validation failed: {}", validation.join("; ")));
@@ -795,7 +795,7 @@ impl OrbisPendingCapture {
     }
 
     fn drain_validation_scopes(mut self, device: &wgpu::Device) {
-        device.poll(wgpu::Maintain::Wait);
+        crate::core::gpu::wait_for_device_idle(&device);
         let _ = self.pop_validation_errors(device);
     }
 }
@@ -1429,7 +1429,7 @@ fn map_readback(device: &wgpu::Device, buffer: &wgpu::Buffer) -> Result<Vec<u8>>
     slice.map_async(wgpu::MapMode::Read, move |result| {
         let _ = tx.send(result);
     });
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     rx.recv().map_err(|_| anyhow!("ORBIS readback callback dropped"))??;
     let bytes = slice.get_mapped_range().to_vec();
     buffer.unmap();

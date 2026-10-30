@@ -351,7 +351,7 @@ mod tests {
                 .iter()
                 .any(|item| item.kind == "validation_error" && item.name == "pbr_render_pipeline"));
 
-            device.poll(wgpu::Maintain::Wait);
+            crate::core::gpu::wait_for_device_idle(&device);
             if let Some(error) = pollster::block_on(device.pop_error_scope()) {
                 panic!("live EVSM PBR resources are invalid: {error}");
             }

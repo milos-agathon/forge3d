@@ -1,0 +1,1344 @@
+{
+  "head_sha": "04e8ae6825ab8073ac6a8ffecef648c5da164885",
+  "environment": {
+    "python": "3.13.14 (tags/v3.13.14:fd17997, Jun 10 2026, 13:03:48) [MSC v.1944 64 bit (AMD64)]",
+    "numpy": "2.3.5",
+    "numba": "0.63.1",
+    "numba_threads": 24,
+    "native_forge3d_imported": false
+  },
+  "contracts": {
+    "grid": [
+      10,
+      10,
+      64
+    ],
+    "active_froxels_both_arms": 622,
+    "directions": 192,
+    "segment_count": 64,
+    "direction_source": "main_nephele_surface_cloudlight existing 192-direction Fibonacci quadrature",
+    "steps_source": "media.grid.z existing 64-depth contract",
+    "iteration_stop": "bitwise identical stored f16 source and terrain caches; no cap",
+    "domain": "untruncated medium on both sides; surface crossings control light only",
+    "surface_cache_dimensions": [
+      10,
+      10
+    ],
+    "surface_cache_resolution_source": "froxel grid horizontal dimensions, independent of DEM resolution"
+  },
+  "baselines": {
+    "d5507249": {
+      "run": 39545456967,
+      "run_url": "https://github.com/milos-agathon/forge3d/actions/runs/39545456967",
+      "metrics": {
+        "b1_fraction": 0.9416863672182821,
+        "shaft_ssim": 0.9899707204281153,
+        "g4a_fraction": 0.6730892742453436,
+        "medium_changed_fraction": 0.37997432605905007,
+        "g4b_response": 0.018602208951602937,
+        "g4b_relative_error": 0.14970735821575165,
+        "margins": {
+          "b1_fraction": -0.008313632781717817,
+          "shaft_ssim": 0.039970720428115336,
+          "g4a_fraction": -0.27691072575465636,
+          "medium_changed_fraction": 0.27997432605905004,
+          "g4b_relative_error": 0.05029264178424836
+        },
+        "all_five_pass": false
+      },
+      "mean_absolute_in_scatter_rgb_error": {
+        "sky": [
+          0.0003386693715583533,
+          0.00031889547244645655,
+          0.00028968852711841464
+        ],
+        "terrain": [
+          0.00016043045616243035,
+          0.00014155766984913498,
+          0.00012583045463543385
+        ],
+        "shadow": [
+          0.00016037668683566153,
+          0.00014157018449623138,
+          0.00012583287025336176
+        ]
+      },
+      "mean_absolute_transmittance_rgb_error": {
+        "sky": [
+          0.00012404228618834168,
+          0.00012421063729561865,
+          0.00012947725190315396
+        ],
+        "terrain": [
+          0.0002462560951244086,
+          0.0002538560947868973,
+          0.00024037979892455041
+        ],
+        "shadow": [
+          0.0002464142453391105,
+          0.0002538623521104455,
+          0.00024053418019320816
+        ]
+      }
+    },
+    "ac739096": {
+      "run": 39566600606,
+      "run_url": "https://github.com/milos-agathon/forge3d/actions/runs/39566600606",
+      "metrics": {
+        "b1_fraction": 0.7884160756501182,
+        "shaft_ssim": 0.9916078255428148,
+        "g4a_fraction": 0.7597944765574823,
+        "medium_changed_fraction": 0.31065468549422337,
+        "g4b_response": 0.020363695197357472,
+        "g4b_relative_error": 0.06919117880576935,
+        "margins": {
+          "b1_fraction": -0.16158392434988178,
+          "shaft_ssim": 0.041607825542814836,
+          "g4a_fraction": -0.19020552344251762,
+          "medium_changed_fraction": 0.21065468549422336,
+          "g4b_relative_error": 0.13080882119423065
+        },
+        "all_five_pass": false
+      },
+      "mean_absolute_in_scatter_rgb_error": {
+        "sky": [
+          0.00037381629226729274,
+          0.0003536756557878107,
+          0.00032001372892409563
+        ],
+        "terrain": [
+          0.0002031636977335438,
+          0.00018120408640243113,
+          0.00015344095299951732
+        ],
+        "shadow": [
+          0.00020317657617852092,
+          0.00018124206690117717,
+          0.00015346109285019338
+        ]
+      },
+      "mean_absolute_transmittance_rgb_error": {
+        "sky": [
+          0.00012404228618834168,
+          0.00012421063729561865,
+          0.00012947725190315396
+        ],
+        "terrain": [
+          0.0002462560951244086,
+          0.0002538560947868973,
+          0.00024037979892455041
+        ],
+        "shadow": [
+          0.0002464142453391105,
+          0.0002538623521104455,
+          0.00024053418019320816
+        ]
+      }
+    },
+    "68cc04e9": {
+      "run": 39580065706,
+      "run_url": "https://github.com/milos-agathon/forge3d/actions/runs/39580065706",
+      "metrics": {
+        "b1_fraction": 0.7127659574468085,
+        "shaft_ssim": 0.9916001251541653,
+        "g4a_fraction": 0.7109826589595376,
+        "medium_changed_fraction": 0.3215661103979461,
+        "g4b_response": 0.019629758417801648,
+        "g4b_relative_error": 0.1027388636433472,
+        "margins": {
+          "b1_fraction": -0.23723404255319147,
+          "shaft_ssim": 0.041600125154165335,
+          "g4a_fraction": -0.23901734104046235,
+          "medium_changed_fraction": 0.22156611039794608,
+          "g4b_relative_error": 0.09726113635665282
+        },
+        "all_five_pass": false
+      },
+      "mean_absolute_in_scatter_rgb_error": {
+        "sky": [
+          0.0003656217595562339,
+          0.0003432325611356646,
+          0.00030062461155466735
+        ],
+        "terrain": [
+          0.0001812250557122752,
+          0.00016276123642455786,
+          0.00013771925296168774
+        ],
+        "shadow": [
+          0.00018122384790331125,
+          0.000162787371664308,
+          0.00013772929378319532
+        ]
+      },
+      "mean_absolute_transmittance_rgb_error": {
+        "sky": [
+          0.00012404228618834168,
+          0.00012421063729561865,
+          0.00012947725190315396
+        ],
+        "terrain": [
+          0.0002462560951244086,
+          0.0002538560947868973,
+          0.00024037979892455041
+        ],
+        "shadow": [
+          0.0002464142453391105,
+          0.0002538623521104455,
+          0.00024053418019320816
+        ]
+      }
+    }
+  },
+  "backcasts": {
+    "ac739096->68cc04e9": {
+      "predicted_metrics": {
+        "b1_fraction": 0.7044917257683215,
+        "shaft_ssim": 0.9909998135830298,
+        "g4a_fraction": 0.682723185613359,
+        "medium_changed_fraction": 0.3196405648267009,
+        "g4b_response": 0.01975079150305869,
+        "g4b_relative_error": 0.09720653454876194,
+        "margins": {
+          "b1_fraction": -0.24550827423167843,
+          "shaft_ssim": 0.04099981358302984,
+          "g4a_fraction": -0.26727681438664097,
+          "medium_changed_fraction": 0.21964056482670088,
+          "g4b_relative_error": 0.10279346545123808
+        },
+        "all_five_pass": false
+      },
+      "observed_metrics": {
+        "b1_fraction": 0.7127659574468085,
+        "shaft_ssim": 0.9916001251541653,
+        "g4a_fraction": 0.7109826589595376,
+        "medium_changed_fraction": 0.3215661103979461,
+        "g4b_response": 0.019629758417801648,
+        "g4b_relative_error": 0.1027388636433472,
+        "margins": {
+          "b1_fraction": -0.23723404255319147,
+          "shaft_ssim": 0.041600125154165335,
+          "g4a_fraction": -0.23901734104046235,
+          "medium_changed_fraction": 0.22156611039794608,
+          "g4b_relative_error": 0.09726113635665282
+        },
+        "all_five_pass": false
+      },
+      "metric_error_predicted_minus_observed": {
+        "b1_fraction": -0.008274231678486954,
+        "shaft_ssim": -0.0006003115711354923,
+        "g4a_fraction": -0.02825947334617862,
+        "medium_changed_fraction": -0.0019255455712451908,
+        "g4b_response": 0.00012103308525704057,
+        "g4b_relative_error": -0.005532329094585259
+      },
+      "mean_absolute_linear_rgb_error": {
+        "sky": [
+          0.0020157820136885145,
+          0.0018330959522390835,
+          0.0016663146537680973
+        ],
+        "terrain": [
+          0.0013406485092680906,
+          0.0012881595519329456,
+          0.0012141628622310016
+        ],
+        "shadow": [
+          0.0013412565611088734,
+          0.0012889714708298628,
+          0.0012148595396262395
+        ]
+      }
+    },
+    "d5507249->ac739096": {
+      "predicted_metrics": {
+        "b1_fraction": 0.7825059101654847,
+        "shaft_ssim": 0.9911026015197829,
+        "g4a_fraction": 0.7154784842646115,
+        "medium_changed_fraction": 0.3138639281129653,
+        "g4b_response": 0.02040188335465735,
+        "g4b_relative_error": 0.06744562755215927,
+        "margins": {
+          "b1_fraction": -0.1674940898345153,
+          "shaft_ssim": 0.041102601519782955,
+          "g4a_fraction": -0.23452151573538849,
+          "medium_changed_fraction": 0.2138639281129653,
+          "g4b_relative_error": 0.13255437244784074
+        },
+        "all_five_pass": false
+      },
+      "observed_metrics": {
+        "b1_fraction": 0.7884160756501182,
+        "shaft_ssim": 0.9916078255428148,
+        "g4a_fraction": 0.7597944765574823,
+        "medium_changed_fraction": 0.31065468549422337,
+        "g4b_response": 0.020363695197357472,
+        "g4b_relative_error": 0.06919117880576935,
+        "margins": {
+          "b1_fraction": -0.16158392434988178,
+          "shaft_ssim": 0.041607825542814836,
+          "g4a_fraction": -0.19020552344251762,
+          "medium_changed_fraction": 0.21065468549422336,
+          "g4b_relative_error": 0.13080882119423065
+        },
+        "all_five_pass": false
+      },
+      "metric_error_predicted_minus_observed": {
+        "b1_fraction": -0.005910165484633523,
+        "shaft_ssim": -0.0005052240230318805,
+        "g4a_fraction": -0.044315992292870865,
+        "medium_changed_fraction": 0.0032092426187419476,
+        "g4b_response": 3.818815729987948e-05,
+        "g4b_relative_error": -0.0017455512536100753
+      },
+      "mean_absolute_linear_rgb_error": {
+        "sky": [
+          0.0021043451202687412,
+          0.0019498858665877932,
+          0.0016812521148216284
+        ],
+        "terrain": [
+          0.0013506918018482948,
+          0.001273237687815199,
+          0.0011939292782741653
+        ],
+        "shadow": [
+          0.0013505392232588725,
+          0.0012740413062826321,
+          0.0011937659024678863
+        ]
+      }
+    }
+  },
+  "candidate": {
+    "name": "directional-froxel-coupled-surface-f16-fixed-point-preserved-primary-sun",
+    "metrics": {
+      "b1_fraction": 1.0,
+      "shaft_ssim": 0.992349393985953,
+      "g4a_fraction": 0.9961464354527938,
+      "medium_changed_fraction": 0.37997432605905007,
+      "g4b_response": 0.022044067152454556,
+      "g4b_relative_error": 0.007617328861087248,
+      "margins": {
+        "b1_fraction": 0.050000000000000044,
+        "shaft_ssim": 0.042349393985953054,
+        "g4a_fraction": 0.046146435452793844,
+        "medium_changed_fraction": 0.27997432605905004,
+        "g4b_relative_error": 0.19238267113891278
+      },
+      "all_five_pass": true
+    },
+    "sensitivity": {
+      "ac739096->68cc04e9": {
+        "b1_fraction": [
+          0.9988179669030733,
+          1.0
+        ],
+        "shaft_ssim": [
+          0.9907645334922185,
+          0.9922798324997629
+        ],
+        "g4a_fraction": [
+          0.9678869621066153,
+          0.9961464354527938
+        ],
+        "medium_changed_fraction": [
+          0.37869062901155326,
+          0.38446726572528883
+        ],
+        "g4b_response": [
+          0.021996515828125895,
+          0.022123413759770914
+        ],
+        "g4b_relative_error": [
+          0.005443794455095495,
+          0.011244201160348766
+        ]
+      },
+      "d5507249->ac739096": {
+        "b1_fraction": [
+          1.0,
+          1.0
+        ],
+        "shaft_ssim": [
+          0.9911369077251232,
+          0.9915335098518914
+        ],
+        "g4a_fraction": [
+          0.9826589595375722,
+          0.9852280025690431
+        ],
+        "medium_changed_fraction": [
+          0.37869062901155326,
+          0.3870346598202824
+        ],
+        "g4b_response": [
+          0.021959994729811097,
+          0.02212007756942562
+        ],
+        "g4b_relative_error": [
+          0.0037744431835479105,
+          0.011091706469552848
+        ]
+      }
+    },
+    "orders": {
+      "True": [
+        {
+          "order": 1,
+          "maximum_stored_rgb_change": 0.43359375,
+          "changed_source_channels": 358272,
+          "changed_surface_channels": 300
+        },
+        {
+          "order": 2,
+          "maximum_stored_rgb_change": 0.092041015625,
+          "changed_source_channels": 358272,
+          "changed_surface_channels": 300
+        },
+        {
+          "order": 3,
+          "maximum_stored_rgb_change": 0.04248046875,
+          "changed_source_channels": 358272,
+          "changed_surface_channels": 300
+        },
+        {
+          "order": 4,
+          "maximum_stored_rgb_change": 0.01806640625,
+          "changed_source_channels": 358272,
+          "changed_surface_channels": 300
+        },
+        {
+          "order": 5,
+          "maximum_stored_rgb_change": 0.00732421875,
+          "changed_source_channels": 358220,
+          "changed_surface_channels": 300
+        },
+        {
+          "order": 6,
+          "maximum_stored_rgb_change": 0.003173828125,
+          "changed_source_channels": 356908,
+          "changed_surface_channels": 297
+        },
+        {
+          "order": 7,
+          "maximum_stored_rgb_change": 0.001220703125,
+          "changed_source_channels": 341170,
+          "changed_surface_channels": 258
+        },
+        {
+          "order": 8,
+          "maximum_stored_rgb_change": 0.00048828125,
+          "changed_source_channels": 260503,
+          "changed_surface_channels": 146
+        },
+        {
+          "order": 9,
+          "maximum_stored_rgb_change": 0.000244140625,
+          "changed_source_channels": 131919,
+          "changed_surface_channels": 73
+        },
+        {
+          "order": 10,
+          "maximum_stored_rgb_change": 0.000244140625,
+          "changed_source_channels": 55507,
+          "changed_surface_channels": 20
+        },
+        {
+          "order": 11,
+          "maximum_stored_rgb_change": 0.000244140625,
+          "changed_source_channels": 19668,
+          "changed_surface_channels": 12
+        },
+        {
+          "order": 12,
+          "maximum_stored_rgb_change": 0.000244140625,
+          "changed_source_channels": 9515,
+          "changed_surface_channels": 5
+        },
+        {
+          "order": 13,
+          "maximum_stored_rgb_change": 0.0001220703125,
+          "changed_source_channels": 3575,
+          "changed_surface_channels": 1
+        },
+        {
+          "order": 14,
+          "maximum_stored_rgb_change": 0.000244140625,
+          "changed_source_channels": 1404,
+          "changed_surface_channels": 1
+        },
+        {
+          "order": 15,
+          "maximum_stored_rgb_change": 1.52587890625e-05,
+          "changed_source_channels": 902,
+          "changed_surface_channels": 0
+        },
+        {
+          "order": 16,
+          "maximum_stored_rgb_change": 1.52587890625e-05,
+          "changed_source_channels": 159,
+          "changed_surface_channels": 0
+        },
+        {
+          "order": 17,
+          "maximum_stored_rgb_change": 1.52587890625e-05,
+          "changed_source_channels": 26,
+          "changed_surface_channels": 0
+        },
+        {
+          "order": 18,
+          "maximum_stored_rgb_change": 7.62939453125e-06,
+          "changed_source_channels": 3,
+          "changed_surface_channels": 0
+        },
+        {
+          "order": 19,
+          "maximum_stored_rgb_change": 0.0,
+          "changed_source_channels": 0,
+          "changed_surface_channels": 0
+        }
+      ],
+      "False": [
+        {
+          "order": 1,
+          "maximum_stored_rgb_change": 0.435791015625,
+          "changed_source_channels": 358272,
+          "changed_surface_channels": 300
+        },
+        {
+          "order": 2,
+          "maximum_stored_rgb_change": 0.101318359375,
+          "changed_source_channels": 358272,
+          "changed_surface_channels": 300
+        },
+        {
+          "order": 3,
+          "maximum_stored_rgb_change": 0.041259765625,
+          "changed_source_channels": 358272,
+          "changed_surface_channels": 300
+        },
+        {
+          "order": 4,
+          "maximum_stored_rgb_change": 0.014892578125,
+          "changed_source_channels": 358244,
+          "changed_surface_channels": 300
+        },
+        {
+          "order": 5,
+          "maximum_stored_rgb_change": 0.005126953125,
+          "changed_source_channels": 356791,
+          "changed_surface_channels": 299
+        },
+        {
+          "order": 6,
+          "maximum_stored_rgb_change": 0.00146484375,
+          "changed_source_channels": 328943,
+          "changed_surface_channels": 284
+        },
+        {
+          "order": 7,
+          "maximum_stored_rgb_change": 0.000732421875,
+          "changed_source_channels": 205362,
+          "changed_surface_channels": 154
+        },
+        {
+          "order": 8,
+          "maximum_stored_rgb_change": 0.000244140625,
+          "changed_source_channels": 75368,
+          "changed_surface_channels": 47
+        },
+        {
+          "order": 9,
+          "maximum_stored_rgb_change": 0.000244140625,
+          "changed_source_channels": 23163,
+          "changed_surface_channels": 20
+        },
+        {
+          "order": 10,
+          "maximum_stored_rgb_change": 0.000244140625,
+          "changed_source_channels": 7207,
+          "changed_surface_channels": 3
+        },
+        {
+          "order": 11,
+          "maximum_stored_rgb_change": 0.000244140625,
+          "changed_source_channels": 2174,
+          "changed_surface_channels": 2
+        },
+        {
+          "order": 12,
+          "maximum_stored_rgb_change": 1.52587890625e-05,
+          "changed_source_channels": 631,
+          "changed_surface_channels": 0
+        },
+        {
+          "order": 13,
+          "maximum_stored_rgb_change": 0.0001220703125,
+          "changed_source_channels": 197,
+          "changed_surface_channels": 1
+        },
+        {
+          "order": 14,
+          "maximum_stored_rgb_change": 1.52587890625e-05,
+          "changed_source_channels": 73,
+          "changed_surface_channels": 0
+        },
+        {
+          "order": 15,
+          "maximum_stored_rgb_change": 1.52587890625e-05,
+          "changed_source_channels": 19,
+          "changed_surface_channels": 0
+        },
+        {
+          "order": 16,
+          "maximum_stored_rgb_change": 7.62939453125e-06,
+          "changed_source_channels": 5,
+          "changed_surface_channels": 0
+        },
+        {
+          "order": 17,
+          "maximum_stored_rgb_change": 3.814697265625e-06,
+          "changed_source_channels": 1,
+          "changed_surface_channels": 0
+        },
+        {
+          "order": 18,
+          "maximum_stored_rgb_change": 3.814697265625e-06,
+          "changed_source_channels": 1,
+          "changed_surface_channels": 0
+        },
+        {
+          "order": 19,
+          "maximum_stored_rgb_change": 0.0,
+          "changed_source_channels": 0,
+          "changed_surface_channels": 0
+        }
+      ]
+    },
+    "angular_source_range_mean_rgb": [
+      0.028454752638936043,
+      0.025402963161468506,
+      0.02177521400153637
+    ],
+    "surface_vs_unreproducible_cache": {
+      "terrain": {
+        "mean_signed_rgb": [
+          0.0015619272538341048,
+          0.0019265645189935929,
+          0.0022905458559363905
+        ],
+        "mean_absolute_rgb": [
+          0.00609494696018639,
+          0.005259836178427046,
+          0.004482008042501793
+        ],
+        "max_absolute_rgb": [
+          0.480224609375,
+          0.46728515625,
+          0.447021484375
+        ]
+      },
+      "shadow": {
+        "mean_signed_rgb": [
+          0.0013786881355803058,
+          0.0017473228395741907,
+          0.0021173396193313395
+        ],
+        "mean_absolute_rgb": [
+          0.005914619222604623,
+          0.005082735328589812,
+          0.004310209296061527
+        ],
+        "max_absolute_rgb": [
+          0.480224609375,
+          0.46728515625,
+          0.447021484375
+        ]
+      }
+    }
+  },
+  "decision": "NOMINAL_PASS_REQUIRES_IMPLEMENTATION",
+  "limitations": [
+    "CPU arithmetic, not a physical render of HEAD; backend/CSM/traversal residuals remain.",
+    "Backward predictions cover historical medium changes; primary surface changes are held at their observed boundary.",
+    "Surface baseline uses exact world sun queries in place of captured CSM and 64^3 world-sun texture samples; their errors are retained.",
+    "Directional and spatial quadrature are explicit shader algorithms, not a convergence certificate for the reference integral.",
+    "Half-float fixed-point count is measured on this workload; other scenes require their own convergence test.",
+    "Held-out plus/minus maps measure sensitivity, not a bound transferable to new physics.",
+    "Frozen reference RNG dimension overlap is unchanged; reported separately."
+  ],
+  "input_sha256": {
+    "docs/audits/nephele-directional-study-2026-10-22.py": "d2f4beac49d11e3d60e9d09d6083072d71d6206b499862c338d11b95740e63b0",
+    "docs/audits/nephele_transport_cpu.py": "090ecd6cf11dd9c2ed15baefc1a7200c19de1bee536364f61cd83d50af46aba1",
+    "docs/audits/nephele-release-analysis-2026-10-22.py": "be30c6256b359695fc399405f2d202c9760531944e5daa21cbfa0c9658d40eba",
+    "assets/media/nephele_blue_noise_8x8.txt": "c4690ee9c66e9b2d1a608537cdc6c5384c93e69a42602093a6ce480606e780ea",
+    "tests/nephele/gate4-policy.json": "69c476c1a20ea5f5471d519b281ff0418b273bd60a84b8b7c9f718de82f349fb",
+    "src/shaders/nephele_froxel.wgsl": "1224d3e1549fabb820a0e5329353623aeaa26d622238d958ebb798b6b57ac807",
+    "src/shaders/nephele_realtime_terrain_trace.wgsl": "8b012a7afb81f7a88cd523f127b5341753fd07e50db510a5a88090d53f1ec779",
+    ".release-evidence/2026-10-22/continuation-study/coupled-surface.npz": "28bca25dec4b3951a98b785caee97f5085fd010133f81a6f13a0d2f4d864acdc",
+    "tests/nephele/fixture/atmosphere.json": "86c32891d5390696f21d9cd5b37c505e65ff2f81922b34f62862a9d2d91c1e47",
+    "tests/nephele/fixture/camera.json": "3d39f374e831eba962a0c57acabb962d2c500efbee11f8dca28f74a5883aa6d1",
+    "tests/nephele/fixture/cloud-shadow-mask.npy": "4cdbf4a232a521157e1428a5d72423f2e82352b206e0b6865c574972af69cd4e",
+    "tests/nephele/fixture/crop.json": "065419f7e21660a582b2326cde605ef8fc9fe030d3db1e07b32bb0026d878c04",
+    "tests/nephele/fixture/exposure.json": "8d27a721074814a7a2494d69be7842a32dff39eb4e7ed8d287588bbc3546fd31",
+    "tests/nephele/fixture/godray-roi-mask.npy": "bfa5e46e8cf884a271cac6ffd1d1b8a58a173d48e7c26a6752c1ac5a30fe2d20",
+    "tests/nephele/fixture/mask-rules.json": "48a16b48747151e06b01669e91d7ed9e21c612aa87baddf1071f56f484681008",
+    "tests/nephele/fixture/material.json": "9104fa8bd20fa69d3c08f3fe57c32cab48d74d690c22872777fbe834b06b8789",
+    "tests/nephele/fixture/medium.json": "40cb93a104db8217de4dae011d1d19dba4fe54c8942d0171e6767fb7746e9cf9",
+    "tests/nephele/fixture/reference-cloud-shadow-aov.npy": "2ed192c66493e0151142623f2d88eed35ccfaacd427eb947f6ff7917a5d58667",
+    "tests/nephele/fixture/reference-in-scatter.npy": "34b4d583b6dd726366c4c8ebad0ce15f4a43363bafab6f1ca0a0e813a2910e5e",
+    "tests/nephele/fixture/reference-media-lighting-visibility.npy": "1d9ab6bb4e88dbeb5f2f31196cdfc885181cba7744097e1b4aa33f64d8273159",
+    "tests/nephele/fixture/reference-optical-depth.npy": "f5bf53a7bf3b0932edad06de18ab4623f241bb4c83b20b3402add7c3132c02b6",
+    "tests/nephele/fixture/reference-provenance.json": "d083b146ff4e7fe1bac1874717bf8d527e9c2357d4be8f661203c63123144a67",
+    "tests/nephele/fixture/reference-rgb.npy": "d0a5ff2c46e746f76fe726873821b569324eb59c9cba87bd9be07a5e7dfcf5dd",
+    "tests/nephele/fixture/reference-terrain-hit.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    "tests/nephele/fixture/reference-terrain-slice.npy": "3d743b53af51a536ee462a89fa59cf4a1c41d9a1b1607e8901e87619eafcc1e5",
+    "tests/nephele/fixture/reference-transmittance.npy": "25fe0d4176f8a8bc9df05faccc3a353a8583aa57d69d18182f80bc2f67e57d20",
+    "tests/nephele/fixture/shaft-mask.npy": "dae7955e935586a3f85022cfc7bed9f0b3491ece6f44544cdc80c8f9bbe29177",
+    "tests/nephele/fixture/sky-cloud-mask.npy": "288e3868f1a06922441af4da195b5db590a5386e647cfc394c7be52f52b5a7b2",
+    "tests/nephele/fixture/sun.json": "fc074b48eb2cbdf2569ebd742a5ef4220514a6ae265a8ad1d298efd4a0722b02",
+    "tests/nephele/fixture/terrain-dem.npy": "4ae0b3517e1e7a7e09ab4a572f5b1c06cfff60074e640ed593638810ec9d36cf",
+    "tests/nephele/fixture/terrain-mask.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    "tests/nephele/fixture/terrain.json": "f8fa80ecb8c4312707ae198bc40ea2e93c7e158ca15f21739d5c3956b1bce315",
+    "tests/nephele/fixture/tonemap.json": "15cbb4e5e289d6d4fcbfdcebad8ad67c8cf8e2f74c032e5d2eeb0271d83d7034",
+    ".release-evidence/2026-10-22/ci-39545456967/realtime-rgb.npy": "f96e539e5a6cd0e2b1ead748c4b02fd01c4befdbeb6dd516aec249481a4e513f",
+    ".release-evidence/2026-10-22/ci-39545456967/terrain-occlusion-disabled-rgb.npy": "7c713e60ed32c46c9c2e41a75847df02c67e1ffe82ed103b11e536d1dbfd56fd",
+    ".release-evidence/2026-10-22/ci-39545456967/medium-disabled-rgb.npy": "92ebb84f45c32e48d4e94d47ea36fd6601878aabee39eb2615622f2fcf39eb3e",
+    ".release-evidence/2026-10-22/ci-39545456967/in-scatter.npy": "81c76ff4194332e3e70fbbc40f0176b64bf6854f9025e573bf482b4fcc2ef3dc",
+    ".release-evidence/2026-10-22/ci-39545456967/transmittance.npy": "f1cc596f64b9b6c15f1aa596bfc23efcfb95dbd5bfff4a0d1595e4553451b5b7",
+    ".release-evidence/2026-10-22/ci-39566600606/realtime-rgb.npy": "91d42a83486f0d055bb37d89d91d6c3615a0da5ea792b92207197ee302e25560",
+    ".release-evidence/2026-10-22/ci-39566600606/terrain-occlusion-disabled-rgb.npy": "47fe4691610ba890ef998c187423d4cbe10e193436d0193158ded45148cbfb2f",
+    ".release-evidence/2026-10-22/ci-39566600606/medium-disabled-rgb.npy": "92ebb84f45c32e48d4e94d47ea36fd6601878aabee39eb2615622f2fcf39eb3e",
+    ".release-evidence/2026-10-22/ci-39566600606/in-scatter.npy": "8aaad008aba195da28f6fb243870ad1cf4d86ec8f4d593fd11f33186c371bd44",
+    ".release-evidence/2026-10-22/ci-39566600606/transmittance.npy": "f1cc596f64b9b6c15f1aa596bfc23efcfb95dbd5bfff4a0d1595e4553451b5b7",
+    ".release-evidence/2026-10-22/ci-39580065706/realtime-rgb.npy": "b0a85054a34eb603812566fb7afe196f0456d537f52695e815813cc5a849b2ed",
+    ".release-evidence/2026-10-22/ci-39580065706/terrain-occlusion-disabled-rgb.npy": "3ef43a25be99361937aa09aa9314c2f22f9f2e7f6d0f068772b069060171e420",
+    ".release-evidence/2026-10-22/ci-39580065706/medium-disabled-rgb.npy": "92ebb84f45c32e48d4e94d47ea36fd6601878aabee39eb2615622f2fcf39eb3e",
+    ".release-evidence/2026-10-22/ci-39580065706/in-scatter.npy": "725635a3a9653b4db0f66b398ba367b9c3ed970f4bcc2e7e42ec1b9bf0d1e434",
+    ".release-evidence/2026-10-22/ci-39580065706/transmittance.npy": "f1cc596f64b9b6c15f1aa596bfc23efcfb95dbd5bfff4a0d1595e4553451b5b7"
+  },
+  "duration_seconds": 58.521962099999655,
+  "unchanged_gate_functions": {
+    "gate3": {
+      "metrics": {
+        "sky_cloud_delta_e_pass_fraction": 1.0,
+        "godray_roi_ssim": 0.992349393985953
+      },
+      "failures": []
+    },
+    "gate4": {
+      "metrics": {
+        "shadow_delta_e_pass_fraction": 0.9961464354527938,
+        "medium_ablation_changed_fraction": 0.37997432605905007,
+        "terrain_occlusion_ablation_ssim": 0.9860671914783118,
+        "shadow_pixels": 1557,
+        "terrain_occlusion_mean_linear_luminance_change": 0.022044067152454556,
+        "terrain_occlusion_reference_mean_linear_luminance_change": 0.02187741965233074,
+        "terrain_occlusion_response_relative_error": 0.007617328861087248,
+        "terrain_occlusion_maximum_relative_error": 0.2
+      },
+      "failures": []
+    }
+  },
+  "protected_value_proposal": {
+    "PINNED_TERRAIN_SOURCE_HASH": {
+      "old": "0x895bb1d3845497e1",
+      "new": "0x3afe8ce71c2d1a4a",
+      "assembly_parts": 21
+    },
+    "shader_contract_input": {
+      "path": "shaders/contracts/terrain_pbr_pom.toml",
+      "entry": "fs_main",
+      "old": "texture:nephele_surface_cloudlight_tex:0:65504:2:nephele_surface_cloudlight_tex.width:nephele_surface_cloudlight_tex.height",
+      "new": "texture:nephele_surface_cloudlight_tex:-65504:65504:2:nephele_surface_cloudlight_tex.width:nephele_surface_cloudlight_tex.height",
+      "reason": "The texture now also carries signed environment-irradiance corrections. Both bounds are the representable finite f16 range; expanding the proof input domain does not relax its output guarantees."
+    },
+    "existing_test_assertion_changes": [],
+    "golden_changes": [],
+    "f32_inventory_changes": [],
+    "status": "APPLIED_WITH_MILOS_APPROVAL"
+  },
+  "implementation_sha256": {
+    "src/shaders/nephele_realtime_terrain_trace.wgsl": "cb6f19ed38b27d7859ceec0143a4077d1cb501d874636c746fcc8eca709617b4",
+    "src/shaders/terrain_pbr_pom.wgsl": "1a41ccb2b602fafd6f841cb0d00d49f6714a2bca62773e9c223f134baa92fb78",
+    "src/terrain/renderer/aov.rs": "11a176c6807e9095ab858657857922b1ef2c4c530cda542341e83d8cf9a35d25",
+    "src/terrain/renderer/atmosphere.rs": "b19c92de1f5eb2c3bd50bf242b6616a62da1f527af9ce8e93d879cbb8aa902ee",
+    "src/terrain/renderer/draw/execute.rs": "d3858940f8e07ee55db4fbf3fac39dba54f56f94d23ce620621247b4df0e17d7",
+    "src/terrain/renderer/draw/mod.rs": "e1bb66a23bc267c7bb068ae54aee108b227e2fec8e61eb298620bc5726fdd2e5",
+    "src/terrain/renderer/media.rs": "dbba0ad53d0f255d617f1db1ff80f7730c6ef7e19bb9351a4c1f80a4c634d91c",
+    "src/terrain/renderer/offline.rs": "d75d8e677dd77ac3a39983dc46e89edbb07fc1f9e71cead6cbf808f9044fc054",
+    "src/terrain/renderer/render_graph.rs": "c5c0aa2c5bb668e6df1a18a5310d6bed1eac47e4d490b503afc11fc5dc987d8f",
+    "src/verify/ir/engine.rs": "975f9591a891a0146ec08aebd47b4ea7ce2e7b89bdf769e65973c522bb0de816"
+  },
+  "storage_equivalence": {
+    "True": {
+      "active_froxels": 622,
+      "directions": 192,
+      "rgb_values_compared": 358272,
+      "bit_exact_f16_roundtrip": true,
+      "witness_row_width_from_viewport": 64
+    },
+    "False": {
+      "active_froxels": 622,
+      "directions": 192,
+      "rgb_values_compared": 358272,
+      "bit_exact_f16_roundtrip": true,
+      "witness_row_width_from_viewport": 64
+    }
+  },
+  "checks": {
+    "directional-adaptive-ci-scoped-check.json": {
+      "command": "workflow contracts after moving benchmark to NEPHELE job",
+      "environment": {
+        "FORGE3D_NO_BOOTSTRAP": "1"
+      },
+      "duration_seconds": 12.041853,
+      "exit_code": 0
+    },
+    "directional-adaptive-contract-inspect-check.json": {
+      "duration_seconds": 24.7090389,
+      "FORGE3D_DET_REWRITE": "0",
+      "exit_code": 101,
+      "command": "cargo test --lib --features extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion inspect_deterministic_kernel_ir_shape -- --ignored --nocapture"
+    },
+    "directional-adaptive-contracts-check.json": {
+      "exit_code": 0,
+      "command": "cargo test --lib --features extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion verify::ir:: -- --nocapture",
+      "duration_seconds": 3.0072961,
+      "environment": {
+        "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+        "FORGE3D_NO_BOOTSTRAP": "1",
+        "FORGE3D_DET_REWRITE": "0"
+      }
+    },
+    "directional-adaptive-cpu-check.json": {
+      "checks": [
+        {
+          "name": "fmt",
+          "command": [
+            "cargo",
+            "fmt",
+            "--check"
+          ],
+          "duration_seconds": 0.3143225999956485,
+          "exit_code": 0
+        },
+        {
+          "name": "ci-contracts",
+          "command": [
+            "python",
+            "-m",
+            "pytest",
+            "tests/test_assert_junit_zero_skips.py",
+            "tests/test_ci_cost_controls.py",
+            "tests/test_ci_lfs_fanout.py",
+            "--basetemp",
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-22\\pytest-adaptive-ci-contracts",
+            "--junitxml",
+            "D:\\forge3d\\.worktrees\\nephele-146-release\\.release-evidence\\2026-10-22\\directional-adaptive-ci-contracts.xml",
+            "-q"
+          ],
+          "duration_seconds": 12.964453499997035,
+          "exit_code": 0
+        }
+      ],
+      "environment": {
+        "FORGE3D_NO_BOOTSTRAP": "1",
+        "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target"
+      }
+    },
+    "directional-adaptive-rust-check.json": {
+      "environment": {
+        "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+        "FORGE3D_NO_BOOTSTRAP": "1",
+        "FORGE3D_DET_REWRITE": "0"
+      },
+      "features": "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+      "checks": [
+        {
+          "name": "clippy",
+          "command": [
+            "cargo",
+            "forge3d-clippy-acceptance"
+          ],
+          "duration_seconds": 28.313302199996542,
+          "exit_code": 0
+        },
+        {
+          "name": "terrain-renderer-render_graph-tests",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "terrain::renderer::render_graph::tests",
+            "--",
+            "--nocapture"
+          ],
+          "duration_seconds": 46.52600280000479,
+          "exit_code": 0,
+          "executed_tests": 4
+        },
+        {
+          "name": "shaders_validate_and_compute_call_graphs_use_manual_shadows",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "shaders_validate_and_compute_call_graphs_use_manual_shadows",
+            "--",
+            "--nocapture"
+          ],
+          "duration_seconds": 0.7813698999816552,
+          "exit_code": 0,
+          "executed_tests": 1
+        },
+        {
+          "name": "assembled_terrain_shader_consumes_same_medium_transmittance",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "assembled_terrain_shader_consumes_same_medium_transmittance",
+            "--",
+            "--nocapture"
+          ],
+          "duration_seconds": 0.9226404999790248,
+          "exit_code": 0,
+          "executed_tests": 1
+        },
+        {
+          "name": "viewer_pbr_uses_rgb_same_medium_direct_light_and_keeps_media_hdr_linear",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "viewer_pbr_uses_rgb_same_medium_direct_light_and_keeps_media_hdr_linear",
+            "--",
+            "--nocapture"
+          ],
+          "duration_seconds": 0.6375813000195194,
+          "exit_code": 0,
+          "executed_tests": 1
+        },
+        {
+          "name": "det_instrument_rewrite",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "det_instrument_rewrite",
+            "--",
+            "--nocapture"
+          ],
+          "duration_seconds": 2.7419102000130806,
+          "exit_code": 0,
+          "executed_tests": 1
+        }
+      ]
+    },
+    "directional-analytic-final-check.json": {
+      "duration_seconds": 29.3967814,
+      "exit_code": 0,
+      "features": "CPU analytic cases"
+    },
+    "directional-clippy-final-check.json": {
+      "duration_seconds": 76.2171899,
+      "features": "forge3d-clippy-acceptance alias",
+      "FORGE3D_NO_BOOTSTRAP": "1",
+      "exit_code": 0,
+      "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target"
+    },
+    "directional-clippy-verified-check.json": {
+      "exit_code": 0,
+      "duration_seconds": 850.2638109,
+      "FORGE3D_NO_BOOTSTRAP": "1",
+      "features": "forge3d-clippy-acceptance alias",
+      "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target"
+    },
+    "directional-cpu-pytest-check.json": {
+      "FORGE3D_NO_BOOTSTRAP": "1",
+      "features": "CPU source and acceptance/fixture contracts",
+      "duration_seconds": 142.8090509,
+      "exit_code": 0,
+      "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target"
+    },
+    "directional-decoupled-analytic-check.json": {
+      "environment": {
+        "FORGE3D_NO_BOOTSTRAP": "1"
+      },
+      "duration_seconds": 15.5724551,
+      "features": "CPU analytic, no GPU",
+      "exit_code": 0
+    },
+    "directional-f32-no-bootstrap-check.json": {
+      "duration_seconds": 71.4205753,
+      "environment": {
+        "FORGE3D_NO_BOOTSTRAP": "1",
+        "FORGE3D_TEST_INSTALLED_WHEEL": null
+      },
+      "features": "CPU source inventory",
+      "exit_code": 1
+    },
+    "directional-final-check.json": {
+      "duration_seconds": 135.2677247,
+      "exit_code": 0,
+      "features": "CPU-only directional transport",
+      "environment": "analysis-venv Python 3.13.14, NumPy 2.3.5, Numba 0.63.1"
+    },
+    "directional-fmt-final-check.json": {
+      "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+      "exit_code": 0,
+      "duration_seconds": 12.8103007
+    },
+    "directional-framegraph-tests-check.json": {
+      "FORGE3D_NO_BOOTSTRAP": "1",
+      "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+      "exit_code": 0,
+      "duration_seconds": 207.1314762,
+      "features": "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion"
+    },
+    "directional-ready-rust-check.json": {
+      "features": "clippy acceptance alias; shader test extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+      "checks": [
+        {
+          "duration_seconds": 33.0461631,
+          "name": "clippy-acceptance",
+          "exit_code": 0
+        },
+        {
+          "duration_seconds": 30.6046047,
+          "name": "shaders_validate_and_compute_call_graphs_use_manual_shadows",
+          "exit_code": 0
+        }
+      ],
+      "environment": {
+        "FORGE3D_DET_REWRITE": "0",
+        "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+        "FORGE3D_NO_BOOTSTRAP": "1"
+      }
+    },
+    "directional-realistic-dem-input-check.json": {
+      "command": "CPU DEM input verification only",
+      "GPU_executed": false,
+      "exit_code": 0,
+      "duration_seconds": 0.6285471
+    },
+    "directional-rust-check.json": {
+      "features": "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+      "checks": [
+        {
+          "duration_seconds": 1080.0312056,
+          "exit_code": 0,
+          "filter": "terrain::renderer::render_graph::tests"
+        },
+        {
+          "duration_seconds": 65.6532146,
+          "exit_code": 101,
+          "filter": "shaders_validate_and_compute_call_graphs_use_manual_shadows"
+        },
+        {
+          "duration_seconds": 1.7472184,
+          "exit_code": 0,
+          "filter": "assembled_terrain_shader_consumes_same_medium_transmittance"
+        },
+        {
+          "duration_seconds": 1.1453976,
+          "exit_code": 0,
+          "filter": "viewer_pbr_uses_rgb_same_medium_direct_light_and_keeps_media_hdr_linear"
+        },
+        {
+          "duration_seconds": 3.4487745,
+          "exit_code": 0,
+          "filter": "det_instrument_rewrite"
+        }
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+        "FORGE3D_DET_REWRITE": "0",
+        "FORGE3D_NO_BOOTSTRAP": "1"
+      }
+    },
+    "directional-sparse-pytest-check.json": {
+      "exit_code": 0,
+      "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+      "duration_seconds": 106.0241838,
+      "FORGE3D_NO_BOOTSTRAP": "1",
+      "features": "CPU source and acceptance/fixture contracts"
+    },
+    "directional-sparse-rust-check.json": {
+      "environment": {
+        "FORGE3D_DET_REWRITE": "0",
+        "FORGE3D_NO_BOOTSTRAP": "1",
+        "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target"
+      },
+      "features": "clippy acceptance alias; unit tests extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+      "checks": [
+        {
+          "name": "clippy-acceptance",
+          "duration_seconds": 55.3390429,
+          "exit_code": 0
+        },
+        {
+          "name": "terrain::renderer::render_graph::tests",
+          "duration_seconds": 2.3214895,
+          "exit_code": 0
+        },
+        {
+          "name": "shaders_validate_and_compute_call_graphs_use_manual_shadows",
+          "duration_seconds": 0.6983496,
+          "exit_code": 101
+        },
+        {
+          "name": "assembled_terrain_shader_consumes_same_medium_transmittance",
+          "duration_seconds": 0.9268973,
+          "exit_code": 0
+        },
+        {
+          "name": "viewer_pbr_uses_rgb_same_medium_direct_light_and_keeps_media_hdr_linear",
+          "duration_seconds": 0.6748653,
+          "exit_code": 0
+        },
+        {
+          "name": "det_instrument_rewrite",
+          "duration_seconds": 2.8055776,
+          "exit_code": 0
+        },
+        {
+          "name": "cargo fmt --check",
+          "duration_seconds": 0.4650036,
+          "exit_code": 0
+        }
+      ]
+    }
+  },
+  "implementation_status": "LOCAL_UNCOMMITTED_CPU_QUALIFIED_PHYSICAL_PROOF_PENDING",
+  "current_validation": {
+    "f32_inventory": {
+      "passed": 33,
+      "failed": 0,
+      "skipped": 0,
+      "pytest_reported_seconds": 51.99,
+      "log": "directional-adaptive-f32.log",
+      "environment": {
+        "FORGE3D_NO_BOOTSTRAP": "1",
+        "FORGE3D_TEST_INSTALLED_WHEEL": "unset"
+      }
+    },
+    "rust_final": {
+      "environment": {
+        "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+        "FORGE3D_NO_BOOTSTRAP": "1",
+        "FORGE3D_DET_REWRITE": "0"
+      },
+      "features": "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+      "checks": [
+        {
+          "name": "clippy",
+          "command": [
+            "cargo",
+            "forge3d-clippy-acceptance"
+          ],
+          "duration_seconds": 28.313302199996542,
+          "exit_code": 0
+        },
+        {
+          "name": "terrain-renderer-render_graph-tests",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "terrain::renderer::render_graph::tests",
+            "--",
+            "--nocapture"
+          ],
+          "duration_seconds": 46.52600280000479,
+          "exit_code": 0,
+          "executed_tests": 4
+        },
+        {
+          "name": "shaders_validate_and_compute_call_graphs_use_manual_shadows",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "shaders_validate_and_compute_call_graphs_use_manual_shadows",
+            "--",
+            "--nocapture"
+          ],
+          "duration_seconds": 0.7813698999816552,
+          "exit_code": 0,
+          "executed_tests": 1
+        },
+        {
+          "name": "assembled_terrain_shader_consumes_same_medium_transmittance",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "assembled_terrain_shader_consumes_same_medium_transmittance",
+            "--",
+            "--nocapture"
+          ],
+          "duration_seconds": 0.9226404999790248,
+          "exit_code": 0,
+          "executed_tests": 1
+        },
+        {
+          "name": "viewer_pbr_uses_rgb_same_medium_direct_light_and_keeps_media_hdr_linear",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "viewer_pbr_uses_rgb_same_medium_direct_light_and_keeps_media_hdr_linear",
+            "--",
+            "--nocapture"
+          ],
+          "duration_seconds": 0.6375813000195194,
+          "exit_code": 0,
+          "executed_tests": 1
+        },
+        {
+          "name": "det_instrument_rewrite",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "det_instrument_rewrite",
+            "--",
+            "--nocapture"
+          ],
+          "duration_seconds": 2.7419102000130806,
+          "exit_code": 0,
+          "executed_tests": 1
+        }
+      ]
+    },
+    "contract_ir": {
+      "exit_code": 0,
+      "command": "cargo test --lib --features extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion verify::ir:: -- --nocapture",
+      "duration_seconds": 3.0072961,
+      "environment": {
+        "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+        "FORGE3D_NO_BOOTSTRAP": "1",
+        "FORGE3D_DET_REWRITE": "0"
+      },
+      "passed": 46,
+      "failed": 0,
+      "ignored": 1,
+      "ignored_name": "inspect_deterministic_kernel_ir_shape: existing diagnostic intentionally panics"
+    },
+    "optional_ignored_inspection": {
+      "duration_seconds": 24.7090389,
+      "FORGE3D_DET_REWRITE": "0",
+      "exit_code": 101,
+      "command": "cargo test --lib --features extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion inspect_deterministic_kernel_ir_shape -- --ignored --nocapture",
+      "result": "Expected unconditional diagnostic panic at src/verify/ir/tests.rs:857; unchanged, not an acceptance test"
+    },
+    "naga": {
+      "naga_validated_assemblies": 304,
+      "compute_entry_texture_sample_compare_calls": 0,
+      "unresolved_source_expressions": [],
+      "duration_seconds": 92.55494909998379
+    },
+    "analytic": {
+      "environment": {
+        "FORGE3D_NO_BOOTSTRAP": "1"
+      },
+      "duration_seconds": 15.5724551,
+      "features": "CPU analytic, no GPU",
+      "exit_code": 0
+    },
+    "workflow_contracts": {
+      "command": "workflow contracts after moving benchmark to NEPHELE job",
+      "environment": {
+        "FORGE3D_NO_BOOTSTRAP": "1"
+      },
+      "duration_seconds": 12.041853,
+      "exit_code": 0,
+      "passed": 44,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "validation_features": {
+    "clippy": "clippy --workspace --all-targets --features extension-module,default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,atmosphere-bake,enable-globe,splat-fusion -- -D warnings",
+    "rust_tests": "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion"
+  },
+  "protected_paths_unchanged": {
+    "frozen_paths": true,
+    "policy": true,
+    "other_protected_paths": true
+  },
+  "canonical_npy_tracked_count": 14,
+  "policy_git_blob_sha256": "69c476c1a20ea5f5471d519b281ff0418b273bd60a84b8b7c9f718de82f349fb",
+  "approvals_received_this_task": [
+    "approved for the pin and range \u2014 but before committing, remove the per-frame readback from the viewer diagnostics path. Before release: decouple the surface cache from DEM resolution and measure frame time on a realistic DEM (\u22651024\u00b2); report or enforce convergence instead of a fixed 21 orders."
+  ],
+  "runtime_convergence": {
+    "stop": "Both stored f16 fields are unchanged, checked on GPU after every order",
+    "order_cap": null,
+    "failure": "Reject non-finite f16 values or loss of positive-operator monotonicity",
+    "transport_readback_bytes_per_order": 16,
+    "viewer_diagnostics_readback_bytes": 0,
+    "reuse": "Only exact matching uniform/provider keys for completely identified static environment inputs",
+    "live_rendered_sky_cache_reuse": false,
+    "surface_cache_dimensions_source": "froxel grid xy, independent of DEM dimensions"
+  },
+  "realistic_dem_timing": {
+    "status": "RELEASE_BLOCKER_NOT_YET_MEASURED",
+    "CPU_input_verification": {
+      "status": "CPU_INPUT_ONLY",
+      "head_sha": "04e8ae6825ab8073ac6a8ffecef648c5da164885",
+      "source": {
+        "path": "assets/tif/Gore_Range_Albers_1m.tif",
+        "sha256": "bcacfdfabefc7ef4e7b9a9cefe12375b491fe1769218ad3c3ddd3ae30f9d93bc",
+        "shape": [
+          1500,
+          1500
+        ],
+        "spacing_metres": 1.0,
+        "elevation_range_metres": [
+          3363.860107421875,
+          4055.239990234375
+        ],
+        "provenance": "tests/data/prometheus/gore_range_dem.json",
+        "dataset_doi": "10.5281/zenodo.3940482"
+      },
+      "GPU_executed": false
+    },
+    "program": "docs/audits/nephele-dem-frame-time-2026-10-22.py",
+    "execution": "Physical NVIDIA Vulkan CI only; first and unchanged completed-frame observations at terrain_demo.DEFAULT_SIZE (1920x1080)",
+    "before_change_timing": "ABSENT; no speedup claim"
+  },
+  "not_run": [
+    "Physical NVIDIA Vulkan capture of the new implementation",
+    "Realistic DEM GPU frame-time measurement",
+    "D3D12 ABSENT",
+    "Metal ABSENT",
+    "WASM ABSENT",
+    "Installed wheel, full produce and fast lane",
+    "Python shader proof/runtime contract suite and the two GPU environment cases (CI only)",
+    "NEPHELE/full CI, release preparation, merge and publish dry run"
+  ]
+}

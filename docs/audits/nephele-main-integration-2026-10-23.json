@@ -1,0 +1,1834 @@
+{
+  "schema": "forge3d.nephele.integration-approval/1",
+  "date": "2026-10-23",
+  "status": "APPROVED BATCH APPLIED; CPU CONTRACT CHECKS PASS; EXACT-HEAD WHEEL AND PHYSICAL PROOF PENDING",
+  "release_parent": "ca9ad2cec1d9b890e9f50178dd279c4b322dd781",
+  "main_parent": "d6b9e556586cceddb9c08f16ffc35f7d71fb4d88",
+  "production_tree_before_audit": "eb12295daf0221e18851521a0d32d84049c8672c",
+  "PR": "https://github.com/milos-agathon/forge3d/pull/172",
+  "approval_words": [
+    "approved for the pin and range — but before committing, remove the per-frame readback from the viewer diagnostics path. Before release: decouple the surface cache from DEM resolution and measure frame time on a realistic DEM (≥1024²); report or enforce convergence instead of a fixed 21 orders.",
+    "Yes — prepare the main integration before capture, push it to PR #172, then stop with one exact approval batch (shader pin, contract changes, f32 ledger regeneration, any certificates). Release still requires physical green plus the 1500² DEM frame-time measurement.",
+    "approved — and correct the manifest's source label for test_api_contracts.py and test_render_certificate_contract.py (they are merged versions, not exact main bytes)."
+  ],
+  "exact_approval": {
+    "shader_pin": {
+      "old": "0x3afe_8ce7_1c2d_1a4a",
+      "new": "0x17ad_c1fb_40ed_8189"
+    },
+    "f32": {
+      "old_count": 1931,
+      "old_inventory_sha256": "eb22339b6de627ada37d1f0068d7306bfa152ae339997d7c6ee106dee09951a8",
+      "new_count": 1936,
+      "new_inventory_sha256": "8f9f378ce8e27a98e9b99961073ae70128584485778adf1dc2c597c464c0cee7",
+      "delta": {
+        "added": [
+          [
+            "src/core/taa.rs",
+            "<module>",
+            "as_f32",
+            1,
+            "resolution: [width as f32, height as f32], ..Default::default()"
+          ],
+          [
+            "src/core/taa.rs",
+            "<module>",
+            "as_f32",
+            2,
+            "resolution: [width as f32, height as f32], ..Default::default()"
+          ],
+          [
+            "src/terrain/renderer/height_ao/passes.rs",
+            "compute_height_ao_pass_with_pipeline",
+            "as_f32",
+            1,
+            "params0: [ decoded.height_ao.directions as f32, decoded.height_ao.steps as f32, decoded.height_ao.max_distance, decoded.height_ao.strength, ], params1: [ params.terrain_span / width as f32, params.terrain_span / height as f32, params.z_scale, decoded.clamp.height_range.0, ], params2: [ ao_width as f32, ao_height as f32, width as f32, height as f32, ],"
+          ],
+          [
+            "src/terrain/renderer/height_ao/passes.rs",
+            "compute_height_ao_pass_with_pipeline",
+            "as_f32",
+            2,
+            "params0: [ decoded.height_ao.directions as f32, decoded.height_ao.steps as f32, decoded.height_ao.max_distance, decoded.height_ao.strength, ], params1: [ params.terrain_span / width as f32, params.terrain_span / height as f32, params.z_scale, decoded.clamp.height_range.0, ], params2: [ ao_width as f32, ao_height as f32, width as f32, height as f32, ],"
+          ],
+          [
+            "src/terrain/renderer/height_ao/passes.rs",
+            "compute_height_ao_pass_with_pipeline",
+            "as_f32",
+            3,
+            "params0: [ decoded.height_ao.directions as f32, decoded.height_ao.steps as f32, decoded.height_ao.max_distance, decoded.height_ao.strength, ], params1: [ params.terrain_span / width as f32, params.terrain_span / height as f32, params.z_scale, decoded.clamp.height_range.0, ], params2: [ ao_width as f32, ao_height as f32, width as f32, height as f32, ],"
+          ],
+          [
+            "src/terrain/renderer/height_ao/passes.rs",
+            "compute_height_ao_pass_with_pipeline",
+            "as_f32",
+            4,
+            "params0: [ decoded.height_ao.directions as f32, decoded.height_ao.steps as f32, decoded.height_ao.max_distance, decoded.height_ao.strength, ], params1: [ params.terrain_span / width as f32, params.terrain_span / height as f32, params.z_scale, decoded.clamp.height_range.0, ], params2: [ ao_width as f32, ao_height as f32, width as f32, height as f32, ],"
+          ],
+          [
+            "src/terrain/renderer/height_ao/passes.rs",
+            "compute_height_ao_pass_with_pipeline",
+            "as_f32",
+            5,
+            "params0: [ decoded.height_ao.directions as f32, decoded.height_ao.steps as f32, decoded.height_ao.max_distance, decoded.height_ao.strength, ], params1: [ params.terrain_span / width as f32, params.terrain_span / height as f32, params.z_scale, decoded.clamp.height_range.0, ], params2: [ ao_width as f32, ao_height as f32, width as f32, height as f32, ],"
+          ],
+          [
+            "src/terrain/renderer/height_ao/passes.rs",
+            "compute_height_ao_pass_with_pipeline",
+            "as_f32",
+            6,
+            "params0: [ decoded.height_ao.directions as f32, decoded.height_ao.steps as f32, decoded.height_ao.max_distance, decoded.height_ao.strength, ], params1: [ params.terrain_span / width as f32, params.terrain_span / height as f32, params.z_scale, decoded.clamp.height_range.0, ], params2: [ ao_width as f32, ao_height as f32, width as f32, height as f32, ],"
+          ],
+          [
+            "src/terrain/renderer/height_ao/passes.rs",
+            "compute_height_ao_pass_with_pipeline",
+            "as_f32",
+            7,
+            "params0: [ decoded.height_ao.directions as f32, decoded.height_ao.steps as f32, decoded.height_ao.max_distance, decoded.height_ao.strength, ], params1: [ params.terrain_span / width as f32, params.terrain_span / height as f32, params.z_scale, decoded.clamp.height_range.0, ], params2: [ ao_width as f32, ao_height as f32, width as f32, height as f32, ],"
+          ],
+          [
+            "src/terrain/renderer/height_ao/passes.rs",
+            "compute_height_ao_pass_with_pipeline",
+            "as_f32",
+            8,
+            "params0: [ decoded.height_ao.directions as f32, decoded.height_ao.steps as f32, decoded.height_ao.max_distance, decoded.height_ao.strength, ], params1: [ params.terrain_span / width as f32, params.terrain_span / height as f32, params.z_scale, decoded.clamp.height_range.0, ], params2: [ ao_width as f32, ao_height as f32, width as f32, height as f32, ],"
+          ],
+          [
+            "src/terrain/renderer/interactive.rs",
+            "new",
+            "as_f32",
+            1,
+            "value.inv_resolution = [1.0 / width as f32, 1.0 / height as f32]"
+          ],
+          [
+            "src/terrain/renderer/interactive.rs",
+            "new",
+            "as_f32",
+            2,
+            "value.inv_resolution = [1.0 / width as f32, 1.0 / height as f32]"
+          ],
+          [
+            "src/terrain/renderer/interactive.rs",
+            "new",
+            "as_f32",
+            3,
+            "value.proj_scale = 0.5 * height as f32 / (params.fov_y_deg.to_radians() * 0.5).tan()"
+          ],
+          [
+            "src/terrain/renderer/interactive.rs",
+            "<module>",
+            "as_f32",
+            1,
+            "let translation = glam::Mat4::from_translation(glam::Vec3::new( 2.0 * x / params.size_px.0 as f32, -2.0 * y / params.size_px.1 as f32, 0.0, ))"
+          ],
+          [
+            "src/terrain/renderer/interactive.rs",
+            "<module>",
+            "as_f32",
+            2,
+            "let translation = glam::Mat4::from_translation(glam::Vec3::new( 2.0 * x / params.size_px.0 as f32, -2.0 * y / params.size_px.1 as f32, 0.0, ))"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            6,
+            "height_exag }, height_min, height_max, ], grid_params: [ SHADOW_GRID_RES as f32, if y_up { 1.0"
+          ],
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup_with_mode",
+            "as_f32",
+            1,
+            "let aspect = params.size_px.0 as f32 / params.size_px.1 as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup_with_mode",
+            "as_f32",
+            2,
+            "let aspect = params.size_px.0 as f32 / params.size_px.1 as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup_with_mode",
+            "as_f32",
+            3,
+            "let step = (shadow_far - last) / remaining.max(1) as f32"
+          ]
+        ],
+        "removed": [
+          [
+            "src/core/taa.rs",
+            "new",
+            "as_f32",
+            1,
+            "resolution: [width as f32, height as f32], ..Default::default()"
+          ],
+          [
+            "src/core/taa.rs",
+            "new",
+            "as_f32",
+            2,
+            "resolution: [width as f32, height as f32], ..Default::default()"
+          ],
+          [
+            "src/terrain/renderer/height_ao/passes.rs",
+            "compute_height_ao_pass",
+            "as_f32",
+            1,
+            "params0: [ decoded.height_ao.directions as f32, decoded.height_ao.steps as f32, decoded.height_ao.max_distance, decoded.height_ao.strength, ], params1: [ params.terrain_span / width as f32, params.terrain_span / height as f32, params.z_scale, decoded.clamp.height_range.0, ], params2: [ ao_width as f32, ao_height as f32, width as f32, height as f32, ],"
+          ],
+          [
+            "src/terrain/renderer/height_ao/passes.rs",
+            "compute_height_ao_pass",
+            "as_f32",
+            2,
+            "params0: [ decoded.height_ao.directions as f32, decoded.height_ao.steps as f32, decoded.height_ao.max_distance, decoded.height_ao.strength, ], params1: [ params.terrain_span / width as f32, params.terrain_span / height as f32, params.z_scale, decoded.clamp.height_range.0, ], params2: [ ao_width as f32, ao_height as f32, width as f32, height as f32, ],"
+          ],
+          [
+            "src/terrain/renderer/height_ao/passes.rs",
+            "compute_height_ao_pass",
+            "as_f32",
+            3,
+            "params0: [ decoded.height_ao.directions as f32, decoded.height_ao.steps as f32, decoded.height_ao.max_distance, decoded.height_ao.strength, ], params1: [ params.terrain_span / width as f32, params.terrain_span / height as f32, params.z_scale, decoded.clamp.height_range.0, ], params2: [ ao_width as f32, ao_height as f32, width as f32, height as f32, ],"
+          ],
+          [
+            "src/terrain/renderer/height_ao/passes.rs",
+            "compute_height_ao_pass",
+            "as_f32",
+            4,
+            "params0: [ decoded.height_ao.directions as f32, decoded.height_ao.steps as f32, decoded.height_ao.max_distance, decoded.height_ao.strength, ], params1: [ params.terrain_span / width as f32, params.terrain_span / height as f32, params.z_scale, decoded.clamp.height_range.0, ], params2: [ ao_width as f32, ao_height as f32, width as f32, height as f32, ],"
+          ],
+          [
+            "src/terrain/renderer/height_ao/passes.rs",
+            "compute_height_ao_pass",
+            "as_f32",
+            5,
+            "params0: [ decoded.height_ao.directions as f32, decoded.height_ao.steps as f32, decoded.height_ao.max_distance, decoded.height_ao.strength, ], params1: [ params.terrain_span / width as f32, params.terrain_span / height as f32, params.z_scale, decoded.clamp.height_range.0, ], params2: [ ao_width as f32, ao_height as f32, width as f32, height as f32, ],"
+          ],
+          [
+            "src/terrain/renderer/height_ao/passes.rs",
+            "compute_height_ao_pass",
+            "as_f32",
+            6,
+            "params0: [ decoded.height_ao.directions as f32, decoded.height_ao.steps as f32, decoded.height_ao.max_distance, decoded.height_ao.strength, ], params1: [ params.terrain_span / width as f32, params.terrain_span / height as f32, params.z_scale, decoded.clamp.height_range.0, ], params2: [ ao_width as f32, ao_height as f32, width as f32, height as f32, ],"
+          ],
+          [
+            "src/terrain/renderer/height_ao/passes.rs",
+            "compute_height_ao_pass",
+            "as_f32",
+            7,
+            "params0: [ decoded.height_ao.directions as f32, decoded.height_ao.steps as f32, decoded.height_ao.max_distance, decoded.height_ao.strength, ], params1: [ params.terrain_span / width as f32, params.terrain_span / height as f32, params.z_scale, decoded.clamp.height_range.0, ], params2: [ ao_width as f32, ao_height as f32, width as f32, height as f32, ],"
+          ],
+          [
+            "src/terrain/renderer/height_ao/passes.rs",
+            "compute_height_ao_pass",
+            "as_f32",
+            8,
+            "params0: [ decoded.height_ao.directions as f32, decoded.height_ao.steps as f32, decoded.height_ao.max_distance, decoded.height_ao.strength, ], params1: [ params.terrain_span / width as f32, params.terrain_span / height as f32, params.z_scale, decoded.clamp.height_range.0, ], params2: [ ao_width as f32, ao_height as f32, width as f32, height as f32, ],"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            6,
+            "light_view_proj: stored_light_view_proj, terrain_params: [terrain_spacing, height_exag, height_min, height_max], grid_params: [ SHADOW_GRID_RES as f32, if y_up { 1.0"
+          ],
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup",
+            "as_f32",
+            1,
+            "let aspect = params.size_px.0 as f32 / params.size_px.1 as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup",
+            "as_f32",
+            2,
+            "let aspect = params.size_px.0 as f32 / params.size_px.1 as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup",
+            "as_f32",
+            3,
+            "let step = (shadow_far - last) / remaining.max(1) as f32"
+          ]
+        ]
+      }
+    },
+    "files": [
+      {
+        "path": "src/verify/ir/engine.rs",
+        "old_git_bytes_sha256": "9a34e9069a82038f4b3047d25f21b7514232c8411d6541f9a15ceb27336b30b7",
+        "new_git_bytes_sha256": "40507a136d6898e15087f6ca3b7bfc25632376ed41cfef8cd56e4155335109ce",
+        "old_size": 121637,
+        "new_size": 121634,
+        "source": "proposed combined integration",
+        "applied": true,
+        "category": "shader_pin"
+      },
+      {
+        "path": "tests/data/world_coord_f32_ledger.json",
+        "old_git_bytes_sha256": "e2a2568075b405b9a5b53f68867d3cb418c73ce99810516397889c1d80ef325d",
+        "new_git_bytes_sha256": "cf67e64f992d60a9161ccab26d73e2f4cb030622b98ebc7bb5a03d4397c7759f",
+        "old_size": 161512,
+        "new_size": 263671,
+        "source": "proposed combined integration",
+        "applied": true,
+        "category": "f32_ledger_or_assertions"
+      },
+      {
+        "path": "tests/test_world_coord_f32_gate.py",
+        "old_git_bytes_sha256": "27e04c85bf89792abc24d18bddb44bb43f8f9d8eb8b71c5f5d936550625fee01",
+        "new_git_bytes_sha256": "1a457a49a54b94501040988b228bc15450c1b7b982aefa6186cc69b19a440234",
+        "old_size": 101449,
+        "new_size": 107145,
+        "source": "proposed combined integration",
+        "applied": true,
+        "category": "f32_ledger_or_assertions"
+      },
+      {
+        "path": "tests/shader_proofs_ledger.toml",
+        "old_git_bytes_sha256": "9111e107951ddc6931e9a7ca34d3404b1038eebf53551b257a14db16a1c0bd1f",
+        "new_git_bytes_sha256": "eb9b0527dab184343c57cba5f14d91e52204a4f034138c84fd28930cca6da6a5",
+        "old_size": 32190,
+        "new_size": 33287,
+        "source": "proposed combined integration",
+        "applied": true,
+        "category": "shader_contract_or_existing_test_contract"
+      },
+      {
+        "path": "scripts/nephele_shader_analyzer.py",
+        "old_git_bytes_sha256": "99d463ed5e0ac2ad03617ad0e28027a448491f6c8a3be744a656f8400e74c7fe",
+        "new_git_bytes_sha256": "c2b7c336205a03791509543ad9c4a7a71e6b360805fe3caf184119aa9c29a0da",
+        "old_size": 34060,
+        "new_size": 35324,
+        "source": "proposed combined integration",
+        "applied": true,
+        "category": "shader_contract_or_existing_test_contract"
+      },
+      {
+        "path": "scripts/nephele_shader_builders.py",
+        "old_git_bytes_sha256": null,
+        "new_git_bytes_sha256": "1e582859a5b1b95e4c99e8fb9b5cbfe484805bbadc289038b9fa951cc3df077d",
+        "old_size": null,
+        "new_size": 9792,
+        "source": "proposed combined integration",
+        "applied": true,
+        "category": "shader_contract_or_existing_test_contract"
+      },
+      {
+        "path": "tests/test_api_contracts.py",
+        "old_git_bytes_sha256": "fd493db10c160e5a71bc295f330060fbd61d310032595441c8c8b8797c7fd9da",
+        "new_git_bytes_sha256": "f0842129df9c489fd775a3f50db6d1aff30f8fd3db5e16645500b89d60291efe",
+        "old_size": 84591,
+        "new_size": 84892,
+        "source": "Merged version of main and NEPHELE; not exact main bytes.",
+        "applied": true,
+        "category": "shader_contract_or_existing_test_contract"
+      },
+      {
+        "path": "tests/test_mapscene_render_cache.py",
+        "old_git_bytes_sha256": "dc32a87fb332efddf470de72092f339cbb9bd51382a7a0ec7abc52fbed189bbd",
+        "new_git_bytes_sha256": "fb29a6ee9dde8028f7e79e9aae93a863c6e33e4f604c0f212256905e8a80d757",
+        "old_size": 9232,
+        "new_size": 10118,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "shader_contract_or_existing_test_contract"
+      },
+      {
+        "path": "tests/test_mapscene_screen_space_settings.py",
+        "old_git_bytes_sha256": "94101e1e46bac761f3d988f92e39ae6e3f971c0a37c36d4ca27cd194a1e7940b",
+        "new_git_bytes_sha256": "240d588c186ccc6d6d0e41f08239ccbc46a0085ecf91da924e8a2b6d08876ca6",
+        "old_size": 25704,
+        "new_size": 26206,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "shader_contract_or_existing_test_contract"
+      },
+      {
+        "path": "tests/test_recipe_goldens.py",
+        "old_git_bytes_sha256": "cb9c57af8813b550e3e8f7d7477100411f552af84cf3d56852025a92670e2150",
+        "new_git_bytes_sha256": "35950ceff1085856cb3cadfd92bc4722c57176b82b2c57cc30f130d9ac74998e",
+        "old_size": 51609,
+        "new_size": 52980,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "shader_contract_or_existing_test_contract"
+      },
+      {
+        "path": "tests/test_render_certificate_contract.py",
+        "old_git_bytes_sha256": "7359aef7d149fdeaa21167ea2a1de6307c54e56e4826100bd9acea40e8b61c09",
+        "new_git_bytes_sha256": "c8b0f8151ea866c0701851cac9752febc7d5cfc059e5097260659892f89bd6d0",
+        "old_size": 19445,
+        "new_size": 19527,
+        "source": "Merged version of main and NEPHELE; not exact main bytes.",
+        "applied": true,
+        "category": "shader_contract_or_existing_test_contract"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_alignment_utm.json",
+        "old_git_bytes_sha256": "e98bf4048bd500996d6931e6873f058d3cc3a713f9ee893c9968e940bc30dffa",
+        "new_git_bytes_sha256": "4316a6596ea2afe3156c9afe38cf41187acd1f1f0761ee7c008489ba352ef4fa",
+        "old_size": 6586,
+        "new_size": 7093,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_auto_water.json",
+        "old_git_bytes_sha256": "8170d37225e267e2075208088065ce0d81960275672eb0a477ef9a8dcf0d2e8d",
+        "new_git_bytes_sha256": "5a297225d22f49aaa4902d7f0624dd4190cde584a942bf390f14e4473b039eb5",
+        "old_size": 6618,
+        "new_size": 7123,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_buildings.json",
+        "old_git_bytes_sha256": "fa7a8c53d81f7c0436396f5f01989be736630c0db49eed187c14ec0cf243b003",
+        "new_git_bytes_sha256": "3996f0468421c6ba461ef29fa8ae61c35734d42f18c2a5cf43fd7c3e335db6dc",
+        "old_size": 6959,
+        "new_size": 7565,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_clipmap_large_region.json",
+        "old_git_bytes_sha256": "d4cc16d1c0ab84b01046424399c5ac0cf00059c6d2c792890f9b04ae6fbe07cb",
+        "new_git_bytes_sha256": "29aea450e951b8f71eb3e9d6311e3aeb3da3107478542fb70b7abd22c0f03810",
+        "old_size": 7352,
+        "new_size": 7887,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_cloud_shadows.json",
+        "old_git_bytes_sha256": "882d99b01aeea96268f6de86d8fb10b8f776797bef777d1bd3f14a73c5d84c4a",
+        "new_git_bytes_sha256": "fc9da7ab5e88d93cebae65c28b06aaa49d330cfd1d6b694440bd06854a46f473",
+        "old_size": 6590,
+        "new_size": 10210,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_concordia.json",
+        "old_git_bytes_sha256": null,
+        "new_git_bytes_sha256": "69fac678f0be66586e91ecc11787f2bf0540b3beeb82c55930c54ec782e43ec5",
+        "old_size": null,
+        "new_size": 15668,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_copc_points.json",
+        "old_git_bytes_sha256": "13a08eab5763f61f8bd0cc1dedef1ede1b70e0582e5e78721eee0fecf140d17c",
+        "new_git_bytes_sha256": "96744313c09d6aa61b822021ee6acefe2829afc79893e3c0b5ccb38df1c424fc",
+        "old_size": 7766,
+        "new_size": 8290,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_furniture_graticule.json",
+        "old_git_bytes_sha256": "c81088e92fd91d23c9ed89f61cd6049823418eba17369abb2fdfbc01f53061b5",
+        "new_git_bytes_sha256": "4cf3c5dbc94d19cb9c29cd6a5370c48b2528cc7aff7902f71085ea291644a74e",
+        "old_size": 6587,
+        "new_size": 7095,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_label_arabic_joining.json",
+        "old_git_bytes_sha256": "bfdaa85e766d9202bab1f7244533d8c63d766ca1e9cc34fa628850555b177473",
+        "new_git_bytes_sha256": "83308c5e8094b1509347b6c6c0e6d5a4833e022308ca57abe4580c4a63961210",
+        "old_size": 8140,
+        "new_size": 8644,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_label_halo_depth.json",
+        "old_git_bytes_sha256": "9a380b0461fb0ccd7c2cf692bdf1421cfb9bfd5396f0499c5c4ffcecf229b406",
+        "new_git_bytes_sha256": "b05ae2d937caca205e4f2cda5deab866d6cc691e867cc3b32cb677cec011479d",
+        "old_size": 8144,
+        "new_size": 8696,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_label_occlusion_ridge.json",
+        "old_git_bytes_sha256": "b840e4c65ab9bfd8658a9ba7214c7d85824e95bd1bc2206dcd31a09d814deb91",
+        "new_git_bytes_sha256": "a2031e7d7b12f44541888eefdb65349cbe1655420abb50199034c48b21349cf0",
+        "old_size": 8142,
+        "new_size": 8696,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_material_maps.json",
+        "old_git_bytes_sha256": "b3c5db539c090b65a7539abc7151a59d45bb443eb4b3dd15afaf0285457086a3",
+        "new_git_bytes_sha256": "b59553e34657bec151c5f68aee1b6ee8894b3d9fa77724645812b8c0924ef1a5",
+        "old_size": 6599,
+        "new_size": 7106,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_offline_aovs.json",
+        "old_git_bytes_sha256": "b692f5e4f1bc0bc2519a549038a9d87c2acdad23b9bd89555159b035e1bdba3a",
+        "new_git_bytes_sha256": "eb6a574803c6662bde89756af105316154ac82caf442399e2367b7fe456ee5f3",
+        "old_size": 7337,
+        "new_size": 7847,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_png16_color.json",
+        "old_git_bytes_sha256": "590027c6323b6657894d4d25c5767595a3b05bddfded4f8a3748f2c3265b75d3",
+        "new_git_bytes_sha256": "20548fe06153b1d584f6a59534868f93955394c7ac4d4d88c06e51be6bd09db0",
+        "old_size": 6588,
+        "new_size": 7090,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_screen_space_contact.json",
+        "old_git_bytes_sha256": "3b8ceff8579166d8cf99c1fa088b63e4717a83b7c277a99f93eb4c8d3f2c67f6",
+        "new_git_bytes_sha256": "b5e30c5234355537a57206ca21a30029ce5863c14cc6e1e19b816e85e37f765f",
+        "old_size": 6816,
+        "new_size": 11928,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_screen_space_reflection.json",
+        "old_git_bytes_sha256": "cd54b9a35e102e502cc030432346a749ff8b979cf9c1592db6d9b28c4e09dc92",
+        "new_git_bytes_sha256": "75d90c1c35d0c37e2acd1e513af640939c2b0a9efd197b611f84f1a637cb5bf8",
+        "old_size": 6620,
+        "new_size": 10920,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_terrain_raster.json",
+        "old_git_bytes_sha256": "f47b71c3223a61ca74f5e4b98396640ebf24319d16b87e03584dc42311857abe",
+        "new_git_bytes_sha256": "0ffb77de13b84e5095248eef565e752497c7f9948939925824f0b2bbc5949596",
+        "old_size": 6570,
+        "new_size": 7189,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_textured_gltf_landmark.json",
+        "old_git_bytes_sha256": "80df684db7e0fd9b714a9d1cf1eedb8714d335ecdf3a163a6061921d0d10bd2a",
+        "new_git_bytes_sha256": "97025dbacf05a79ed2d4fcc2573e54bde221e9670dd0298fd725f2b333f34f53",
+        "old_size": 6570,
+        "new_size": 12554,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_thematic_choropleth.json",
+        "old_git_bytes_sha256": "b727a54bd8fb0f042a27672970bea63e9d3232a9b457e5c4ea6052ce6f20a940",
+        "new_git_bytes_sha256": "2359261a1ebb230d6485a2e3fbb2221432c1c42016b8e965569380ff4e2e27bc",
+        "old_size": 7922,
+        "new_size": 8428,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_tiles3d_points.json",
+        "old_git_bytes_sha256": "0ddf73df1f10f84275007392cf10b651d720770d4e6459d43ac91f3aa31d087b",
+        "new_git_bytes_sha256": "24dad8f3da501361273474617ecf7e7a4261abe39e5f4744af6dd3d260f5ec90",
+        "old_size": 7784,
+        "new_size": 8286,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_vector_labels.json",
+        "old_git_bytes_sha256": "9fa730154e2202ff04ef97069f99a7bd127f92a43c50be8c21ef94acc5ca08b4",
+        "new_git_bytes_sha256": "2476a7c8f63c9af667a7608a3159c60dd07cdfbf2afde0b8fc71950addc024c4",
+        "old_size": 8143,
+        "new_size": 8652,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_vector_stroke_quality.json",
+        "old_git_bytes_sha256": "da11c8c0f3b3b79632c054a2ae2f5e743154b83c7d0ee19e7bc48d55825b1d0d",
+        "new_git_bytes_sha256": "2e02c3c3cf404070b76102ebcae7eca2d39d3a3e42eaa60d0b3afaff65955d1c",
+        "old_size": 6589,
+        "new_size": 7090,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/certificates/mapscene_vector_stroke_quality_4x.json",
+        "old_git_bytes_sha256": "17d824096f3083df67d2c81e49a3f8a3289181ceab02983b3d62ab73a2103622",
+        "new_git_bytes_sha256": "5ea1e8d47ba6aa13f13bd933c41ec48a5c6c3bf83dfddc4760de3eeb42739967",
+        "old_size": 6591,
+        "new_size": 7098,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "certificate"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_alignment_utm.png",
+        "old_git_bytes_sha256": "859090f9ecec172a822fb8907407e97288e35fcce9ae145371597d4137dc9b12",
+        "new_git_bytes_sha256": "07f272156cf26d6a264bae3ea712b43f06aa35a150400dcf636d583429e927e2",
+        "old_size": 1683,
+        "new_size": 5539,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_auto_water.png",
+        "old_git_bytes_sha256": "68cae5ca8365896d81e6000a45d93f67b48e97e917e694c607ff8e146d66eabe",
+        "new_git_bytes_sha256": "2b57afa48414912c76fae74878c418400a52d8b039b135ba8a0f0beb12a18ca7",
+        "old_size": 368,
+        "new_size": 11481,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_buildings.png",
+        "old_git_bytes_sha256": "ade37bf7fe54d7d8942a382829a6e6dcc66e780eabe74fb255fe2b531ea26872",
+        "new_git_bytes_sha256": "39ca91688b2cb9dfd7dc34da45f9395f80e12b01a5f9a2a450cdd9a9fa6de619",
+        "old_size": 3006,
+        "new_size": 8407,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_clipmap_large_region.png",
+        "old_git_bytes_sha256": "a59bc937589fa911179ad481c0cd61d1c0abb6be76b2fc128f2523bbc5d415fe",
+        "new_git_bytes_sha256": "68b0b9ed888755def2dab76ee8006feeb3d041c7f663bb9dfb6784b94aca4ca6",
+        "old_size": 5871,
+        "new_size": 14225,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_cloud_shadows.png",
+        "old_git_bytes_sha256": "3ed0b8cd153789044f26f2a707c46160cf342bfd5aea8e9065e383cb7f821f19",
+        "new_git_bytes_sha256": "f2fac9219c43b8797a8d39d55b550a74fead92280c00fd5a74908b4c12c7334c",
+        "old_size": 8885,
+        "new_size": 7655,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_concordia.png",
+        "old_git_bytes_sha256": null,
+        "new_git_bytes_sha256": "99a19f47046656b3684180c95bdb5fe28ef8459995955c11df73ac21d73fdf4f",
+        "old_size": null,
+        "new_size": 26821,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_copc_points.png",
+        "old_git_bytes_sha256": "eef389c05ae3bdec9fe4a634b0fc31dd472d259fbdc63b0a1dfde959f902cf1e",
+        "new_git_bytes_sha256": "67af02aa278d2b3672899fd878fa7c8f5da8a9b836ffc1378d0336428bc63bdf",
+        "old_size": 1373,
+        "new_size": 6365,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_furniture_graticule.png",
+        "old_git_bytes_sha256": "9d7fbf6ebfabcda920dad4ded7200589d59458d67ebd0a37e6a6d5d64491eafb",
+        "new_git_bytes_sha256": "5a7a678d2ba456876d3379bd96641657323d58a1eb68735041be33cc7903e4b0",
+        "old_size": 12242,
+        "new_size": 17368,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_label_arabic_joining.png",
+        "old_git_bytes_sha256": "bfed2de0a3920bc1bcd23f59ca003d65ec0327b3b48567bf479cf440e5189317",
+        "new_git_bytes_sha256": "ebbf7e83bf3cce29603b10ecc8aa44004123cb7f1661ff049ed8f0a1a4aa5a6d",
+        "old_size": 3840,
+        "new_size": 10619,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_label_halo_depth.png",
+        "old_git_bytes_sha256": "f3cc0676d7e49fac9d8e1c328f9c5be8004771b65c787b5c8d326fc586a0f0d0",
+        "new_git_bytes_sha256": "dce1171724e1363e88f61b3d8671e4079b2ba4e8418ab4fec975a169fb8dcb94",
+        "old_size": 3016,
+        "new_size": 8924,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_label_occlusion_ridge.png",
+        "old_git_bytes_sha256": "a81e574d75f97e68be7f6e9f1adc44e1a90969bfd75dec406ef70a74bdaf2023",
+        "new_git_bytes_sha256": "d99fa5c04babd28d9fa5ee872d805a4064fc9855c81f28d825b992ad5dbd16b8",
+        "old_size": 1622,
+        "new_size": 7393,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_material_maps.png",
+        "old_git_bytes_sha256": "7d2ea66098d15d68192a43a4e3a3f42bd71f7f177cd3e636a9c08aa182be7a6e",
+        "new_git_bytes_sha256": "82b46711336c6e8d5bf473814be4963c3b942bbf561e36eef55720e22fe1c318",
+        "old_size": 3127,
+        "new_size": 8452,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_offline_aovs.png",
+        "old_git_bytes_sha256": "ab22bda5d50f629929f8a29544919de8703b1f874ae31f23e962ef6dffde81df",
+        "new_git_bytes_sha256": "3ae731c388ae725e07b8aa6a2010e12e0498063266f6683b3e51a6779209fa84",
+        "old_size": 846,
+        "new_size": 5045,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_png16_color.png",
+        "old_git_bytes_sha256": "f5bab143e66bcc2f6485e18afbb4b65ef515cf42b5e2350be7c71901b0cddde9",
+        "new_git_bytes_sha256": "f8d440f1268c7d2b042c334427505f25d4c60d9bc6a35ccb13b1c7ca86e0b08f",
+        "old_size": 922,
+        "new_size": 5170,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_screen_space_contact.png",
+        "old_git_bytes_sha256": "a06d9d698b34271494def1ca583f785b6f5ca583444fd3f3fd13796ac5faca7e",
+        "new_git_bytes_sha256": "a8f9db44a39bc0ac4f90fca99a8e824b62184d75bdad42563f5f12e5ebaa16d9",
+        "old_size": 3834,
+        "new_size": 19929,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_screen_space_reflection.png",
+        "old_git_bytes_sha256": "06ac1ab3bd4a643b540be16cf44b5779700209f87e1a14992e296f8c8af9482e",
+        "new_git_bytes_sha256": "6abf39ea7ce3cb3a5c79750375821d4288b36a50355b7fc809f36576e9ceb0e4",
+        "old_size": 682,
+        "new_size": 8700,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_terrain_raster.nvidia-vulkan.png",
+        "old_git_bytes_sha256": "1a9444ff12361e28e8bb0e099a7a5dacb6e10e89bc9c50408095dda5fc234ad7",
+        "new_git_bytes_sha256": "385ed69d61af90cc2fa67ef622cdd6c93f22dcd4fa3a82bc69e840442a5c7955",
+        "old_size": 8096,
+        "new_size": 9505,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_terrain_raster.png",
+        "old_git_bytes_sha256": "1a9444ff12361e28e8bb0e099a7a5dacb6e10e89bc9c50408095dda5fc234ad7",
+        "new_git_bytes_sha256": "385ed69d61af90cc2fa67ef622cdd6c93f22dcd4fa3a82bc69e840442a5c7955",
+        "old_size": 8096,
+        "new_size": 9505,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_textured_gltf_landmark.png",
+        "old_git_bytes_sha256": "4b6610301a837f6f1d2abeb76b98310ab2c642b5ecaba5365e543dba22a19ceb",
+        "new_git_bytes_sha256": "d47e02f820261b1db38f2b6f003c5c2a9085e897281bbdd9eac836bf5fcee0ed",
+        "old_size": 3310,
+        "new_size": 9319,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_thematic_choropleth.png",
+        "old_git_bytes_sha256": "637b22db5036f7d1cf7e6081d637016d0a5811d3fa63abef0a48ed96aef476ba",
+        "new_git_bytes_sha256": "bf077d018cd96cb0c0b88bbfcc524dce08b9e22ac03f5b51c683601665a36ac4",
+        "old_size": 1328,
+        "new_size": 7283,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_tiles3d_points.png",
+        "old_git_bytes_sha256": "d0d14c0bce1e1147ce8c5a6dd3283c69adc3f19246ea2ef0896097a25c27a0c4",
+        "new_git_bytes_sha256": "9718c23d5a78674ef22e04623b1fbd409fb8060f858e85bdb66d1f9ea0bc521f",
+        "old_size": 1639,
+        "new_size": 6656,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_vector_labels.png",
+        "old_git_bytes_sha256": "348c5d41695fb8f14924a4b5451ae3f2b2c9abec83046b1fededd4ad754fe506",
+        "new_git_bytes_sha256": "1d79fd8e2e00fecb6c7af5c61765695ff53ddce4679a14088f54d93a4762aa40",
+        "old_size": 3442,
+        "new_size": 7776,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_vector_stroke_quality.png",
+        "old_git_bytes_sha256": "c9f49ad3dc0083a067c09a034c4836b29dfc0ca87df7fe906f9eea49d7ab281d",
+        "new_git_bytes_sha256": "792690cb15a293c72ae9df8efc15630192f6671e8ff1b40312e11148ec9b9041",
+        "old_size": 6242,
+        "new_size": 9038,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      },
+      {
+        "path": "tests/golden/recipes/mapscene_vector_stroke_quality_4x.png",
+        "old_git_bytes_sha256": "8a72c73b614eaa59c140d37361afd01272c312aaea1b961830c979fd56775c7d",
+        "new_git_bytes_sha256": "6cb70744fda7306bc0f182442111ef62432b8cf24ff7ae36a35755f98a7c900c",
+        "old_size": 13196,
+        "new_size": 18878,
+        "source": "exact origin/main d6b9e556 bytes",
+        "applied": true,
+        "category": "pixel_golden"
+      }
+    ],
+    "code_patch": {
+      "path": "docs/audits/nephele-main-integration-2026-10-23-protected.patch",
+      "sha256": "c132d1db70832e5ac89838bfeb4038a8f5fb3e8c92bdd0d2fa3626cf6cd55e07"
+    },
+    "main_products_apply": "For each certificate/pixel entry, restore the exact path from d6b9e556586cceddb9c08f16ffc35f7d71fb4d88 and verify its new SHA-256. No regeneration or signing is proposed.",
+    "hash_convention": "Canonical Git blob bytes. Text proposals use LF; pixel/certificate product blobs from main are unchanged.",
+    "approved_manifest_git_sha256": "e71bc615039fb92318142aa91e17c0b10843923164d820fb3d79a6986716ca90",
+    "owner_approval": "approved — and correct the manifest's source label for test_api_contracts.py and test_render_certificate_contract.py (they are merged versions, not exact main bytes)."
+  },
+  "changed_files_and_reasons": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "reason": "Add the verified original 1500-square Gore Range DEM to the single shared LFS download, package a separate NEPHELE bundle, and restore it after the clean-source check."
+    },
+    {
+      "path": ".gitignore",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "docs/gallery/index.md",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "docs/guides/feature_map.md",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "docs/guides/mapscene_native_pipeline.md",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "docs/splat-fused.md",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "examples/mapscene_water_clouds.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "python/forge3d/__init__.pyi",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "python/forge3d/_map_scene_labels.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "python/forge3d/_map_scene_native_inputs.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "python/forge3d/_map_scene_projection.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "python/forge3d/_map_scene_render.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "python/forge3d/map_scene.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "python/forge3d/terrain_params.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/cloud_shadows/renderer.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/gbuffer.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/overlays.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/screen_space_effects.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/screen_space_effects/hzb.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/screen_space_effects/manager/accessors.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/screen_space_effects/manager/core.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/screen_space_effects/manager/execute.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/screen_space_effects/ssao/constructor.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/screen_space_effects/ssao/passes.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/screen_space_effects/ssao/pipelines.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/screen_space_effects/ssgi.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/screen_space_effects/ssgi/constructor/mod.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/screen_space_effects/ssgi/controls.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/screen_space_effects/ssgi/runtime.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/screen_space_effects/ssr.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/screen_space_effects/ssr/accessors.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/screen_space_effects/ssr/constructor/mod.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/taa.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/core/texture_readback.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/lighting/ibl_wrapper.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/py_types/frame.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/render/mesh_instanced.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/shaders/cloud_shadows.wgsl",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/shaders/concordia_compose.wgsl",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/shaders/concordia_label_fade.wgsl",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/shaders/concordia_surface.wgsl",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/shaders/terrain_pbr_pom.wgsl",
+      "reason": "Combine NEPHELE Y-up normals with main full-tile oversized-screen UVs; combined pin remains pending."
+    },
+    {
+      "path": "src/splat/fusion.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/splat/stream.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/colormap_lut.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/render_params.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/render_params/native_effects.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/render_params/native_postfx/atmosphere.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/render_params/py_api.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/renderer.rs",
+      "reason": "Keep both media and interactive modules and camera helper exports."
+    },
+    {
+      "path": "src/terrain/renderer/bind_groups/layouts.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/renderer/constructor.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/renderer/core.rs",
+      "reason": "Keep main interactive frame ownership and media module device/queue visibility."
+    },
+    {
+      "path": "src/terrain/renderer/draw/execute.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/renderer/draw/setup/pipeline.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/renderer/height_ao/passes.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/renderer/interactive.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/renderer/interactive/cartographic_depth.rs",
+      "reason": "Forward the same environment arguments through main cartographic depth calls."
+    },
+    {
+      "path": "src/terrain/renderer/interactive/execution.rs",
+      "reason": "Supply the existing media environment arguments and the actual Rgba16Float pipeline target to main interactive calls."
+    },
+    {
+      "path": "src/terrain/renderer/interactive/fog.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/renderer/interactive/labels.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/renderer/interactive/overlays.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/renderer/interactive/points.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/renderer/interactive/settings.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/renderer/interactive/shaders.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/renderer/interactive/validation.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/renderer/pipeline_cache.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/renderer/resources/resize.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/renderer/scatter.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/renderer/shadows/render.rs",
+      "reason": "Preserve both Y-up shadow bounds and main shared-frame centered Z-up bounds, uniforms and transforms."
+    },
+    {
+      "path": "src/terrain/renderer/shadows/setup.rs",
+      "reason": "Pass both camera-axis and shared-frame mode to shadow rendering."
+    },
+    {
+      "path": "src/terrain/renderer/upload.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/terrain/scatter.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/vector/oit/mod.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/vector/oit/pipeline.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/vector/point/renderer/draw.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/vector/point/renderer/init.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/vector/point/renderer/mod.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/vector/point/renderer/pipelines.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/vector/point/renderer/shared.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/viewer/init/fog_init.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/viewer/init/mod.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "src/viewer/mod.rs",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "tests/_concordia_ao_reference.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "tests/_concordia_measurements.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "tests/_concordia_scene.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "tests/_concordia_screen_fixtures.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "tests/test_mapscene_cloud_golden_sensitivity.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "tests/test_mapscene_gtao_height_ao.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "tests/test_mapscene_native_atmosphere.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "tests/test_mapscene_native_certificate_order.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "tests/test_mapscene_native_pipeline.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "tests/test_mapscene_review_regressions.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    },
+    {
+      "path": "tests/test_mapscene_screen_framing.py",
+      "reason": "Import main integration code or new main tests unchanged, including automatic merge of the existing NEPHELE integration."
+    }
+  ],
+  "checks": {
+    "rust": {
+      "checks": [
+        {
+          "name": "clippy",
+          "command": [
+            "cargo",
+            "forge3d-clippy-acceptance"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 77.49744310000096
+        },
+        {
+          "name": "tests",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "terrain::renderer::render_graph::tests",
+            "--",
+            "--nocapture"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 277.51554419999593,
+          "executed_tests": 4,
+          "summary": "test result: ok. 4 passed; 0 failed; 0 ignored"
+        },
+        {
+          "name": "tests",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "terrain::renderer::core::tests",
+            "--",
+            "--nocapture"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 1.2688202999997884,
+          "executed_tests": 0,
+          "summary": "test result: ok. 0 passed; 0 failed; 0 ignored",
+          "proof_error": "filter executed no tests"
+        },
+        {
+          "name": "shaders_validate_and_compute_call_graphs_use_manual_shadows",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "shaders_validate_and_compute_call_graphs_use_manual_shadows",
+            "--",
+            "--nocapture"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.7597800999938045,
+          "executed_tests": 1,
+          "summary": "test result: ok. 1 passed; 0 failed; 0 ignored"
+        },
+        {
+          "name": "assembled_terrain_shader_consumes_same_medium_transmittance",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "assembled_terrain_shader_consumes_same_medium_transmittance",
+            "--",
+            "--nocapture"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.983901200001128,
+          "executed_tests": 1,
+          "summary": "test result: ok. 1 passed; 0 failed; 0 ignored"
+        },
+        {
+          "name": "viewer_pbr_uses_rgb_same_medium_direct_light_and_keeps_media_hdr_linear",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "viewer_pbr_uses_rgb_same_medium_direct_light_and_keeps_media_hdr_linear",
+            "--",
+            "--nocapture"
+          ],
+          "exit_code": 0,
+          "duration_seconds": 0.6719224999833386,
+          "executed_tests": 1,
+          "summary": "test result: ok. 1 passed; 0 failed; 0 ignored"
+        },
+        {
+          "name": "terrain_renderer_source_hash_is_pinned",
+          "command": [
+            "cargo",
+            "test",
+            "--lib",
+            "--features",
+            "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+            "terrain_renderer_source_hash_is_pinned",
+            "--",
+            "--nocapture"
+          ],
+          "exit_code": 101,
+          "duration_seconds": 0.621320200007176,
+          "executed_tests": 1,
+          "summary": "test result: FAILED. 0 passed; 1 failed; 0 ignored"
+        }
+      ],
+      "features": "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+      "environment": {
+        "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+        "FORGE3D_NO_BOOTSTRAP": "1",
+        "FORGE3D_DET_REWRITE": "0"
+      }
+    },
+    "fmt": "PASS after resolving conflicts and caller mismatches",
+    "workflow": {
+      "passed": 44,
+      "failed": 0,
+      "skipped": 0,
+      "pytest_seconds": 18.44,
+      "environment": {
+        "FORGE3D_NO_BOOTSTRAP": "1"
+      },
+      "junit": ".release-evidence\\2026-10-23\\workflow-fixed.xml"
+    },
+    "current_f32": {
+      "passed": 20,
+      "failed": 13,
+      "skipped": 0,
+      "reason": "approved old freeze deliberately retained until approval",
+      "pytest_seconds": 75.68
+    },
+    "proposed_f32": {
+      "first_run_passed": 36,
+      "first_run_failed": 1,
+      "first_run_reason": "draft approval-word assertion; no owner approval was claimed",
+      "pytest_seconds": 83.89,
+      "final_affected_check": {
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "pytest_seconds": 2.3,
+        "note": "The new proposal test checks review/provenance presence; all existing approval assertions and historical freezes remain intact. Both exact parent restorations executed."
+      }
+    },
+    "current_shader_pin": "1 executed, expected FAIL with actual 0x17adc1fb40ed8189; pending owner approval",
+    "proposed_shader_analysis": {
+      "naga_assemblies": 356,
+      "unresolved": [],
+      "compute_comparison_calls": 0,
+      "duration_seconds": 117.69267430002219,
+      "note": "Executes pure Rust shader builders from current source, including all boolean variants; no GPU work. Pending code patch; current analyzer still rejects the new main builders."
+    },
+    "camera_mode_tests": {
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0
+    },
+    "dem_download": {
+      "url": "https://media.githubusercontent.com/media/milos-agathon/forge3d/75051e850d11135f04f12f2c25d81be95673cf42/assets/tif/Gore_Range_Albers_1m.tif",
+      "size": 9012888,
+      "sha256": "bcacfdfabefc7ef4e7b9a9cefe12375b491fe1769218ad3c3ddd3ae30f9d93bc",
+      "duration_seconds": 1.9622732999850996,
+      "scope": "download and hash only; no GPU timing"
+    },
+    "additional_final_checks": {
+      "builder_negative_checks": {
+        "passed": [
+          "known factory uses its exact executed source",
+          "same name in unrelated owner rejected",
+          "unsupported parameter rejected",
+          "unknown factory remains unresolved"
+        ],
+        "GPU_executed": false
+      },
+      "fmt_after_callers_wall_seconds": 0.5676786,
+      "camera_mode_command_wall_seconds": 1.1676882
+    }
+  },
+  "image_metrics": {
+    "before_physical": {
+      "b1_fraction": 0.7127659574468085,
+      "shaft_ssim": 0.9916001251541653,
+      "g4a_fraction": 0.7109826589595376,
+      "medium_changed_fraction": 0.3215661103979461,
+      "g4b_response": 0.019629758417801648,
+      "g4b_relative_error": 0.1027388636433472,
+      "margins": {
+        "b1_fraction": -0.23723404255319147,
+        "shaft_ssim": 0.041600125154165335,
+        "g4a_fraction": -0.23901734104046235,
+        "medium_changed_fraction": 0.22156611039794608,
+        "g4b_relative_error": 0.09726113635665282
+      },
+      "all_five_pass": false
+    },
+    "after_CPU_forecast": {
+      "b1_fraction": 1.0,
+      "shaft_ssim": 0.992349393985953,
+      "g4a_fraction": 0.9961464354527938,
+      "medium_changed_fraction": 0.37997432605905007,
+      "g4b_response": 0.022044067152454556,
+      "g4b_relative_error": 0.007617328861087248,
+      "margins": {
+        "b1_fraction": 0.050000000000000044,
+        "shaft_ssim": 0.042349393985953054,
+        "g4a_fraction": 0.046146435452793844,
+        "medium_changed_fraction": 0.27997432605905004,
+        "g4b_relative_error": 0.19238267113891278
+      },
+      "all_five_pass": true
+    },
+    "after_physical": "ABSENT"
+  },
+  "backcasts": {
+    "ac739096->68cc04e9": {
+      "predicted_metrics": {
+        "b1_fraction": 0.7044917257683215,
+        "shaft_ssim": 0.9909998135830298,
+        "g4a_fraction": 0.682723185613359,
+        "medium_changed_fraction": 0.3196405648267009,
+        "g4b_response": 0.01975079150305869,
+        "g4b_relative_error": 0.09720653454876194,
+        "margins": {
+          "b1_fraction": -0.24550827423167843,
+          "shaft_ssim": 0.04099981358302984,
+          "g4a_fraction": -0.26727681438664097,
+          "medium_changed_fraction": 0.21964056482670088,
+          "g4b_relative_error": 0.10279346545123808
+        },
+        "all_five_pass": false
+      },
+      "observed_metrics": {
+        "b1_fraction": 0.7127659574468085,
+        "shaft_ssim": 0.9916001251541653,
+        "g4a_fraction": 0.7109826589595376,
+        "medium_changed_fraction": 0.3215661103979461,
+        "g4b_response": 0.019629758417801648,
+        "g4b_relative_error": 0.1027388636433472,
+        "margins": {
+          "b1_fraction": -0.23723404255319147,
+          "shaft_ssim": 0.041600125154165335,
+          "g4a_fraction": -0.23901734104046235,
+          "medium_changed_fraction": 0.22156611039794608,
+          "g4b_relative_error": 0.09726113635665282
+        },
+        "all_five_pass": false
+      },
+      "metric_error_predicted_minus_observed": {
+        "b1_fraction": -0.008274231678486954,
+        "shaft_ssim": -0.0006003115711354923,
+        "g4a_fraction": -0.02825947334617862,
+        "medium_changed_fraction": -0.0019255455712451908,
+        "g4b_response": 0.00012103308525704057,
+        "g4b_relative_error": -0.005532329094585259
+      },
+      "mean_absolute_linear_rgb_error": {
+        "sky": [
+          0.0020157820136885145,
+          0.0018330959522390835,
+          0.0016663146537680973
+        ],
+        "terrain": [
+          0.0013406485092680906,
+          0.0012881595519329456,
+          0.0012141628622310016
+        ],
+        "shadow": [
+          0.0013412565611088734,
+          0.0012889714708298628,
+          0.0012148595396262395
+        ]
+      }
+    },
+    "d5507249->ac739096": {
+      "predicted_metrics": {
+        "b1_fraction": 0.7825059101654847,
+        "shaft_ssim": 0.9911026015197829,
+        "g4a_fraction": 0.7154784842646115,
+        "medium_changed_fraction": 0.3138639281129653,
+        "g4b_response": 0.02040188335465735,
+        "g4b_relative_error": 0.06744562755215927,
+        "margins": {
+          "b1_fraction": -0.1674940898345153,
+          "shaft_ssim": 0.041102601519782955,
+          "g4a_fraction": -0.23452151573538849,
+          "medium_changed_fraction": 0.2138639281129653,
+          "g4b_relative_error": 0.13255437244784074
+        },
+        "all_five_pass": false
+      },
+      "observed_metrics": {
+        "b1_fraction": 0.7884160756501182,
+        "shaft_ssim": 0.9916078255428148,
+        "g4a_fraction": 0.7597944765574823,
+        "medium_changed_fraction": 0.31065468549422337,
+        "g4b_response": 0.020363695197357472,
+        "g4b_relative_error": 0.06919117880576935,
+        "margins": {
+          "b1_fraction": -0.16158392434988178,
+          "shaft_ssim": 0.041607825542814836,
+          "g4a_fraction": -0.19020552344251762,
+          "medium_changed_fraction": 0.21065468549422336,
+          "g4b_relative_error": 0.13080882119423065
+        },
+        "all_five_pass": false
+      },
+      "metric_error_predicted_minus_observed": {
+        "b1_fraction": -0.005910165484633523,
+        "shaft_ssim": -0.0005052240230318805,
+        "g4a_fraction": -0.044315992292870865,
+        "medium_changed_fraction": 0.0032092426187419476,
+        "g4b_response": 3.818815729987948e-05,
+        "g4b_relative_error": -0.0017455512536100753
+      },
+      "mean_absolute_linear_rgb_error": {
+        "sky": [
+          0.0021043451202687412,
+          0.0019498858665877932,
+          0.0016812521148216284
+        ],
+        "terrain": [
+          0.0013506918018482948,
+          0.001273237687815199,
+          0.0011939292782741653
+        ],
+        "shadow": [
+          0.0013505392232588725,
+          0.0012740413062826321,
+          0.0011937659024678863
+        ]
+      }
+    }
+  },
+  "sensitivity": {
+    "ac739096->68cc04e9": {
+      "b1_fraction": [
+        0.9988179669030733,
+        1.0
+      ],
+      "shaft_ssim": [
+        0.9907645334922185,
+        0.9922798324997629
+      ],
+      "g4a_fraction": [
+        0.9678869621066153,
+        0.9961464354527938
+      ],
+      "medium_changed_fraction": [
+        0.37869062901155326,
+        0.38446726572528883
+      ],
+      "g4b_response": [
+        0.021996515828125895,
+        0.022123413759770914
+      ],
+      "g4b_relative_error": [
+        0.005443794455095495,
+        0.011244201160348766
+      ]
+    },
+    "d5507249->ac739096": {
+      "b1_fraction": [
+        1.0,
+        1.0
+      ],
+      "shaft_ssim": [
+        0.9911369077251232,
+        0.9915335098518914
+      ],
+      "g4a_fraction": [
+        0.9826589595375722,
+        0.9852280025690431
+      ],
+      "medium_changed_fraction": [
+        0.37869062901155326,
+        0.3870346598202824
+      ],
+      "g4b_response": [
+        0.021959994729811097,
+        0.02212007756942562
+      ],
+      "g4b_relative_error": [
+        0.0037744431835479105,
+        0.011091706469552848
+      ]
+    }
+  },
+  "statistical_gates": {
+    "scope": "CPU statistical evidence only; not a physical capture of HEAD",
+    "states": {
+      "before_68cc04e9": {
+        "gate1": {
+          "metrics": {
+            "homogeneous": {
+              "mean": 0.605711,
+              "standard_error": 0.0004886976808870934,
+              "analytic": 0.6065306597126334,
+              "samples": 1000000
+            },
+            "heterogeneous": {
+              "mean": 0.4323316609017278,
+              "comparator": {
+                "mean": 0.43241938,
+                "samples": 100000000
+              },
+              "relative_error": 0.00020285653772550573
+            },
+            "majorant": {
+              "probe_count": 1000000,
+              "violation_count": 0,
+              "max_excess": -5.960464477539063e-08
+            },
+            "russian_roulette": {
+              "on": [
+                0.314637,
+                0.00041053407504033907
+              ],
+              "off": [
+                0.314603204687953,
+                0.0003907781260617572
+              ],
+              "analytic_oracle": 0.31477547222989327,
+              "relative_difference": 0.00010742202095659897,
+              "pairs": 1000000
+            }
+          },
+          "failures": []
+        },
+        "gate2": {
+          "metrics": {
+            "sample_count": 10000000,
+            "transmitted": 0.7216797,
+            "scattered_out": 0.2144632,
+            "absorbed": 0.0641738,
+            "relative_residual": 0.0003166999999999476,
+            "residual_standard_error": 0.00020721544651320425
+          },
+          "failures": []
+        }
+      },
+      "after_ca9ad2ce_CPU": {
+        "gate1": {
+          "metrics": {
+            "homogeneous": {
+              "mean": 0.605711,
+              "standard_error": 0.0004886976808870934,
+              "analytic": 0.6065306597126334,
+              "samples": 1000000
+            },
+            "heterogeneous": {
+              "mean": 0.4323316609017278,
+              "comparator": {
+                "mean": 0.43241938,
+                "samples": 100000000
+              },
+              "relative_error": 0.00020285653772550573
+            },
+            "majorant": {
+              "probe_count": 1000000,
+              "violation_count": 0,
+              "max_excess": -5.960464477539063e-08
+            },
+            "russian_roulette": {
+              "on": [
+                0.314637,
+                0.00041053407504033907
+              ],
+              "off": [
+                0.314603204687953,
+                0.0003907781260617572
+              ],
+              "analytic_oracle": 0.31477547222989327,
+              "relative_difference": 0.00010742202095659897,
+              "pairs": 1000000
+            }
+          },
+          "failures": []
+        },
+        "gate2": {
+          "metrics": {
+            "sample_count": 10000000,
+            "transmitted": 0.7216797,
+            "scattered_out": 0.2144632,
+            "absorbed": 0.0641738,
+            "relative_residual": 0.0003166999999999476,
+            "residual_standard_error": 0.00020721544651320425
+          },
+          "failures": []
+        }
+      }
+    },
+    "duration_seconds": 2.3388139000162482
+  },
+  "convergence": {
+    "CPU_orders_enabled": 19,
+    "CPU_orders_disabled": 19,
+    "runtime": "Stop only when both stored-f16 fields are unchanged; no selected order cap",
+    "progress_readback_bytes_per_rebuild_order": 16,
+    "viewer_diagnostics_readback_bytes": 0
+  },
+  "physical_before": {
+    "sha": "68cc04e9",
+    "run": "https://github.com/milos-agathon/forge3d/actions/runs/39580065706"
+  },
+  "physical_after": null,
+  "guards": {
+    "canonical_fixture_and_gate_code": "git diff ac739096 -- tests/nephele/fixture scripts/nephele_acceptance.py tests/test_nephele_physical.py tests/_deltae.py tests/_ssim.py is empty",
+    "gate4_policy": "git diff 04e8ae68 -- tests/nephele/gate4-policy.json is empty",
+    "protected_files": "Held at release parent bytes; proposals are in this batch only",
+    "mesh_unavailable_test": "Preserved existing test despite incoming main deletion; no test deletion is proposed",
+    "media_transport": "media.rs, nephele WGSL and terrain_shadow_depth.wgsl unchanged from ca9ad2ce",
+    "viewer_diagnostics": "No per-frame diagnostics readback; unchanged from ca9ad2ce"
+  },
+  "not_run": [
+    "New merge-head wheel build/install and installed-wheel tests (pending protected approval).",
+    "Current-tree complete shader contract suite (pin and ledger deliberately remain old).",
+    "Any new NVIDIA Vulkan capture, fast GPU lane, environment GPU cases or physical memory measurement.",
+    "1500 x 1500 DEM GPU frame-time measurement; only URL, exact bytes and original dimensions were verified.",
+    "Full acceptance CI, merge, publish dry-run.",
+    "D3D12 ABSENT; Metal ABSENT; WASM ABSENT."
+  ],
+  "residual_risks": [
+    "CPU image forecasts are historical forecasts, not physical results of this prepared integration. Main retains mesh:yup behavior, and the directional transport files are unchanged.",
+    "Directional convergence, cache dimensions and frame time still require physical observation. Convergence progress uses rebuild-order 16-byte readbacks; viewer diagnostics does not read back.",
+    "The proposed imported certificates attest main renders, not the combined NEPHELE source. No candidate certificate was generated or signed. Exact values for a future physical certificate refresh are unavailable before that render; no blanket approval is requested.",
+    "The protected certificate-refresh workflow currently accepts protected main only. A required candidate certificate refresh would need an owner decision before release; do not weaken verification or fabricate signatures.",
+    "New CONCORDIA rendering has not been physically verified with the NEPHELE integration.",
+    "Existing reference RNG-dimension overlap remains unchanged.",
+    "Some trailing whitespace in incoming main embedded shader strings is retained byte-for-byte; no unrelated source/certificate churn."
+  ],
+  "steering_gaps_proposed_not_applied": [
+    "Document how branch candidates obtain exact recipe certificates before a protected-main-only refresh can run; keep signature verification and physical review intact.",
+    "Add the full-resolution DEM to the shared fixture bundle whenever a physical benchmark depends on it; do not add per-job LFS transfers.",
+    "Record the actual camera-mode Rust module name in validation handoffs so filters cannot silently execute zero tests."
+  ],
+  "preparation_first_pushed_sha": "d590df3e6be43d301519c388a32df6c67ad14386",
+  "post_approval_validation": {
+    "features": "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+    "environment": {
+      "CARGO_TARGET_DIR": "D:\\forge3d\\.worktrees\\nephele-146-release\\target",
+      "FORGE3D_NO_BOOTSTRAP": "1",
+      "FORGE3D_DET_REWRITE": "0"
+    },
+    "checks": [
+      {
+        "name": "fmt",
+        "command": [
+          "cargo",
+          "fmt",
+          "--check"
+        ],
+        "exit_code": 0,
+        "duration_seconds": 0.2853418000158854
+      },
+      {
+        "name": "clippy",
+        "command": [
+          "cargo",
+          "forge3d-clippy-acceptance"
+        ],
+        "exit_code": 0,
+        "duration_seconds": 29.16853130000527
+      },
+      {
+        "name": "ir-contracts",
+        "command": [
+          "cargo",
+          "test",
+          "--lib",
+          "--features",
+          "extension-module,default,cog_streaming,shader-contract-asserts,splat-fusion",
+          "verify::ir::tests",
+          "--",
+          "--nocapture"
+        ],
+        "exit_code": 0,
+        "duration_seconds": 34.3877935000055,
+        "executed_passed": 46,
+        "summary": "test result: ok. 46 passed; 0 failed; 1 ignored"
+      }
+    ],
+    "f32": {
+      "passed": 37,
+      "failed": 0,
+      "skipped": 0,
+      "pytest_seconds": 66.26,
+      "environment": {
+        "FORGE3D_NO_BOOTSTRAP": "1"
+      },
+      "junit": ".release-evidence/2026-10-23/approved-f32.xml",
+      "zero_skips_assertion": "PASS"
+    }
+  }
+}

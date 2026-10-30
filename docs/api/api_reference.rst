@@ -255,6 +255,10 @@ Cartography And Export
 Native Rendering And Quality
 ----------------------------
 
+.. automodule:: forge3d.media
+   :members:
+   :no-index:
+
 .. automodule:: forge3d.offline
    :members:
    :no-index:

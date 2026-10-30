@@ -658,7 +658,7 @@ def test_m06_nonzero_origin_effects_orbit_no_flash_and_scatter(tmp_path: Path) -
                     "steps": 24,
                     "half_res": True,
                     "density_volumes": [
-                        {"preset": "fog_bank", "center": [96.0, 16.0, 48.0], "size": [60.0, 28.0, 28.0], "resolution": [32, 16, 16], "density_scale": 0.35, "seed": 7}
+                        {"preset": "valley_fog", "center": [96.0, 16.0, 48.0], "size": [60.0, 28.0, 28.0], "resolution": [32, 16, 16], "density_scale": 0.35, "seed": 7}
                     ],
                 },
             }

@@ -195,7 +195,7 @@ impl QueueBuffers {
             slice.map_async(wgpu::MapMode::Read, move |result| {
                 sender.send(result).ok();
             });
-            device.poll(wgpu::Maintain::Wait);
+            crate::core::gpu::wait_for_device_idle(&device);
             let map_result = pollster::block_on(receiver.receive())
                 .ok_or("ray queue header readback callback dropped")?;
             map_result.map_err(|e| format!("ray queue header readback failed: {e:?}"))?;

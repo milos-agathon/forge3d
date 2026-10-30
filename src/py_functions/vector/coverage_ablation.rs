@@ -239,7 +239,7 @@ pub(crate) fn _vector_render_coverage_ablation_py(
     timing.end(&mut encoder, timing_scope, draw_count);
 
     timing.submit(&queue, encoder);
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
 
     let rgba = read_rgba_texture_to_py(
         py,

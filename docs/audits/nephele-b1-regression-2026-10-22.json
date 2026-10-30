@@ -1,0 +1,601 @@
+{
+  "kind": "CPU-only existing-capture measurements and unfitted predictions; no native execution",
+  "numpy": "2.5.1",
+  "input_sha256": {
+    "tests/nephele/fixture/atmosphere.json": "86c32891d5390696f21d9cd5b37c505e65ff2f81922b34f62862a9d2d91c1e47",
+    "tests/nephele/fixture/camera.json": "3d39f374e831eba962a0c57acabb962d2c500efbee11f8dca28f74a5883aa6d1",
+    "tests/nephele/fixture/cloud-shadow-mask.npy": "4cdbf4a232a521157e1428a5d72423f2e82352b206e0b6865c574972af69cd4e",
+    "tests/nephele/fixture/crop.json": "065419f7e21660a582b2326cde605ef8fc9fe030d3db1e07b32bb0026d878c04",
+    "tests/nephele/fixture/exposure.json": "8d27a721074814a7a2494d69be7842a32dff39eb4e7ed8d287588bbc3546fd31",
+    "tests/nephele/fixture/godray-roi-mask.npy": "bfa5e46e8cf884a271cac6ffd1d1b8a58a173d48e7c26a6752c1ac5a30fe2d20",
+    "tests/nephele/fixture/mask-rules.json": "48a16b48747151e06b01669e91d7ed9e21c612aa87baddf1071f56f484681008",
+    "tests/nephele/fixture/material.json": "9104fa8bd20fa69d3c08f3fe57c32cab48d74d690c22872777fbe834b06b8789",
+    "tests/nephele/fixture/medium.json": "40cb93a104db8217de4dae011d1d19dba4fe54c8942d0171e6767fb7746e9cf9",
+    "tests/nephele/fixture/reference-cloud-shadow-aov.npy": "2ed192c66493e0151142623f2d88eed35ccfaacd427eb947f6ff7917a5d58667",
+    "tests/nephele/fixture/reference-in-scatter.npy": "34b4d583b6dd726366c4c8ebad0ce15f4a43363bafab6f1ca0a0e813a2910e5e",
+    "tests/nephele/fixture/reference-media-lighting-visibility.npy": "1d9ab6bb4e88dbeb5f2f31196cdfc885181cba7744097e1b4aa33f64d8273159",
+    "tests/nephele/fixture/reference-optical-depth.npy": "f5bf53a7bf3b0932edad06de18ab4623f241bb4c83b20b3402add7c3132c02b6",
+    "tests/nephele/fixture/reference-provenance.json": "d083b146ff4e7fe1bac1874717bf8d527e9c2357d4be8f661203c63123144a67",
+    "tests/nephele/fixture/reference-rgb.npy": "d0a5ff2c46e746f76fe726873821b569324eb59c9cba87bd9be07a5e7dfcf5dd",
+    "tests/nephele/fixture/reference-terrain-hit.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    "tests/nephele/fixture/reference-terrain-slice.npy": "3d743b53af51a536ee462a89fa59cf4a1c41d9a1b1607e8901e87619eafcc1e5",
+    "tests/nephele/fixture/reference-transmittance.npy": "25fe0d4176f8a8bc9df05faccc3a353a8583aa57d69d18182f80bc2f67e57d20",
+    "tests/nephele/fixture/shaft-mask.npy": "dae7955e935586a3f85022cfc7bed9f0b3491ece6f44544cdc80c8f9bbe29177",
+    "tests/nephele/fixture/sky-cloud-mask.npy": "288e3868f1a06922441af4da195b5db590a5386e647cfc394c7be52f52b5a7b2",
+    "tests/nephele/fixture/sun.json": "fc074b48eb2cbdf2569ebd742a5ef4220514a6ae265a8ad1d298efd4a0722b02",
+    "tests/nephele/fixture/terrain-dem.npy": "4ae0b3517e1e7a7e09ab4a572f5b1c06cfff60074e640ed593638810ec9d36cf",
+    "tests/nephele/fixture/terrain-mask.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    "tests/nephele/fixture/terrain.json": "f8fa80ecb8c4312707ae198bc40ea2e93c7e158ca15f21739d5c3956b1bce315",
+    "tests/nephele/fixture/tonemap.json": "15cbb4e5e289d6d4fcbfdcebad8ad67c8cf8e2f74c032e5d2eeb0271d83d7034",
+    "tests/nephele/gate4-policy.json": "0c742788fa0a4a6b0cf2cfc97fd540916128b0e7a6c1b7ac1716947738c76f69",
+    "scripts/nephele_acceptance.py": "096938310e312d3038a58d57fbbfcedf32eaa0194307a3dc8577d34f6c5ae9dc",
+    "tests/_deltae.py": "c4f8fcb6a2a2a66d1fed4209a2e2a8327403cbd71b8199f5069d83fe2b3f3151",
+    "tests/_ssim.py": "75a4b5456d07c53c56d5a469c5a7b1840fd5f50fb4a2c783a4bce814f471e010",
+    ".release-evidence/2026-10-22/ci-39517423981/checked-out-head.txt": "30873adad56194e18e0afffc0eb8351b3a2dac0969833ea1b8c101e4bc4c6b5b",
+    ".release-evidence/2026-10-22/ci-39517423981/cloud-shadow-aov.npy": "66e5972cff143f8b008e8e09e5ab827763c903b383533f93e10b6edc72d46f60",
+    ".release-evidence/2026-10-22/ci-39517423981/cloud-shadow-mask.npy": "4cdbf4a232a521157e1428a5d72423f2e82352b206e0b6865c574972af69cd4e",
+    ".release-evidence/2026-10-22/ci-39517423981/froxel-frame-run-a.npy": "a819571cb24d0bafebd45b006c28c5350384aeffdff2b00b7e2018e2f935999e",
+    ".release-evidence/2026-10-22/ci-39517423981/froxel-frame-run-b.npy": "a819571cb24d0bafebd45b006c28c5350384aeffdff2b00b7e2018e2f935999e",
+    ".release-evidence/2026-10-22/ci-39517423981/godray-roi-mask.npy": "bfa5e46e8cf884a271cac6ffd1d1b8a58a173d48e7c26a6752c1ac5a30fe2d20",
+    ".release-evidence/2026-10-22/ci-39517423981/in-scatter.npy": "552743c43198f8a81f35e8f34c6375f9ad2bb8be82ca47049bc393d29011eeca",
+    ".release-evidence/2026-10-22/ci-39517423981/junit.xml": "803b1eed11f4590af3d9c48691339d3abe7cefcb694d75368bc0bb0fcdcc9026",
+    ".release-evidence/2026-10-22/ci-39517423981/medium-disabled-rgb.npy": "92ebb84f45c32e48d4e94d47ea36fd6601878aabee39eb2615622f2fcf39eb3e",
+    ".release-evidence/2026-10-22/ci-39517423981/optical-depth.npy": "3ef43348cadaacd2cce01c9a420c2ebe0ce7eec9d2d374f98dfee11815876449",
+    ".release-evidence/2026-10-22/ci-39517423981/realtime-rgb.npy": "a819571cb24d0bafebd45b006c28c5350384aeffdff2b00b7e2018e2f935999e",
+    ".release-evidence/2026-10-22/ci-39517423981/realtime-termination-slice.npy": "f8ac2be8633e58cdea5934a80d354fcd59fc7466f27cf6481daf844aef23e23b",
+    ".release-evidence/2026-10-22/ci-39517423981/reference-cloud-shadow-aov-spp320.npy": "04dd3fc04c71f6269c481451404c1df81e5d63537c6d81efdf4ae4fbf99cceff",
+    ".release-evidence/2026-10-22/ci-39517423981/reference-cloud-shadow-aov.npy": "2ed192c66493e0151142623f2d88eed35ccfaacd427eb947f6ff7917a5d58667",
+    ".release-evidence/2026-10-22/ci-39517423981/reference-in-scatter-spp320.npy": "d778b1a58e930677e40b2e1d0210da857fac4b620e51c316e0170b5f8ecea856",
+    ".release-evidence/2026-10-22/ci-39517423981/reference-in-scatter.npy": "34b4d583b6dd726366c4c8ebad0ce15f4a43363bafab6f1ca0a0e813a2910e5e",
+    ".release-evidence/2026-10-22/ci-39517423981/reference-media-lighting-visibility-spp320.npy": "1d9ab6bb4e88dbeb5f2f31196cdfc885181cba7744097e1b4aa33f64d8273159",
+    ".release-evidence/2026-10-22/ci-39517423981/reference-media-lighting-visibility.npy": "1d9ab6bb4e88dbeb5f2f31196cdfc885181cba7744097e1b4aa33f64d8273159",
+    ".release-evidence/2026-10-22/ci-39517423981/reference-optical-depth-spp320.npy": "ee7fa9a309077021ac05c8df91b110421c59eb6c74c37b6f0c7d023dae16c31b",
+    ".release-evidence/2026-10-22/ci-39517423981/reference-optical-depth.npy": "f5bf53a7bf3b0932edad06de18ab4623f241bb4c83b20b3402add7c3132c02b6",
+    ".release-evidence/2026-10-22/ci-39517423981/reference-rgb-spp320.npy": "faed5d5f8d5aec7ede7d30c7f8363e24737825ddf8393207b3f33d6038807dac",
+    ".release-evidence/2026-10-22/ci-39517423981/reference-rgb.npy": "d0a5ff2c46e746f76fe726873821b569324eb59c9cba87bd9be07a5e7dfcf5dd",
+    ".release-evidence/2026-10-22/ci-39517423981/reference-terrain-hit-spp320.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    ".release-evidence/2026-10-22/ci-39517423981/reference-terrain-hit.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    ".release-evidence/2026-10-22/ci-39517423981/reference-terrain-slice-spp320.npy": "3d743b53af51a536ee462a89fa59cf4a1c41d9a1b1607e8901e87619eafcc1e5",
+    ".release-evidence/2026-10-22/ci-39517423981/reference-terrain-slice.npy": "3d743b53af51a536ee462a89fa59cf4a1c41d9a1b1607e8901e87619eafcc1e5",
+    ".release-evidence/2026-10-22/ci-39517423981/reference-transmittance-spp320.npy": "922c7305e0fe0d0f2260446a0f6e26747023ca2ca05533f087569f250d3382fd",
+    ".release-evidence/2026-10-22/ci-39517423981/reference-transmittance.npy": "25fe0d4176f8a8bc9df05faccc3a353a8583aa57d69d18182f80bc2f67e57d20",
+    ".release-evidence/2026-10-22/ci-39517423981/run-a.json": "7f080794b0512e7805c50af0e273b4394d6ef1f8d8c60348836b3d28374af465",
+    ".release-evidence/2026-10-22/ci-39517423981/run-b.json": "1b7dba4d64a4d738ed416ac322bcd4e321d7621beaa448b169115769bc388d41",
+    ".release-evidence/2026-10-22/ci-39517423981/shaft-mask.npy": "dae7955e935586a3f85022cfc7bed9f0b3491ece6f44544cdc80c8f9bbe29177",
+    ".release-evidence/2026-10-22/ci-39517423981/sky-cloud-mask.npy": "288e3868f1a06922441af4da195b5db590a5386e647cfc394c7be52f52b5a7b2",
+    ".release-evidence/2026-10-22/ci-39517423981/terrain-dem.npy": "4ae0b3517e1e7a7e09ab4a572f5b1c06cfff60074e640ed593638810ec9d36cf",
+    ".release-evidence/2026-10-22/ci-39517423981/terrain-mask.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    ".release-evidence/2026-10-22/ci-39517423981/terrain-occlusion-disabled-rgb.npy": "a542b79a2b6342fa2e2b60ef38ec850ded5ff69182416f518573d88dc505c303",
+    ".release-evidence/2026-10-22/ci-39517423981/transmittance.npy": "f1cc596f64b9b6c15f1aa596bfc23efcfb95dbd5bfff4a0d1595e4553451b5b7",
+    ".release-evidence/2026-10-22/ci-39545456967/checked-out-head.txt": "93da899a20e4532b607c3a9d42f98552260abcbcb0a4e56f686e0ae76563a24e",
+    ".release-evidence/2026-10-22/ci-39545456967/cloud-shadow-aov.npy": "66e5972cff143f8b008e8e09e5ab827763c903b383533f93e10b6edc72d46f60",
+    ".release-evidence/2026-10-22/ci-39545456967/cloud-shadow-mask.npy": "4cdbf4a232a521157e1428a5d72423f2e82352b206e0b6865c574972af69cd4e",
+    ".release-evidence/2026-10-22/ci-39545456967/froxel-frame-run-a.npy": "f96e539e5a6cd0e2b1ead748c4b02fd01c4befdbeb6dd516aec249481a4e513f",
+    ".release-evidence/2026-10-22/ci-39545456967/froxel-frame-run-b.npy": "f96e539e5a6cd0e2b1ead748c4b02fd01c4befdbeb6dd516aec249481a4e513f",
+    ".release-evidence/2026-10-22/ci-39545456967/godray-roi-mask.npy": "bfa5e46e8cf884a271cac6ffd1d1b8a58a173d48e7c26a6752c1ac5a30fe2d20",
+    ".release-evidence/2026-10-22/ci-39545456967/in-scatter.npy": "81c76ff4194332e3e70fbbc40f0176b64bf6854f9025e573bf482b4fcc2ef3dc",
+    ".release-evidence/2026-10-22/ci-39545456967/junit.xml": "ae9a56073745dc39c224ffb38ce27fb0b4ec7badab1e3d8a140c9704a6b32fa7",
+    ".release-evidence/2026-10-22/ci-39545456967/medium-disabled-rgb.npy": "92ebb84f45c32e48d4e94d47ea36fd6601878aabee39eb2615622f2fcf39eb3e",
+    ".release-evidence/2026-10-22/ci-39545456967/optical-depth.npy": "3ef43348cadaacd2cce01c9a420c2ebe0ce7eec9d2d374f98dfee11815876449",
+    ".release-evidence/2026-10-22/ci-39545456967/realtime-rgb.npy": "f96e539e5a6cd0e2b1ead748c4b02fd01c4befdbeb6dd516aec249481a4e513f",
+    ".release-evidence/2026-10-22/ci-39545456967/realtime-termination-slice.npy": "f8ac2be8633e58cdea5934a80d354fcd59fc7466f27cf6481daf844aef23e23b",
+    ".release-evidence/2026-10-22/ci-39545456967/reference-cloud-shadow-aov-spp320.npy": "04dd3fc04c71f6269c481451404c1df81e5d63537c6d81efdf4ae4fbf99cceff",
+    ".release-evidence/2026-10-22/ci-39545456967/reference-cloud-shadow-aov.npy": "2ed192c66493e0151142623f2d88eed35ccfaacd427eb947f6ff7917a5d58667",
+    ".release-evidence/2026-10-22/ci-39545456967/reference-in-scatter-spp320.npy": "d778b1a58e930677e40b2e1d0210da857fac4b620e51c316e0170b5f8ecea856",
+    ".release-evidence/2026-10-22/ci-39545456967/reference-in-scatter.npy": "34b4d583b6dd726366c4c8ebad0ce15f4a43363bafab6f1ca0a0e813a2910e5e",
+    ".release-evidence/2026-10-22/ci-39545456967/reference-media-lighting-visibility-spp320.npy": "1d9ab6bb4e88dbeb5f2f31196cdfc885181cba7744097e1b4aa33f64d8273159",
+    ".release-evidence/2026-10-22/ci-39545456967/reference-media-lighting-visibility.npy": "1d9ab6bb4e88dbeb5f2f31196cdfc885181cba7744097e1b4aa33f64d8273159",
+    ".release-evidence/2026-10-22/ci-39545456967/reference-optical-depth-spp320.npy": "ee7fa9a309077021ac05c8df91b110421c59eb6c74c37b6f0c7d023dae16c31b",
+    ".release-evidence/2026-10-22/ci-39545456967/reference-optical-depth.npy": "f5bf53a7bf3b0932edad06de18ab4623f241bb4c83b20b3402add7c3132c02b6",
+    ".release-evidence/2026-10-22/ci-39545456967/reference-rgb-spp320.npy": "faed5d5f8d5aec7ede7d30c7f8363e24737825ddf8393207b3f33d6038807dac",
+    ".release-evidence/2026-10-22/ci-39545456967/reference-rgb.npy": "d0a5ff2c46e746f76fe726873821b569324eb59c9cba87bd9be07a5e7dfcf5dd",
+    ".release-evidence/2026-10-22/ci-39545456967/reference-terrain-hit-spp320.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    ".release-evidence/2026-10-22/ci-39545456967/reference-terrain-hit.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    ".release-evidence/2026-10-22/ci-39545456967/reference-terrain-slice-spp320.npy": "3d743b53af51a536ee462a89fa59cf4a1c41d9a1b1607e8901e87619eafcc1e5",
+    ".release-evidence/2026-10-22/ci-39545456967/reference-terrain-slice.npy": "3d743b53af51a536ee462a89fa59cf4a1c41d9a1b1607e8901e87619eafcc1e5",
+    ".release-evidence/2026-10-22/ci-39545456967/reference-transmittance-spp320.npy": "922c7305e0fe0d0f2260446a0f6e26747023ca2ca05533f087569f250d3382fd",
+    ".release-evidence/2026-10-22/ci-39545456967/reference-transmittance.npy": "25fe0d4176f8a8bc9df05faccc3a353a8583aa57d69d18182f80bc2f67e57d20",
+    ".release-evidence/2026-10-22/ci-39545456967/run-a.json": "5bc392fdc5cf8a2ec593654e7b7b5128dc19e434adfbf7d3c6d3d9ca66705c24",
+    ".release-evidence/2026-10-22/ci-39545456967/run-b.json": "95236f279b10b754a4bf3f248ba433e3b2616f6ef94d575e8250ad94c24a87bd",
+    ".release-evidence/2026-10-22/ci-39545456967/shaft-mask.npy": "dae7955e935586a3f85022cfc7bed9f0b3491ece6f44544cdc80c8f9bbe29177",
+    ".release-evidence/2026-10-22/ci-39545456967/sky-cloud-mask.npy": "288e3868f1a06922441af4da195b5db590a5386e647cfc394c7be52f52b5a7b2",
+    ".release-evidence/2026-10-22/ci-39545456967/terrain-dem.npy": "4ae0b3517e1e7a7e09ab4a572f5b1c06cfff60074e640ed593638810ec9d36cf",
+    ".release-evidence/2026-10-22/ci-39545456967/terrain-mask.npy": "5b7ca2bf3538bf37b461f864258cceb7f5e611ad9901eb38dab3cbafee9723f7",
+    ".release-evidence/2026-10-22/ci-39545456967/terrain-occlusion-disabled-rgb.npy": "7c713e60ed32c46c9c2e41a75847df02c67e1ffe82ed103b11e536d1dbfd56fd",
+    ".release-evidence/2026-10-22/ci-39545456967/transmittance.npy": "f1cc596f64b9b6c15f1aa596bfc23efcfb95dbd5bfff4a0d1595e4553451b5b7",
+    ".release-evidence/2026-10-22/ci-39566600606/checked-out-head.txt": "023aaf5c0be6419bba5844c535d3ddb2c3de223dd6e03e311585cef0e6773b65",
+    ".release-evidence/2026-10-22/ci-39566600606/cloud-shadow-aov.npy": "66e5972cff143f8b008e8e09e5ab827763c903b383533f93e10b6edc72d46f60",
+    ".release-evidence/2026-10-22/ci-39566600606/froxel-frame-run-a.npy": "91d42a83486f0d055bb37d89d91d6c3615a0da5ea792b92207197ee302e25560",
+    ".release-evidence/2026-10-22/ci-39566600606/froxel-frame-run-b.npy": "91d42a83486f0d055bb37d89d91d6c3615a0da5ea792b92207197ee302e25560",
+    ".release-evidence/2026-10-22/ci-39566600606/gate2-energy-outcomes.npy": "0b9297016425164a29e2a8f38cebd817bf6272a107068d9f54bdecf2a8c58daf",
+    ".release-evidence/2026-10-22/ci-39566600606/heterogeneous-ratio-samples.npy": "04420e1f032943ea8436bb73507141f38753dbda02e13c64a237b6120c0ec86b",
+    ".release-evidence/2026-10-22/ci-39566600606/homogeneous-ratio-samples.npy": "eb4cfb65972632871fb82e9bb2fe1786a9174dac8ab4bd312d9b3d1dcfc15de3",
+    ".release-evidence/2026-10-22/ci-39566600606/in-scatter.npy": "8aaad008aba195da28f6fb243870ad1cf4d86ec8f4d593fd11f33186c371bd44",
+    ".release-evidence/2026-10-22/ci-39566600606/junit.xml": "08b42ff82060cbba1e4c77e85e5d9caa18a4243849765c68d15b9c9558dbfa4c",
+    ".release-evidence/2026-10-22/ci-39566600606/majorant-probe-pairs.npy": "79d8e0cc679979bc679d9238546ad98bd1656fdfd7a7f9391152a70ee380639e",
+    ".release-evidence/2026-10-22/ci-39566600606/medium-disabled-rgb.npy": "92ebb84f45c32e48d4e94d47ea36fd6601878aabee39eb2615622f2fcf39eb3e",
+    ".release-evidence/2026-10-22/ci-39566600606/optical-depth.npy": "3ef43348cadaacd2cce01c9a420c2ebe0ce7eec9d2d374f98dfee11815876449",
+    ".release-evidence/2026-10-22/ci-39566600606/realtime-rgb.npy": "91d42a83486f0d055bb37d89d91d6c3615a0da5ea792b92207197ee302e25560",
+    ".release-evidence/2026-10-22/ci-39566600606/realtime-termination-slice.npy": "f8ac2be8633e58cdea5934a80d354fcd59fc7466f27cf6481daf844aef23e23b",
+    ".release-evidence/2026-10-22/ci-39566600606/rr-contributions.npy": "2ef08346a07c8dba9b9942cc4703f689d399aaaabc8038dc8630c1e062020b49",
+    ".release-evidence/2026-10-22/ci-39566600606/run-a.json": "24cea601cdcfed6c69f5d989a0ecd76a119fb35f7580e0623a5a4c472b7b6e84",
+    ".release-evidence/2026-10-22/ci-39566600606/run-b.json": "a1166b57de45ca3e6fb5795f924634b555823761987b2c9da3106d991c722c5d",
+    ".release-evidence/2026-10-22/ci-39566600606/terrain-occlusion-disabled-rgb.npy": "47fe4691610ba890ef998c187423d4cbe10e193436d0193158ded45148cbfb2f",
+    ".release-evidence/2026-10-22/ci-39566600606/transmittance.npy": "f1cc596f64b9b6c15f1aa596bfc23efcfb95dbd5bfff4a0d1595e4553451b5b7",
+    ".release-evidence/2026-10-22/ci-39580065706/checked-out-head.txt": "63e6589ee3314fe2a5540c46375073e9b8ebf39e2e49d98d1ba4ac381db32651",
+    ".release-evidence/2026-10-22/ci-39580065706/cloud-shadow-aov.npy": "66e5972cff143f8b008e8e09e5ab827763c903b383533f93e10b6edc72d46f60",
+    ".release-evidence/2026-10-22/ci-39580065706/froxel-frame-run-a.npy": "b0a85054a34eb603812566fb7afe196f0456d537f52695e815813cc5a849b2ed",
+    ".release-evidence/2026-10-22/ci-39580065706/froxel-frame-run-b.npy": "b0a85054a34eb603812566fb7afe196f0456d537f52695e815813cc5a849b2ed",
+    ".release-evidence/2026-10-22/ci-39580065706/gate2-energy-outcomes.npy": "0b9297016425164a29e2a8f38cebd817bf6272a107068d9f54bdecf2a8c58daf",
+    ".release-evidence/2026-10-22/ci-39580065706/heterogeneous-ratio-samples.npy": "04420e1f032943ea8436bb73507141f38753dbda02e13c64a237b6120c0ec86b",
+    ".release-evidence/2026-10-22/ci-39580065706/homogeneous-ratio-samples.npy": "eb4cfb65972632871fb82e9bb2fe1786a9174dac8ab4bd312d9b3d1dcfc15de3",
+    ".release-evidence/2026-10-22/ci-39580065706/in-scatter.npy": "725635a3a9653b4db0f66b398ba367b9c3ed970f4bcc2e7e42ec1b9bf0d1e434",
+    ".release-evidence/2026-10-22/ci-39580065706/junit.xml": "b802d72c2963937cefab47a89148956534007645739473d59a0acc8627fcb97e",
+    ".release-evidence/2026-10-22/ci-39580065706/majorant-probe-pairs.npy": "79d8e0cc679979bc679d9238546ad98bd1656fdfd7a7f9391152a70ee380639e",
+    ".release-evidence/2026-10-22/ci-39580065706/medium-disabled-rgb.npy": "92ebb84f45c32e48d4e94d47ea36fd6601878aabee39eb2615622f2fcf39eb3e",
+    ".release-evidence/2026-10-22/ci-39580065706/optical-depth.npy": "3ef43348cadaacd2cce01c9a420c2ebe0ce7eec9d2d374f98dfee11815876449",
+    ".release-evidence/2026-10-22/ci-39580065706/realtime-rgb.npy": "b0a85054a34eb603812566fb7afe196f0456d537f52695e815813cc5a849b2ed",
+    ".release-evidence/2026-10-22/ci-39580065706/realtime-termination-slice.npy": "f8ac2be8633e58cdea5934a80d354fcd59fc7466f27cf6481daf844aef23e23b",
+    ".release-evidence/2026-10-22/ci-39580065706/rr-contributions.npy": "2ef08346a07c8dba9b9942cc4703f689d399aaaabc8038dc8630c1e062020b49",
+    ".release-evidence/2026-10-22/ci-39580065706/run-a.json": "40e46d3d57e3921c46abee0db5d7be4faffdd9cdaed3ce4399d87f9b05354985",
+    ".release-evidence/2026-10-22/ci-39580065706/run-b.json": "ef79b837cbda4c7bd7dede088e752043102492f4b6eac103ef6657b57abde2ae",
+    ".release-evidence/2026-10-22/ci-39580065706/terrain-occlusion-disabled-rgb.npy": "3ef43a25be99361937aa09aa9314c2f22f9f2e7f6d0f068772b069060171e420",
+    ".release-evidence/2026-10-22/ci-39580065706/transmittance.npy": "f1cc596f64b9b6c15f1aa596bfc23efcfb95dbd5bfff4a0d1595e4553451b5b7",
+    ".release-evidence/2026-10-22/continuation-study/source_operator.py": "964c8faaab05b76e0f9c835cdbd2af2f13d756067303897af8e4164571eb51b2",
+    ".release-evidence/2026-10-22/first-order/nephele_first_order_ablation.py": "b07b14e2da1ca6e0cee94ac9e74e4593d6e49de73d6db876038e5f607c734e07",
+    ".release-evidence/2026-10-22/continuation-study/source-operator-hammersley-environment-quadrature.npz": "edd3106a30822e77c1e3aff00fb5298174fdcc74a494f09e71c29683d4eb00df",
+    ".release-evidence/2026-10-22/continuation-study/source-operator-hammersley-physical-boundary.npz": "e3d77c4d98cd5528d94e04ff13480d00f18b424c4beba15cea854f3983963132",
+    ".release-evidence/2026-10-22/continuation-study/source-operator-hammersley.npz": "f1a4c40288abd2bc77eb9191b3f01597ed3e37795293a74f846d14a638e80e12",
+    ".release-evidence/2026-10-22/continuation-study/source-operator-shifted.npz": "a3164feed5144ecbeac3ebaf26818e33178aae43a7ee9007ac0c7ee8bbb6a6cd",
+    ".release-evidence/2026-10-22/first-order/first-order.npz": "973f5fb1d5cc23f423062360c2ad47a70cb21f27b8cc62ebb3004cf2ac7721fe",
+    ".release-evidence/2026-10-22/first-order/geometry.npz": "9ecf65810b657ce1acf0155753b29208a5accdcc3542b8d6e5f368d087acd1d4",
+    ".release-evidence/2026-10-22/first-order/surface-cloudlight.npy": "99406ab05d37919833ae45aa8fec516a1d9c33e4171ae6c9df0dd5fa7f998c20",
+    ".release-evidence/2026-10-22/continuation-study/sun-ablation.npz": "a0cbbfd1066867a2694ec5e0b597a75d7cf44061f6bcb6532396e806d0c31e28",
+    ".release-evidence/2026-10-22/continuation-study/coupled-surface.npz": "28bca25dec4b3951a98b785caee97f5085fd010133f81a6f13a0d2f4d864acdc"
+  },
+  "captures": {
+    "39517423981": {
+      "head": "d38758e183c522dfb660805987d751f5a6263b24",
+      "url": "https://github.com/milos-agathon/forge3d/actions/runs/39517423981",
+      "adapter": "NVIDIA GeForce RTX 3070",
+      "backend": "Vulkan",
+      "counts": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0
+      },
+      "metrics_under_current_unchanged_policy": {
+        "b1_fraction": 0.9558707643814027,
+        "shaft_ssim": 0.982692300851118,
+        "g4a_fraction": 0.596660244059088,
+        "medium_changed_fraction": 0.386392811296534,
+        "g4b_response": 0.01710810664709675,
+        "g4b_relative_error": 0.5415433551417496,
+        "margins": {
+          "b1_fraction": 0.005870764381402771,
+          "shaft_ssim": 0.03269230085111807,
+          "g4a_fraction": -0.35333975594091194,
+          "medium_changed_fraction": 0.28639281129653404,
+          "g4b_relative_error": -0.34154335514174955
+        },
+        "all_five_pass": false
+      },
+      "encoding_checks": {
+        "inverse_round_trip_byte_identical": true,
+        "beer_mean_abs_error": [
+          0.00024513236712664366,
+          0.0002464710269123316,
+          0.0002450752363074571
+        ],
+        "sky_composite_mean_abs_linear_error": [
+          0.001693399801140294,
+          0.001535460578253103,
+          0.0013052083664407874
+        ],
+        "sky_composite_byte_agreement": 0.8353033884948778
+      },
+      "regions": {
+        "sky": {
+          "in_scatter_mean_error_rgb": [
+            -0.016418488256609798,
+            -0.011481549619448242,
+            -0.005700961759694103
+          ],
+          "transmittance_mean_error_rgb": [
+            -0.00015307862643325676,
+            -6.457299017549219e-06,
+            8.821737247249852e-05
+          ],
+          "optical_depth_mean_error_rgb": [
+            -0.015157078392803669,
+            -0.014482018537819386,
+            -0.014003812335431576
+          ],
+          "beauty_mean_linear_error_rgb": [
+            -0.016835434347943483,
+            -0.011822800447665885,
+            -0.006003232681105204
+          ]
+        },
+        "shadow": {
+          "in_scatter_mean_error_rgb": [
+            -0.08078507680204255,
+            -0.07444998822201883,
+            -0.0657186525764378
+          ],
+          "transmittance_mean_error_rgb": [
+            -0.005740430969302288,
+            -0.005572289367210582,
+            -0.0054506628834519845
+          ],
+          "optical_depth_mean_error_rgb": [
+            0.006695001386106014,
+            0.006430679000914097,
+            0.006256299093365669
+          ],
+          "beauty_mean_linear_error_rgb": [
+            -0.02147359217293436,
+            -0.015445275759907427,
+            -0.007455271998353773
+          ]
+        }
+      }
+    },
+    "39545456967": {
+      "head": "d5507249a2327d183edf0bb3ff11dcb83a773333",
+      "url": "https://github.com/milos-agathon/forge3d/actions/runs/39545456967",
+      "adapter": "NVIDIA GeForce RTX 3070",
+      "backend": "Vulkan",
+      "counts": {
+        "passed": 6,
+        "failed": 0,
+        "skipped": 0
+      },
+      "metrics_under_current_unchanged_policy": {
+        "b1_fraction": 0.9416863672182821,
+        "shaft_ssim": 0.9899707204281153,
+        "g4a_fraction": 0.6730892742453436,
+        "medium_changed_fraction": 0.37997432605905007,
+        "g4b_response": 0.018602208951602937,
+        "g4b_relative_error": 0.5015049602609736,
+        "margins": {
+          "b1_fraction": -0.008313632781717817,
+          "shaft_ssim": 0.039970720428115336,
+          "g4a_fraction": -0.27691072575465636,
+          "medium_changed_fraction": 0.27997432605905004,
+          "g4b_relative_error": -0.30150496026097356
+        },
+        "all_five_pass": false
+      },
+      "encoding_checks": {
+        "inverse_round_trip_byte_identical": true,
+        "beer_mean_abs_error": [
+          0.00024513236712664366,
+          0.0002464710269123316,
+          0.0002450752363074571
+        ],
+        "sky_composite_mean_abs_linear_error": [
+          0.001621647685313513,
+          0.001472918341365118,
+          0.0012960876831239223
+        ],
+        "sky_composite_byte_agreement": 0.8364854215918046
+      },
+      "regions": {
+        "sky": {
+          "in_scatter_mean_error_rgb": [
+            -0.02000875867553895,
+            -0.014631497559201493,
+            -0.008268863250779603
+          ],
+          "transmittance_mean_error_rgb": [
+            -0.00015307862643325676,
+            -6.457299017549219e-06,
+            8.821737247249852e-05
+          ],
+          "optical_depth_mean_error_rgb": [
+            -0.015157078392803669,
+            -0.014482018537819386,
+            -0.014003812335431576
+          ],
+          "beauty_mean_linear_error_rgb": [
+            -0.02035464267780661,
+            -0.014900344923822344,
+            -0.008548718787986189
+          ]
+        },
+        "shadow": {
+          "in_scatter_mean_error_rgb": [
+            -0.08296879329978846,
+            -0.07628242786574149,
+            -0.06717311225558752
+          ],
+          "transmittance_mean_error_rgb": [
+            -0.005740430969302288,
+            -0.005572289367210582,
+            -0.0054506628834519845
+          ],
+          "optical_depth_mean_error_rgb": [
+            0.006695001386106014,
+            0.006430679000914097,
+            0.006256299093365669
+          ],
+          "beauty_mean_linear_error_rgb": [
+            -0.004775260907004933,
+            0.00045777740714947384,
+            0.006968416624637787
+          ]
+        }
+      },
+      "from_previous": {
+        "sky_new_failures": 60,
+        "sky_new_passes": 24,
+        "transmittance_byte_identical": true,
+        "optical_depth_byte_identical": true,
+        "sky_in_scatter_delta_rgb": [
+          -0.003590270418929152,
+          -0.0031499479397532506,
+          -0.0025679014910855004
+        ],
+        "sky_beauty_delta_rgb": [
+          -0.0035192083298630716,
+          -0.003077544476156462,
+          -0.0025454861068809763
+        ],
+        "sky_b1_replacing_only_in_scatter": 0.9539007092198581
+      }
+    },
+    "39566600606": {
+      "head": "ac7390968bcba2b393ad4fbea58716f6dc1acd59",
+      "url": "https://github.com/milos-agathon/forge3d/actions/runs/39566600606",
+      "adapter": "NVIDIA GeForce RTX 3070",
+      "backend": "Vulkan",
+      "counts": {
+        "passed": 4,
+        "failed": 2,
+        "skipped": 0
+      },
+      "metrics_under_current_unchanged_policy": {
+        "b1_fraction": 0.7884160756501182,
+        "shaft_ssim": 0.9916078255428148,
+        "g4a_fraction": 0.7597944765574823,
+        "medium_changed_fraction": 0.31065468549422337,
+        "g4b_response": 0.020363695197357472,
+        "g4b_relative_error": 0.45430131050294364,
+        "margins": {
+          "b1_fraction": -0.16158392434988178,
+          "shaft_ssim": 0.041607825542814836,
+          "g4a_fraction": -0.19020552344251762,
+          "medium_changed_fraction": 0.21065468549422336,
+          "g4b_relative_error": -0.25430131050294363
+        },
+        "all_five_pass": false
+      },
+      "encoding_checks": {
+        "inverse_round_trip_byte_identical": true,
+        "beer_mean_abs_error": [
+          0.00024513236712664366,
+          0.0002464710269123316,
+          0.0002450752363074571
+        ],
+        "sky_composite_mean_abs_linear_error": [
+          0.0015732669660300349,
+          0.001391645732799762,
+          0.0012415692763161428
+        ],
+        "sky_composite_byte_agreement": 0.8506698187549251
+      },
+      "regions": {
+        "sky": {
+          "in_scatter_mean_error_rgb": [
+            -0.03379018673081746,
+            -0.026052532832808294,
+            -0.01858031762091603
+          ],
+          "transmittance_mean_error_rgb": [
+            -0.00015307862643325676,
+            -6.457299017549219e-06,
+            8.821737247249852e-05
+          ],
+          "optical_depth_mean_error_rgb": [
+            -0.015157078392803669,
+            -0.014482018537819386,
+            -0.014003812335431576
+          ],
+          "beauty_mean_linear_error_rgb": [
+            -0.034246875405336455,
+            -0.02631218273778257,
+            -0.018889088147067995
+          ]
+        },
+        "shadow": {
+          "in_scatter_mean_error_rgb": [
+            -0.09009238702646416,
+            -0.08205286079183863,
+            -0.07198937787323252
+          ],
+          "transmittance_mean_error_rgb": [
+            -0.005740430969302288,
+            -0.005572289367210582,
+            -0.0054506628834519845
+          ],
+          "optical_depth_mean_error_rgb": [
+            0.006695001386106014,
+            0.006430679000914097,
+            0.006256299093365669
+          ],
+          "beauty_mean_linear_error_rgb": [
+            -0.011856719467785427,
+            -0.005292787602309458,
+            0.0021561844839438223
+          ]
+        }
+      },
+      "from_previous": {
+        "sky_new_failures": 443,
+        "sky_new_passes": 54,
+        "transmittance_byte_identical": true,
+        "optical_depth_byte_identical": true,
+        "sky_in_scatter_delta_rgb": [
+          -0.013781428055278516,
+          -0.011421035273606802,
+          -0.010311454370136426
+        ],
+        "sky_beauty_delta_rgb": [
+          -0.013892232727530079,
+          -0.011411837813960279,
+          -0.010340369359081808
+        ],
+        "sky_b1_replacing_only_in_scatter": 0.9412923561859732
+      }
+    },
+    "39580065706": {
+      "head": "68cc04e9ab87de3d90e92e76a8690e016e5d759b",
+      "url": "https://github.com/milos-agathon/forge3d/actions/runs/39580065706",
+      "adapter": "NVIDIA GeForce RTX 3070",
+      "backend": "Vulkan",
+      "counts": {
+        "passed": 4,
+        "failed": 2,
+        "skipped": 0
+      },
+      "metrics_under_current_unchanged_policy": {
+        "b1_fraction": 0.7127659574468085,
+        "shaft_ssim": 0.9916001251541653,
+        "g4a_fraction": 0.7109826589595376,
+        "medium_changed_fraction": 0.3215661103979461,
+        "g4b_response": 0.019629758417801648,
+        "g4b_relative_error": 0.4739690738875221,
+        "margins": {
+          "b1_fraction": -0.23723404255319147,
+          "shaft_ssim": 0.041600125154165335,
+          "g4a_fraction": -0.23901734104046235,
+          "medium_changed_fraction": 0.22156611039794608,
+          "g4b_relative_error": -0.27396907388752206
+        },
+        "all_five_pass": false
+      },
+      "encoding_checks": {
+        "inverse_round_trip_byte_identical": true,
+        "beer_mean_abs_error": [
+          0.00024513236712664366,
+          0.0002464710269123316,
+          0.0002450752363074571
+        ],
+        "sky_composite_mean_abs_linear_error": [
+          0.0015105964360296524,
+          0.0014005699817540085,
+          0.0012207401090255235
+        ],
+        "sky_composite_byte_agreement": 0.843183609141056
+      },
+      "regions": {
+        "sky": {
+          "in_scatter_mean_error_rgb": [
+            -0.0445261516749941,
+            -0.03528737682714131,
+            -0.025939851629762808
+          ],
+          "transmittance_mean_error_rgb": [
+            -0.00015307862643325676,
+            -6.457299017549219e-06,
+            8.821737247249852e-05
+          ],
+          "optical_depth_mean_error_rgb": [
+            -0.015157078392803669,
+            -0.014482018537819386,
+            -0.014003812335431576
+          ],
+          "beauty_mean_linear_error_rgb": [
+            -0.04482993519670891,
+            -0.03566841616598001,
+            -0.026243525580254053
+          ]
+        },
+        "shadow": {
+          "in_scatter_mean_error_rgb": [
+            -0.09373529076662367,
+            -0.08520512849657139,
+            -0.07451704685924983
+          ],
+          "transmittance_mean_error_rgb": [
+            -0.005740430969302288,
+            -0.005572289367210582,
+            -0.0054506628834519845
+          ],
+          "optical_depth_mean_error_rgb": [
+            0.006695001386106014,
+            0.006430679000914097,
+            0.006256299093365669
+          ],
+          "beauty_mean_linear_error_rgb": [
+            -0.015433843070604306,
+            -0.008488305315289206,
+            -0.00038288973149475867
+          ]
+        }
+      },
+      "from_previous": {
+        "sky_new_failures": 308,
+        "sky_new_passes": 116,
+        "transmittance_byte_identical": true,
+        "optical_depth_byte_identical": true,
+        "sky_in_scatter_delta_rgb": [
+          -0.01073596494417664,
+          -0.009234843994333013,
+          -0.007359534008846779
+        ],
+        "sky_beauty_delta_rgb": [
+          -0.0105830597913725,
+          -0.009356233428197646,
+          -0.007354437433186125
+        ],
+        "sky_b1_replacing_only_in_scatter": 0.7832939322301025
+      }
+    }
+  },
+  "reference_encoding": {
+    "beauty": "uint8 IEC sRGB after ACES fitted, exposure 1",
+    "aovs": "linear RGB in-scatter, dimensionless transmittance and optical depth",
+    "reference_in_scatter_semantics": "Total path radiance when collision_count > 0, including paths that first hit the primary terrain and scatter later (media_reference.rs). Not the same terrain path partition as the runtime camera-segment source integral.",
+    "reference_optical_depth_semantics": "Negative log of Monte Carlo mean transmittance; runtime integrates extinction deterministically.",
+    "sky_composite_mean_abs_linear_error": [
+      0.003746869421176256,
+      0.0038614657974111065,
+      0.0038715978205326406
+    ],
+    "sky_composite_byte_agreement": 0.2568951930654058
+  },
+  "canonical_npy_files_identical_to_ac739096": 14,
+  "acceptance_diff_from_ac739096": "",
+  "python": "3.13.14 (tags/v3.13.14:fd17997, Jun 10 2026, 13:03:48) [MSC v.1944 64 bit (AMD64)]",
+  "artifact_download_verification": {
+    "39517423981": {
+      "input_files": 36,
+      "missing": [],
+      "mismatched": []
+    },
+    "39545456967": {
+      "input_files": 36,
+      "missing": [],
+      "mismatched": []
+    },
+    "39566600606": {
+      "input_files": 19,
+      "missing": [],
+      "mismatched": []
+    },
+    "39580065706": {
+      "input_files": 19,
+      "missing": [],
+      "mismatched": []
+    }
+  },
+  "state": "STEP_1_VERIFIED; STEP_2_AND_STEP_3_INCOMPLETE; NO_DEMONSTRATED_TRANSPORT_BLOCKER",
+  "capture_metrics_tool_sha256": "5912de95d66723255cbccbb992dc85bdbeaca4cbf3af41830e8f2817146b07ff",
+  "capture_metrics_source": ".release-evidence/2026-10-22/pre-review-audit/nephele-release-analysis-2026-10-22.py",
+  "reproducer_current_sha256": "3fd1cad0cb5b3a48066d3eba8777c95e881836ef2a9d8059d86ad82329328096",
+  "provenance_correction": "Verified existing capture measurements reused. Only path keys and status/provenance metadata corrected; raw captures and metrics unchanged.",
+  "captured_revision": "68cc04e9ab87de3d90e92e76a8690e016e5d759b",
+  "uncaptured_workspace_head": "ca4f5bd3dbea63dfc2e9bab7e888c3202a3b1e17"
+}

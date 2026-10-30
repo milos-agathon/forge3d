@@ -502,6 +502,36 @@ def test_native_terrain_cache_recomputes_moment_shadow_techniques(tmp_path, tech
     os.environ.get("FORGE3D_RUN_GPU_ANAMNESIS") != "1",
     reason="set FORGE3D_RUN_GPU_ANAMNESIS=1 on a hardware-backed runner",
 )
+def test_native_terrain_cache_bypasses_participating_media(tmp_path):
+    from forge3d.media import Medium
+
+    hdr_path = tmp_path / "environment.hdr"
+    write_canonical_hdr(str(hdr_path))
+    renderer = f3d.TerrainRenderer(f3d.Session(window=False))
+    material_set = f3d.MaterialSet.terrain_default()
+    env_maps = f3d.IBL.from_hdr(str(hdr_path), intensity=1.0)
+    config = _canonical_params_config()(64, 64)
+    config.media = Medium((0.01, 0.01, 0.01), (0.02, 0.02, 0.02), 1.0)
+    config.camera_mode = "mesh:yup"
+    params = f3d.TerrainRenderParams(config)
+    heightmap = np.ascontiguousarray(canonical_heightmap(), dtype=np.float32)
+
+    renderer.render_terrain_pbr_pom(
+        material_set, env_maps, params, heightmap, cache=tmp_path / "native-media"
+    )
+    report = dict(renderer.last_anamnesis_cache_report)
+    assert report["hits"] == []
+    assert report["bytes_read"] == report["bytes_written"] == 0
+    assert report["graph_command_submissions"] > 0
+    assert not (tmp_path / "native-media").exists()
+    assert report["bypass_reason"] == "participating_media"
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(
+    os.environ.get("FORGE3D_RUN_GPU_ANAMNESIS") != "1",
+    reason="set FORGE3D_RUN_GPU_ANAMNESIS=1 on a hardware-backed runner",
+)
 def test_native_aov_cache_option_recomputes_every_attachment(tmp_path):
     hdr_path = tmp_path / "environment.hdr"
     write_canonical_hdr(str(hdr_path))

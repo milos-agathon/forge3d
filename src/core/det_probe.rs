@@ -156,7 +156,7 @@ pub(crate) fn run_det_probe_on(
     slice.map_async(wgpu::MapMode::Read, move |result| {
         let _ = sender.send(result);
     });
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     receiver
         .recv()
         .map_err(|e| RenderError::readback(format!("det_probe map channel: {e}")))?
@@ -307,7 +307,7 @@ pub(crate) fn run_det_raster_on(
     slice.map_async(wgpu::MapMode::Read, move |result| {
         let _ = sender.send(result);
     });
-    device.poll(wgpu::Maintain::Wait);
+    crate::core::gpu::wait_for_device_idle(&device);
     receiver
         .recv()
         .map_err(|e| RenderError::readback(format!("det_raster map channel: {e}")))?
