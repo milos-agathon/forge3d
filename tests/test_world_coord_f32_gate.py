@@ -583,9 +583,36 @@ def _complete_conversion_inventory():
     return sites
 
 
-def conversion_inventory():
-    """Reviewed narrowing inventory, excluding the exact lossless DD split."""
+def _raw_conversion_inventory():
+    """The scanned inventory, excluding the exact lossless DD split."""
     return [site for site in _complete_conversion_inventory() if site not in SANCTIONED_DD_SPLITS]
+
+
+def _undo_splat_env_map_transition(sites):
+    """Reverse the SPLAT-FUSED HDRI env-map additions.
+
+    The four ``env_from_hdr_image`` sites are the newest transition in the
+    ledger, stacked on top of every freeze the chain below reconstructs, so
+    they come off before it runs.
+    """
+    transition = _ledger_data()["splat_fused_env_map"]
+    added = set(map(tuple, transition["added"]))
+    assert transition["removed"] == []
+    assert len(added) == 4
+    for site in added:
+        assert sites.count(site) == 1, f"env-map conversion missing or duplicated: {site}"
+    return [site for site in sites if site not in added]
+
+
+def conversion_inventory():
+    """The chain's input: the inventory below the branch's own transition.
+
+    Every `_undo_*` below reconstructs an earlier freeze, so the chain starts
+    from the inventory those freezes describe — the additions this branch
+    made on top of it are removed first, and are checked by
+    ``test_splat_fused_env_map_inventory_transition_is_exact``.
+    """
+    return _undo_splat_env_map_transition(_raw_conversion_inventory())
 
 
 def _inventory_digest(sites) -> str:
@@ -1148,6 +1175,54 @@ def test_splat_fused_inventory_transition_is_exact():
         assert current[site] > 0, f"recorded addition missing: {site}"
 
 
+def test_splat_fused_env_map_inventory_transition_is_exact():
+    transition = _ledger_data()["splat_fused_env_map"]
+    assert transition["review"]
+    assert transition["removed"] == []
+    # The base is the production inventory of the commit this branch was
+    # rebased onto; the four HDRI env-map sites bridge it forward.
+    # The merged tree carries these sites on top of the NEPHELE integration
+    # freeze, so the whole-tree pair is locked by the combined record.
+    combined = _ledger_data()["nephele_splat_env_map_2026_10_30"]
+    assert combined["review"]
+    sites = _raw_conversion_inventory()
+    assert (len(sites), _inventory_digest(sites)) == (
+        combined["result_count"], combined["result_digest"],
+    )
+    base = _undo_splat_env_map_transition(sites)
+    assert (len(base), _inventory_digest(base)) == (
+        combined["base_count"], combined["base_digest"],
+    )
+    assert (combined["base_count"], combined["base_digest"]) == (
+        EXPECTED_CONVERSION_COUNT, EXPECTED_CONVERSION_SHA256,
+    )
+    # The pair above is measured in scan order, so its digests are not
+    # numerically comparable with the chain's — and `base` holds the same 1861
+    # sites as `concordia`'s result under a different digest. Normalised the
+    # way the chain normalises, `base` must hash to that result exactly: this
+    # is what makes "bridged onto main" a check rather than a claim.
+    concordia = _ledger_data()["concordia"]
+    normalised = _undo_p1_inventory_transitions(_integrated_main_inventory())
+    assert len(normalised) == concordia["result_count"]
+    assert _inventory_digest(normalised) == concordia["result_digest"]
+    added = list(map(tuple, transition["added"]))
+    assert len(added) == 4 and len(set(added)) == 4
+    assert transition["base_count"] + len(added) == transition["result_count"]
+    # Every site is an env_from_hdr_image radiance/texture narrowing, never a
+    # world coordinate: positions still cross f64 -> f32 only through Anchor.
+    for rel, fn, op, _occ, _stmt in added:
+        assert rel == "src/path_tracing/hybrid_compute/render_fused.rs"
+        assert fn == "env_from_hdr_image" and op == "as_f32"
+    body = _function_body("src/path_tracing/hybrid_compute/render_fused.rs", "env_from_hdr_image")
+    assert "position" not in body.lower()
+    assert "anchor" not in body.lower()
+    assert "to_render_f32" not in body
+
+    current = collections.Counter(_raw_conversion_inventory())
+    for site in added:
+        assert current[site] > 0, f"recorded addition missing: {site}"
+
+
 def test_tessella_and_splat_combined_freeze_is_exact():
     tessella = REVIEWED_TESSELLA_INVENTORY_TRANSITION
     splat = _ledger_data()["splat_fused"]
@@ -1583,7 +1658,14 @@ def test_p1_inventory_rejects_missing_duplicate_changed_and_extra_sites():
 
 
 def _inventory_before_water_optics():
-    """Check both approved branch inventories without replacing either freeze."""
+    """Check both approved branch inventories without replacing either freeze.
+
+    The chain starts from `conversion_inventory()`, which already has the
+    SPLAT-FUSED HDRI env-map additions removed, so this helper sees exactly
+    the production inventory main's freezes describe. The four env-map sites
+    are locked separately by
+    ``test_splat_fused_env_map_inventory_transition_is_exact``.
+    """
     water = _ledger_data()["water_optics"]
     viewport = _ledger_data()["viewer_viewport_resize"]
     sites = _undo_sky_lighting_transition(_undo_p1_inventory_transitions(_main_side_inventory()))

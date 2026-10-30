@@ -901,13 +901,12 @@ impl FusedGpu {
     }
 
     /// Pages requested from the loader and not yet resident.
+    ///
+    /// The paging policy's behaviour is a property of the pool, and this is
+    /// the only window onto the loader's backlog; the acceptance test's
+    /// formulation is tracked separately.
     pub fn pending_pages(&self) -> usize {
         self.pending.len()
-    }
-
-    /// Slot of a resident page (tests and diagnostics).
-    pub fn resident_slot(&self, page: u32) -> Option<u32> {
-        self.residency.slot(page)
     }
 }
 

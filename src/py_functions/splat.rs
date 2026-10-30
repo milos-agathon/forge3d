@@ -25,8 +25,9 @@ use crate::splat::fusion::{
 };
 use crate::splat::kernel::{ray_gaussian, splat_transmittance};
 use crate::splat::stream::{
-    write_splat_page_store, write_synthetic_point_field, CopcPageSource, PageSource,
-    PageStoreFile, PageStoreSummary, PointCloudFrame, SplatCloudSource, SyntheticFieldDesc,
+    write_splat_page_store, write_synthetic_point_field, srgb_byte_to_linear, CopcPageSource,
+    PageSource, PageStoreFile, PageStoreSummary, PointArraySource, PointCloudFrame,
+    SplatCloudSource, SyntheticFieldDesc,
 };
 use crate::splat::{inverse_covariance, GaussianSplatCloud, ShRest};
 
@@ -366,6 +367,80 @@ pub(crate) fn splat_ray_gaussian(
     Ok(d.into())
 }
 
+/// The camera, sun, exposure and seed that produced one view's pixels.
+///
+/// A certificate that does not name these cannot tell two renders apart:
+/// the same scene at another size, with the sun somewhere else, or from
+/// another seed produces different pixels under the same signed inputs.
+/// The single-view path records them without a prefix; a sequence prefixes
+/// each view's own set with its index, because its views differ.
+fn record_view_inputs(prefix: &str, view: &SequenceView) {
+    let vec3 = |v: [f32; 3]| format!("{:.6},{:.6},{:.6}", v[0], v[1], v[2]);
+    for (key, value) in [
+        ("cam_origin", vec3(view.cam_origin)),
+        ("cam_look_at", vec3(view.cam_look_at)),
+        ("cam_up", vec3(view.cam_up)),
+        ("fov_y_deg", view.fov_y_deg.to_string()),
+        ("sun_azimuth_deg", view.sun_azimuth_deg.to_string()),
+        ("sun_elevation_deg", view.sun_elevation_deg.to_string()),
+        ("sun_intensity", view.sun_intensity.to_string()),
+        ("sun_color", vec3(view.sun_color)),
+        ("exposure", view.exposure.to_string()),
+        ("seed", view.seed.to_string()),
+    ] {
+        crate::core::certificate::record_input(format!("fused.{prefix}{key}"), value);
+    }
+}
+
+/// The frame and sky the render used, for the signed certificate.
+fn record_render_inputs(
+    width: u32,
+    height: u32,
+    tile: Option<(u32, u32)>,
+    sky_turbidity: f32,
+    sky_ground_albedo: f32,
+    sky_intensity: f32,
+) {
+    for (key, value) in [
+        ("fused.width", width.to_string()),
+        ("fused.height", height.to_string()),
+        (
+            "fused.tile",
+            match tile {
+                Some((w, h)) => format!("{w}x{h}"),
+                None => "none".to_string(),
+            },
+        ),
+        ("fused.sky_turbidity", sky_turbidity.to_string()),
+        ("fused.sky_ground_albedo", sky_ground_albedo.to_string()),
+        ("fused.sky_intensity", sky_intensity.to_string()),
+    ] {
+        crate::core::certificate::record_input(key, value);
+    }
+}
+
+/// Identity of the HDRI a fused render used, for the signed certificate.
+///
+/// The certificate has to be comparable across machines, so it records the
+/// file's BASENAME together with the SHA256 of its bytes:
+///
+///   * the absolute path would leak the machine's directory layout into the
+///     signed payload, and
+///   * the path alone would not distinguish two different files that share a
+///     name — the content hash does.
+fn fused_env_identity(path: &str) -> PyResult<String> {
+    let bytes = std::fs::read(path).map_err(|err| {
+        PyValueError::new_err(format!("cannot read env_map {path}: {err}"))
+    })?;
+    let digest = crate::core::provenance::sha256(&bytes);
+    let name = std::path::Path::new(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "env.hdr".to_string());
+    Ok(format!("{name}#{}", crate::core::provenance::to_hex(&digest)))
+}
+
 fn brdf_index(name: &str) -> PyResult<u32> {
     Ok(match name {
         "lambert" => 0,
@@ -401,6 +476,8 @@ fn build_scene(
     splat_page_size: Option<u32>,
     splat_stores: Vec<String>,
     pointclouds: Vec<(String, (f64, f64, f64), bool)>,
+    point_positions: Option<PyReadonlyArray2<'_, f32>>,
+    point_colors: Option<PyReadonlyArray2<'_, u8>>,
     heights: Option<PyReadonlyArray2<'_, f32>>,
     spacing: (f32, f32),
     exaggeration: f32,
@@ -471,6 +548,54 @@ fn build_scene(
             )?));
         }
     }
+    // In-memory point arrays: world-space y-up positions with optional sRGB
+    // byte colours (the terrain albedo map convention), paged like any other
+    // point source. No file, no origin transform — the caller owns the frame.
+    if point_colors.is_some() && point_positions.is_none() {
+        return Err(PyValueError::new_err(
+            "point_colors was given without point_positions",
+        ));
+    }
+    if let Some(array) = point_positions {
+        let positions = rows::<3>(&array, "point_positions")?;
+        if positions.is_empty() {
+            return Err(PyValueError::new_err(
+                "point_positions must contain at least one (N, 3) row",
+            ));
+        }
+        if positions.iter().any(|p| p.iter().any(|v| !v.is_finite())) {
+            return Err(PyValueError::new_err(
+                "point_positions must be finite world coordinates",
+            ));
+        }
+        let colors = match point_colors {
+            None => None,
+            Some(map) => {
+                let view = map.as_array();
+                if view.shape() != [positions.len(), 3] {
+                    return Err(PyValueError::new_err(format!(
+                        "point_colors shape {:?} must be ({}, 3)",
+                        view.shape(),
+                        positions.len()
+                    )));
+                }
+                let mut colors = Vec::with_capacity(positions.len());
+                for r in 0..view.shape()[0] {
+                    colors.push([
+                        srgb_byte_to_linear(view[[r, 0]]),
+                        srgb_byte_to_linear(view[[r, 1]]),
+                        srgb_byte_to_linear(view[[r, 2]]),
+                    ]);
+                }
+                Some(colors)
+            }
+        };
+        sources.push(Arc::new(PointArraySource::new(
+            positions,
+            colors,
+            params.page_capacity as usize,
+        )));
+    }
     if heights.is_none() && terrain_albedo_map.is_some() {
         return Err(PyValueError::new_err(
             "terrain albedo_map was given without terrain heights",
@@ -518,7 +643,8 @@ fn build_scene(
     };
     if sources.is_empty() && terrain.is_none() {
         return Err(PyValueError::new_err(
-            "fused render has no inputs: pass at least one of splats, pointcloud or terrain",
+            "fused render has no inputs: pass at least one of splats, pointcloud, \
+             point_positions or terrain",
         ));
     }
     Ok(SceneInputs {
@@ -619,6 +745,8 @@ fn output_dict(py: Python<'_>, out: FusedRenderOutput) -> PyResult<Py<PyDict>> {
     splats = None,
     splat_stores = Vec::new(),
     pointclouds = Vec::new(),
+    point_positions = None,
+    point_colors = None,
     heights = None,
     spacing = (1.0, 1.0),
     exaggeration = 1.0,
@@ -638,6 +766,8 @@ fn output_dict(py: Python<'_>, out: FusedRenderOutput) -> PyResult<Py<PyDict>> {
     sky_turbidity = 2.5,
     sky_ground_albedo = 0.2,
     sky_intensity = 0.35,
+    env_map = None,
+    env_rotation_deg = 0.0,
     kappa = 4.0,
     lidar_radius = 0.2,
     lidar_opacity = 1.0,
@@ -674,6 +804,8 @@ pub(crate) fn render_fused(
     splats: Option<PyRef<'_, PyGaussianSplatCloud>>,
     splat_stores: Vec<String>,
     pointclouds: Vec<(String, (f64, f64, f64), bool)>,
+    point_positions: Option<PyReadonlyArray2<'_, f32>>,
+    point_colors: Option<PyReadonlyArray2<'_, u8>>,
     heights: Option<PyReadonlyArray2<'_, f32>>,
     spacing: (f32, f32),
     exaggeration: f32,
@@ -693,6 +825,8 @@ pub(crate) fn render_fused(
     sky_turbidity: f32,
     sky_ground_albedo: f32,
     sky_intensity: f32,
+    env_map: Option<&str>,
+    env_rotation_deg: f32,
     kappa: f32,
     lidar_radius: f32,
     lidar_opacity: f32,
@@ -732,6 +866,14 @@ pub(crate) fn render_fused(
     // render-graph cache (its paged scene is streamed per view).
     let _ = cache;
     let policy_name = policy;
+    // Load the HDRI before any scene/GPU work: a bad path is a cheap error.
+    let env = match env_map {
+        Some(path) => Some(crate::path_tracing::hybrid_compute::load_fused_env(
+            path,
+            env_rotation_deg,
+        )?),
+        None => None,
+    };
     let params = fusion_params(
         kappa,
         lidar_radius,
@@ -758,6 +900,8 @@ pub(crate) fn render_fused(
         splat_page_size,
         splat_stores,
         pointclouds,
+        point_positions,
+        point_colors,
         heights,
         spacing,
         exaggeration,
@@ -786,9 +930,42 @@ pub(crate) fn render_fused(
         ("fused.spp", spp.to_string()),
         ("fused.frames", frames.to_string()),
         ("fused.brdf", brdf.to_string()),
+        (
+            "fused.env_map",
+            match env_map {
+                Some(path) => fused_env_identity(path)?,
+                None => "hosek-wilkie".to_string(),
+            },
+        ),
+        ("fused.env_rotation_deg", env_rotation_deg.to_string()),
+        ("fused.fog_density", fog_density.to_string()),
+        ("fused.fog_height_falloff", fog_height_falloff.to_string()),
     ] {
         crate::core::certificate::record_input(key, value);
     }
+    record_render_inputs(
+        width,
+        height,
+        tile_width.zip(tile_height),
+        sky_turbidity,
+        sky_ground_albedo,
+        sky_intensity,
+    );
+    record_view_inputs(
+        "",
+        &SequenceView {
+            cam_origin: [cam_origin.0, cam_origin.1, cam_origin.2],
+            cam_look_at: [cam_look_at.0, cam_look_at.1, cam_look_at.2],
+            cam_up: [cam_up.0, cam_up.1, cam_up.2],
+            fov_y_deg,
+            sun_azimuth_deg,
+            sun_elevation_deg,
+            sun_intensity,
+            sun_color: [sun_color.0, sun_color.1, sun_color.2],
+            exposure,
+            seed,
+        },
+    );
     let out = py.allow_threads(|| -> Result<FusedRenderOutput, crate::core::error::RenderError> {
         let tracer = HybridPathTracer::new_fused()?;
         tracer.render_fused(&FusedRenderDesc {
@@ -806,6 +983,7 @@ pub(crate) fn render_fused(
             sky_turbidity,
             sky_ground_albedo,
             sky_intensity,
+            env_map: env.clone(),
             width,
             height,
             seed,
@@ -970,6 +1148,8 @@ fn sequence_view(index: usize, view: &Bound<'_, PyDict>) -> PyResult<SequenceVie
     splats = None,
     splat_stores = Vec::new(),
     pointclouds = Vec::new(),
+    point_positions = None,
+    point_colors = None,
     heights = None,
     spacing = (1.0, 1.0),
     exaggeration = 1.0,
@@ -981,6 +1161,8 @@ fn sequence_view(index: usize, view: &Bound<'_, PyDict>) -> PyResult<SequenceVie
     sky_turbidity = 2.5,
     sky_ground_albedo = 0.2,
     sky_intensity = 0.35,
+    env_map = None,
+    env_rotation_deg = 0.0,
     kappa = 4.0,
     lidar_radius = 0.2,
     lidar_opacity = 1.0,
@@ -1016,6 +1198,8 @@ pub(crate) fn render_fused_sequence(
     splats: Option<PyRef<'_, PyGaussianSplatCloud>>,
     splat_stores: Vec<String>,
     pointclouds: Vec<(String, (f64, f64, f64), bool)>,
+    point_positions: Option<PyReadonlyArray2<'_, f32>>,
+    point_colors: Option<PyReadonlyArray2<'_, u8>>,
     heights: Option<PyReadonlyArray2<'_, f32>>,
     spacing: (f32, f32),
     exaggeration: f32,
@@ -1027,6 +1211,8 @@ pub(crate) fn render_fused_sequence(
     sky_turbidity: f32,
     sky_ground_albedo: f32,
     sky_intensity: f32,
+    env_map: Option<&str>,
+    env_rotation_deg: f32,
     kappa: f32,
     lidar_radius: f32,
     lidar_opacity: f32,
@@ -1075,6 +1261,14 @@ pub(crate) fn render_fused_sequence(
             ))
         }
     };
+    // Load the HDRI before any scene/GPU work: a bad path is a cheap error.
+    let env = match env_map {
+        Some(path) => Some(crate::path_tracing::hybrid_compute::load_fused_env(
+            path,
+            env_rotation_deg,
+        )?),
+        None => None,
+    };
     let params = fusion_params(
         kappa,
         lidar_radius,
@@ -1101,6 +1295,8 @@ pub(crate) fn render_fused_sequence(
         splat_page_size,
         splat_stores,
         pointclouds,
+        point_positions,
+        point_colors,
         heights,
         spacing,
         exaggeration,
@@ -1122,10 +1318,39 @@ pub(crate) fn render_fused_sequence(
         ("fused.logical_primitives", inputs.scene.logical_primitive_count().to_string()),
         ("fused.paging_policy", policy.to_string()),
         ("fused.views", views.len().to_string()),
+        ("fused.kappa", kappa.to_string()),
+        ("fused.lidar_radius", lidar_radius.to_string()),
+        ("fused.lidar_opacity", lidar_opacity.to_string()),
+        ("fused.lidar_surfels", lidar_surfels.to_string()),
+        ("fused.brdf", brdf.to_string()),
         ("fused.spp", spp.to_string()),
         ("fused.frames", frames.to_string()),
+        (
+            "fused.env_map",
+            match env_map {
+                Some(path) => fused_env_identity(path)?,
+                None => "hosek-wilkie".to_string(),
+            },
+        ),
+        ("fused.env_rotation_deg", env_rotation_deg.to_string()),
+        ("fused.fog_density", fog_density.to_string()),
+        ("fused.fog_height_falloff", fog_height_falloff.to_string()),
     ] {
         crate::core::certificate::record_input(key, value);
+    }
+    record_render_inputs(
+        width,
+        height,
+        tile_width.zip(tile_height),
+        sky_turbidity,
+        sky_ground_albedo,
+        sky_intensity,
+    );
+    // Each view has its own camera, sun, exposure and seed, so each gets its
+    // own set: a sequence's views differ from each other, and a certificate
+    // that named only the first could not tell them apart.
+    for (index, view) in views.iter().enumerate() {
+        record_view_inputs(&format!("view{index}."), view);
     }
     let outputs = py.allow_threads(
         || -> Result<Vec<FusedRenderOutput>, crate::core::error::RenderError> {
@@ -1146,6 +1371,7 @@ pub(crate) fn render_fused_sequence(
                     sky_turbidity,
                     sky_ground_albedo,
                     sky_intensity,
+                    env_map: env.clone(),
                     width,
                     height,
                     seed: view.seed,
@@ -1259,6 +1485,8 @@ pub(crate) fn render_fused_reference_py(
         splat_page_size,
         splat_stores,
         pointclouds,
+        None,
+        None,
         heights,
         spacing,
         exaggeration,
