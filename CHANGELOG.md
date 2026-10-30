@@ -6,9 +6,6 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
-### Fixed
-- SPLAT-FUSED: an HDRI `env_map` sky no longer renders as visible blocks. The background interpolates between texels, and the source is kept up to 4096 texels wide instead of 1024. Lighting and the default analytic sky are unchanged. A 4096-wide sky uses 134 MB of the 512 MiB render budget, so large frames may need a smaller `tile`.
-
 ## [1.47.0] - 2026-10-30
 
 ### Added
@@ -35,6 +32,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - NEPHELE render certificates identify the registered shader modules used by each pass, rather than their pipeline labels.
 - Slow GPUs, such as software Vulkan on hosted Linux, no longer crash when one submission takes longer than 5 seconds. Waits for all GPU work in the native library now last until the device has really finished; on the GL backend they keep wgpu's own wait, because GL defers freeing objects still in use. Some waits are unchanged: waits for one specific submission in the vector code and the fence tracker (`src/core/fence_tracker.rs`), the frozen offline reference/hybrid path-tracer sources, the `policies` benchmark binary (`bench/upload_policies/policies.rs`), and three resource-tracker unit tests. Previously, wgpu 0.19's `Maintain::Wait` gave up after 5 seconds and then freed command buffers and buffers the device was still using.
 - The Radiance `.hdr` loader honours the `+Y` orientation and flips bottom-to-top files back, which were previously upside down (this affects IBL as well as SPLAT-FUSED). A resolution line with neither `-Y` nor `+Y` is refused instead of guessed at (#255).
+- SPLAT-FUSED: an HDRI `env_map` sky no longer renders as visible blocks. The background interpolates between texels, and the source is kept up to 4096 texels wide instead of 1024. Lighting and the default analytic sky are unchanged. A 4096-wide sky uses 134 MB of the 512 MiB render budget, so large frames may need a smaller `tile`.
 
 ## [1.46.0] - 2026-10-29
 
