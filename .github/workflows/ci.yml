@@ -3105,6 +3105,8 @@ jobs:
           python -m scripts.nephele_acceptance report --artifact-dir "$env:FORGE3D_NEPHELE_ARTIFACT_DIR" --head-sha "$env:FORGE3D_NEPHELE_CANDIDATE_SHA" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/evidence-verifier.log"
           exit $LASTEXITCODE
       - name: Measure NEPHELE frame latency on the original 1500-square Gore Range DEM
+        env:
+          FORGE3D_NEPHELE_TRACE: "1"
         shell: pwsh
         run: |
           python docs/audits/nephele-dem-frame-time-2026-10-22.py --output "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/realistic-dem-frame-time.json" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/realistic-dem-frame-time.log"
