@@ -26,6 +26,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - SPLAT-FUSED: the signed render certificate now records the render, not only the scene: frame size, tile, sky, environment map (basename and SHA256 of its bytes, never its path) and rotation, plus each view's camera, sun, exposure and seed. `render_fused_sequence` records the same scene inputs as `render_fused`. Certificates of existing renders change accordingly (#255).
 
 ### Fixed
+- NEPHELE directional transport submits each dispatch separately, so first-frame solves on large terrain no longer lose the GPU device to the 2 s Windows watchdog (seen on a 1500-square DEM with an RTX 3070).
 - NEPHELE checks convergence using the packed f16 bits actually stored, including overflow and monotonicity checks, so rounding cannot keep an already converged solve running.
 - Terrain AOV rendering follows the compiled pass order, including directional media injection before terrain shading when the graph requires it.
 - External media inputs and previous-frame history now have content and producer identities in the render cache, preventing missing-input errors and stale media reuse.
