@@ -2210,6 +2210,11 @@ impl TerrainMediaResources {
                 for (index, group) in dispatch.groups.iter().enumerate() { pass.set_bind_group(index as u32, group, &[]); }
                 pass.dispatch_workgroups(groups[0], groups[1], groups[2]);
             };
+            let flush_dispatch = |encoder: &mut wgpu::CommandEncoder| {
+                let submitted=std::mem::replace(encoder,device.create_command_encoder(&wgpu::CommandEncoderDescriptor {label:Some("nephele.media.directional.continue")}));
+                queue.submit([submitted.finish()]);
+                crate::core::gpu::wait_for_device_idle(device);
+            };
             dispatch(encoder,&directional.clear,directional.cache_workgroups);
             let mut orders=0u32;
             let mut previous_trace_progress=None;
@@ -2219,8 +2224,14 @@ impl TerrainMediaResources {
                 trace_stage(orders,"begin");
                 encoder.clear_buffer(&directional.buffers[4],0,None);
                 let [incoming, source, surface] = &directional.iterations[(orders%2) as usize];
+                // One submission per dispatch: on large terrain a whole order
+                // outlasts the 2 s Windows GPU watchdog and loses the device.
                 dispatch(encoder, incoming, workgroups);
+                flush_dispatch(encoder);
+                trace_stage(orders,"after_incoming");
                 dispatch(encoder, source, workgroups);
+                flush_dispatch(encoder);
+                trace_stage(orders,"after_source");
                 dispatch(encoder, surface, directional.surface_workgroups);
                 if orders==0 {
                     encoder.copy_buffer_to_buffer(&directional.buffers[1],0,&directional.buffers[3],0,directional.buffers[3].size());
@@ -2278,7 +2289,9 @@ impl TerrainMediaResources {
             }
             let parity=(orders%2) as usize;
             dispatch(encoder, &directional.final_incoming[parity], workgroups);
+            flush_dispatch(encoder);
             dispatch(encoder, &directional.camera, workgroups);
+            flush_dispatch(encoder);
             dispatch(encoder, &directional.primary[parity], [self.viewport.0.div_ceil(8), self.viewport.1.div_ceil(8), 1]);
             let submitted=std::mem::replace(encoder,device.create_command_encoder(&wgpu::CommandEncoderDescriptor {label:Some("nephele.media.directional.output")}));
             queue.submit([submitted.finish()]);
