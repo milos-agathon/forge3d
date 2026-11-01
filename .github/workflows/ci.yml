@@ -171,7 +171,7 @@ jobs:
           sudo apt-get install -y libvulkan-dev pkg-config
           python -m venv .venv
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
-          .venv/bin/python -m pip install -U pip maturin pytest numpy pillow
+          .venv/bin/python -m pip install -U pip maturin pytest numpy pillow pyproj
       - name: Check formatting and routine Rust contracts
         run: |
           cargo fmt --check
@@ -1375,6 +1375,19 @@ jobs:
           $env:FORGE3D_D02_ARTIFACT_DIR = $dir
           $junit = Join-Path $dir "junit.xml"
           python -m pytest tests/test_raster_styles_gpu.py -v --tb=short --junitxml="$junit"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$junit"
+          exit $LASTEXITCODE
+
+      - name: Run C06 publication physical GPU gate
+        shell: pwsh
+        env:
+          FORGE3D_RUN_GPU_ANAMNESIS: '1'
+        run: |
+          $dir = Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR "c06"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $junit = Join-Path $dir "junit.xml"
+          python -m pytest tests/test_publication.py tests/test_publication_gpu.py -v --tb=short --junitxml="$junit"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/assert_junit_zero_skips.py "$junit"
           exit $LASTEXITCODE

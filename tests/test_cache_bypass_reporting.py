@@ -71,6 +71,7 @@ _CACHE_DELEGATES = {
     ("map_scene.py", "render", "render_sequence"),
     ("map_scene.py", "render_passes", "self.render"),
     ("path_tracing.py", "render_terrain_poster", "hybrid_render_terrain_reference"),
+    ("publication.py", "render_series", "self._render"),
     ("sdf.py", "render_simple_scene", "renderer.render_sdf_scene"),
     ("smoke.py", "render_rgba", "self.render_projection_rgba"),
     ("terrain_demo.py", "render_sunrise_to_noon_sequence", "renderer_native.render_terrain_pbr_pom"),

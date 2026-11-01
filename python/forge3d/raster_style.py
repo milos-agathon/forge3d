@@ -136,6 +136,12 @@ class CategoricalRasterStyle:
     nodata: float | None = None
     units: str = ""
 
+    def __deepcopy__(self, memo):
+        # All fields are frozen scalars or read-only mappings of immutable
+        # values. Native cache snapshots may safely share this style; Python
+        # cannot otherwise deepcopy its MappingProxyType fields.
+        return self
+
     def __post_init__(self) -> None:
         from types import MappingProxyType
         if not self.palette or any(isinstance(k, bool) or not isinstance(k, (int, np.integer)) for k in self.palette):

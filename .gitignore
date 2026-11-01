@@ -403,6 +403,7 @@ examples/.cache/
 examples/out/
 examples/output/
 examples/**/*.py
+!examples/c06_population_publication.py
 !examples/moon_south_pole.py
 !examples/orbis_swiss_alps_descent.py
 !examples/mapscene_thematic_rasters.py
