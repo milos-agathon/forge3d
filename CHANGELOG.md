@@ -6,6 +6,8 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.47.1] - 2026-11-01
+
 ### Fixed
 - NEPHELE directional transport now submits froxel work in tiles, so its longest GPU submission on the 1500-square Gore Range DEM falls from about 1.7 s to 144 ms against the 2 s Windows watchdog on an RTX 3070. Rendered output is byte-identical; the first frame on that DEM takes about 36% longer (68 s to 92 s) and cached frames are unchanged.
 
