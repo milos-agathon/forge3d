@@ -174,7 +174,7 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "9e616b313435",
+    "git_sha": "03d0f6883101",
     "version": "1.47.0",
     "wgsl_module_hashes": {
       "ibl.precompute.shader.brdf": "1ae542caaac04a941c211ec924c0072a3110cbff03aff23e140ea9305ba8dc75",
@@ -224,7 +224,7 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0030720001086592674,
       "label": "scene.main"
     },
     {
@@ -242,7 +242,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "4b7f9d0b0de9715bcd662dc065ffbc405b0e669d71d56fe080b085a2e6ddd2e358f98872658adfb8e79d847d65ff3c94753284f0e02046e8cbdb250767acb60d",
+    "sig": "f034259a041a8c93ba5d8cc070d4e61e03ee81931d8bb4a8822fa1236b7525ab912c46174c4ac88d2983e39b128e93fefa914b062e84416088f09f1548491706",
     "signed_fields": [
       "adapter",
       "allocations",

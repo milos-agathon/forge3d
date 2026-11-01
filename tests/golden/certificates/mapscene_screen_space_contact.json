@@ -173,7 +173,7 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "9e616b313435",
+    "git_sha": "03d0f6883101",
     "version": "1.47.0",
     "wgsl_module_hashes": {
       "concordia.ao_filter.shader": "b78182a96a1e3913a29f7d6af1baf83a00b1ccceee6109b6c67cfc6a3e08c8ad",
@@ -202,12 +202,12 @@
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 1.0076160430908203,
+      "gpu_ms": 0.9134079813957214,
       "label": "concordia.shadows"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 1.6465920209884644,
+      "gpu_ms": 1.619968056678772,
       "label": "concordia.geometry"
     },
     {
@@ -217,32 +217,32 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 1.5964159965515137,
+      "gpu_ms": 1.5595519542694092,
       "label": "terrain.main"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.17203199863433838,
+      "gpu_ms": 0.1884160041809082,
       "label": "concordia.depth_pyramid"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.17715199291706085,
+      "gpu_ms": 0.15360000729560852,
       "label": "concordia.ao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.14950400590896606,
+      "gpu_ms": 0.12902399897575378,
       "label": "p5.ssao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.15462400019168854,
+      "gpu_ms": 0.16281600296497345,
       "label": "concordia.ssgi"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.12902399897575378,
+      "gpu_ms": 0.14028799533843994,
       "label": "p5.ssgi"
     },
     {
@@ -252,7 +252,7 @@
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.023552000522613525,
+      "gpu_ms": 0.021503999829292297,
       "label": "concordia.output_transform"
     }
   ],
@@ -260,7 +260,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "5c8fd497b425a0d99d593fa6151f4a263beca4eca4878485676568a637ab41301a5962c43055cbf724f2daddc943564c9e4651c0813d13f089e4c14fcbe2ce03",
+    "sig": "b7b9470cbf51851bf2bfb3cfecff2eb785a6642fc22e1425874997f9e56a8550780f66701144f6203268f59fb3e2cf7540c6991ab2cf217bd8232bb5e80a8304",
     "signed_fields": [
       "adapter",
       "allocations",

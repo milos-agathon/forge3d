@@ -138,7 +138,7 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "9e616b313435",
+    "git_sha": "03d0f6883101",
     "version": "1.47.0",
     "wgsl_module_hashes": {
       "ibl.precompute.shader.brdf": "1ae542caaac04a941c211ec924c0072a3110cbff03aff23e140ea9305ba8dc75",
@@ -151,7 +151,7 @@
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 2.9767680168151855,
+      "gpu_ms": 3.072000026702881,
       "label": "terrain.shadow"
     },
     {
@@ -161,7 +161,7 @@
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.height_ao"
     },
     {
@@ -176,7 +176,7 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 1.3783040046691895,
+      "gpu_ms": 1.3649920225143433,
       "label": "terrain.main"
     },
     {
@@ -194,7 +194,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "f76e74224caab888f92d42bf70fea7f31bb238eca179f178800f5fe9a19f7775db68451a4e100adaaa9115054b7d0e2dcb09bb57c0592c11e0f1e90cde8cec0b",
+    "sig": "6fd0a3d408b8b20c04dcb4604e0f648a5787fe7a0bf2228be8cb148bd37fedf22ed36c7442596206918107c080de7609d315ed40ce32abbb0772ee905678cf06",
     "signed_fields": [
       "adapter",
       "allocations",
