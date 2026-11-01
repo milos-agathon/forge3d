@@ -572,7 +572,7 @@ def test_public_scene_600_frame_fresh_process_acceptance(tmp_path):
         assert not [entry for entry in phase["degradations"] if entry["kind"] in {"uncaptured_gpu_error", "validation_error"}]
         assert phase["frame_hashes"] == phase["blob_hashes"]
     # Fresh processes pay snapshot page-commit and packed-index load on every
-    # run (measured 11.7-14.3x); 20x returns with the binary index in 1.47.
+    # run (measured 11.7-14.3x); 20x returns with the binary index in 1.48.
     assert result["incremental_seconds"] <= result["cold_seconds"] / 10.0
 
 
