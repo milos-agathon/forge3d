@@ -24,6 +24,7 @@ from .raster_style import CategoricalRasterStyle, RasterStyleResult
 from .scale_bar import ScaleBar, ScaleBarConfig
 
 __all__ = ["PublicationSource", "PublicationExtent", "PublicationRecipe"]
+_LEGEND_TOLERANCE = 1  # RGBA8 levels allowed by the native albedo check.
 
 
 def _identity(value: Any) -> str:
@@ -36,6 +37,41 @@ def _bbox(b: BBox) -> None:
         raise ValueError("Publication bounds must be finite with positive area; no antimeridian wrapping")
 
 
+def _check_source_metadata(path: Path, year: str) -> None:
+    """Validate embedded GDAL metadata without decoding or transforming pixels."""
+    from PIL.TiffImagePlugin import ImageFileDirectory_v2
+    from xml.etree import ElementTree
+
+    # Native GIS reads the TIFF itself. It cannot consume external PAM overrides.
+    if Path(str(path) + ".aux.xml").exists():
+        raise ValueError("Publication requires a self-contained GeoTIFF; metadata sidecars are unsupported")
+    with path.open("rb") as stream:
+        header = stream.read(8)
+        if header[2:4] in (b"+\0", b"\0+"):  # BigTIFF's header is 16 bytes.
+            header += stream.read(8)
+        directory = ImageFileDirectory_v2(header)
+        stream.seek(directory.next)
+        directory.load(stream)
+        metadata = directory.get(42112)  # GDAL_METADATA TIFF tag.
+    if metadata is None:
+        return
+    try:
+        items = ElementTree.fromstring(metadata).findall("Item")
+    except (ElementTree.ParseError, TypeError) as exc:
+        raise ValueError("Publication GeoTIFF metadata is unreadable") from exc
+    for item in items:
+        role = item.get("role", "").lower()
+        if role in {"scale", "offset"}:
+            try:
+                value = float(item.text or "")
+            except ValueError as exc:
+                raise ValueError("Publication GeoTIFF scale/offset must be identity") from exc
+            if value != (1 if role == "scale" else 0):
+                raise ValueError("Publication GeoTIFF scale/offset must be identity; decode values before publishing")
+        if item.get("name") == "observation_year" and (item.text or "").strip() != year.strip():
+            raise ValueError("Publication source year differs from the GeoTIFF observation_year tag")
+
+
 @dataclass(frozen=True)
 class PublicationSource:
     """A single-band GeoTIFF and its declared observation provenance.
@@ -43,6 +79,8 @@ class PublicationSource:
     Nodata is defined by the file mask/nodata value. It is never a zero count.
     Year/edition describe this file, not a request to relabel another edition.
     The caller must supply the corresponding dataset when changing year.
+    An embedded observation_year tag, when present, must match the declaration;
+    absent tags leave year provenance with the caller. Scale/offset must be identity.
     """
     path: str | Path
     name: str
@@ -101,6 +139,7 @@ class PublicationRecipe:
         values = np.asarray(loaded["array"])
         if values.ndim != 3 or values.shape[0] != 1:
             raise ValueError("Publication requires a single-band GeoTIFF")
+        _check_source_metadata(path, self.source.year)
         values = values[0]
         valid = np.asarray(loaded["mask"], dtype=bool).reshape(values.shape) & np.isfinite(values)
         authority = info.get("crs_authority")
@@ -171,6 +210,10 @@ class PublicationRecipe:
         # The published frame is opaque. A transparent key could not be shown.
         if any(rgba[3] != 255 for rgba in style.palette.values()):
             raise ValueError("Publication palette and missing colour must be fully opaque")
+        colours = np.array(list(style.palette.values()), np.int16)
+        for index, colour in enumerate(colours[:-1]):
+            if np.any(np.max(np.abs(colours[index + 1:] - colour), axis=1) <= _LEGEND_TOLERANCE):
+                raise ValueError("Publication legend keys must be distinguishable beyond the frame colour tolerance")
         classes = np.asarray(classified["array"])[0]
         result = style.apply(classes)
         return classes, style, result, table
@@ -204,7 +247,7 @@ class PublicationRecipe:
         palette = np.array(list(style.palette.values()), np.int16)
         colours = np.unique(pixels.reshape(-1, 4), axis=0).astype(np.int16)
         deviation = int(np.abs(colours[:, None] - palette[None]).max(axis=2).min(axis=1).max())
-        if deviation > 1:
+        if deviation > _LEGEND_TOLERANCE:
             raise ValueError(f"Native map colours differ from the legend by {deviation} levels")
         return pixels, {"backend": scene.last_render_backend, "metadata": scene.last_render_metadata,
                         "map_pixels": "native unlit albedo frame, sRGB-encoded RGBA8",
@@ -222,7 +265,7 @@ class PublicationRecipe:
         if self.camera_mode != "screen":
             raise ValueError("Unsupported publication camera footprint: only flat screen plan views are qualified")
         pages = tuple(pages)
-        if not pages or len({p.page_id for p in pages}) != len(pages):
+        if not pages or len({p.page_id.casefold() for p in pages}) != len(pages):
             raise ValueError("Publication requires nonempty, distinct page IDs")
         for page in pages:
             if not re.fullmatch(r"[A-Za-z0-9_-]+", page.page_id) or not page.title.strip():
@@ -287,6 +330,13 @@ class PublicationRecipe:
                 border = np.flatnonzero(np.all(scale_image[scale_bar.config.padding, :, :3] ==
                                                scale_bar.config.border_color[:3], axis=1))
                 scale_span = int(border[-1] - border[0] + 1)  # Pixel-edge span, not centre-to-centre.
+                number, unit = scale_label.split()
+                if unit not in {"m", "km"}:
+                    raise ValueError("Publication scale bar label has unsupported units")
+                labelled_metres = float(number) * {"m": 1, "km": 1000}[unit]
+                if (not np.isfinite(labelled_metres) or labelled_metres <= 0
+                        or abs(labelled_metres - scale_span * mpp) > mpp):
+                    raise ValueError("Publication scale bar label differs from its drawn distance by more than one pixel")
                 # MapPlate centres the map inside its region and anchors furniture
                 # to the region, not the image. Place the bar on the drawn map,
                 # whose pixels must be the unresampled frame the scale describes.

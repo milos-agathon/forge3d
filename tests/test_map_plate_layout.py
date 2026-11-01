@@ -342,15 +342,15 @@ class TestScaleBarRender:
     def test_scale_bar_allocation_uses_native_outline_bounds(self, monkeypatch):
         from forge3d import scale_bar as scale_bar_module
 
-        monkeypatch.setattr(scale_bar_module, "UNIT_LABELS", {**scale_bar_module.UNIT_LABELS, "km": "iiiiii"})
+        monkeypatch.setattr(scale_bar_module, "UNIT_LABELS", {**scale_bar_module.UNIT_LABELS, "m": "iiiiii"})
         narrow = ScaleBar(
             meters_per_pixel=100,
-            config=ScaleBarConfig(units="km", width_px=10, font_size=32, padding=4),
+            config=ScaleBarConfig(units="m", width_px=10, font_size=32, padding=4),
         ).render_geometry()[0]
-        monkeypatch.setattr(scale_bar_module, "UNIT_LABELS", {**scale_bar_module.UNIT_LABELS, "km": "WWWWWW"})
+        monkeypatch.setattr(scale_bar_module, "UNIT_LABELS", {**scale_bar_module.UNIT_LABELS, "m": "WWWWWW"})
         wide = ScaleBar(
             meters_per_pixel=100,
-            config=ScaleBarConfig(units="km", width_px=10, font_size=32, padding=4),
+            config=ScaleBarConfig(units="m", width_px=10, font_size=32, padding=4),
         ).render_geometry()[0]
 
         assert wide.shape[1] > narrow.shape[1] * 2

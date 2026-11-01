@@ -129,3 +129,26 @@ def test_corrupt_cached_frame_is_never_published(recipe, tmp_path):
     except (RuntimeError, ValueError, OSError):
         return  # Refusing corrupt storage is valid; publishing from it is not.
     assert again["output"]["pixel_sha256"] == first["output"]["pixel_sha256"]
+
+
+@pytest.mark.parametrize("width", [60, 300])
+def test_native_short_map_scale_matches_independent_geodesic(recipe, tmp_path, width):
+    from dataclasses import replace
+    from pyproj import Geod, Transformer
+    cell = width / 10
+    bounds = BBox(600000, 5820000 - width, 600000 + width, 5820000, "EPSG:32631")
+    gis.write_raster(recipe.source.path, np.arange(100, dtype=np.float32).reshape(10, 10),
+                     crs=bounds.crs, transform=(cell, 0, bounds.west, 0, -cell, bounds.north), overwrite=True)
+    recipe.locator_bounds = bounds
+    page = replace(PAGE, bounds=bounds)
+    result = recipe.render_series([page], tmp_path / "short")[0]
+    assert result["main_render"]["backend"] == "gpu_terrain"
+    transform = Transformer.from_crs(bounds.crs, 4326, always_xy=True)
+    lon, lat = transform.transform([bounds.west, bounds.east], [bounds.center_lat] * 2)
+    mpp = Geod(ellps="WGS84").inv(lon[0], lat[0], lon[1], lat[1])[2] / result["main_viewport"][0]
+    image = np.asarray(Image.open(result["output"]["path"]).convert("RGBA"))
+    x0, y0, x1, y1 = result["scale"]["bar_rect"]
+    border = np.flatnonzero(np.all(image[y0 + 12, x0:x1, :3] == 0, axis=1))
+    number, unit = result["scale"]["bar_label"].split()
+    assert unit == "m"
+    assert abs(float(number) - (border[-1] - border[0] + 1) * mpp) <= mpp

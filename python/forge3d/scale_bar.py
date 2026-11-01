@@ -170,10 +170,11 @@ class ScaleBar:
         unit_factor = UNIT_FACTORS[cfg.units]
         unit_label = UNIT_LABELS[cfg.units]
         display_distance = nice_distance * unit_factor
-        if display_distance >= 1:
-            label = f"{int(display_distance)} {unit_label}"
-        else:
-            label = f"{display_distance:.1f} {unit_label}"
+        if cfg.units == "km" and nice_distance < 1000:
+            display_distance, unit_label = nice_distance, "m"
+        # Nice intervals may be fractional. Never round 0.05 km to 0.1 km,
+        # or truncate a fractional distance above one in another unit.
+        label = f"{display_distance:g} {unit_label}"
         label_width, outline_height, bounds = _text_outline_metrics(label, float(cfg.font_size))
         label_height = max(outline_height, max(1, int(math.ceil(cfg.font_size * 1.25))))
         total_width = max(actual_bar_px + 2 * cfg.padding, label_width + 2 * cfg.padding)

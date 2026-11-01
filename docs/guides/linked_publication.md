@@ -10,7 +10,7 @@ every displayed colour is a legend colour.
 This local implementation starts at main
 `37159353f618f76e6020f6221b2a475e7969013a`. The older root checkout
 `7c81644ad7d7180dd51d59d93b2180878eec5131` and its unrelated edits were preserved.
-Implementation and local validation used `D:/forge3d/.worktrees/c06-publication`.
+Implementation and local validation used a dedicated worktree.
 The evidence below establishes the local first delivery; merge and release are
 separate integration steps.
 
@@ -63,7 +63,7 @@ Each page's JSON receipt exposes identities and dependencies:
 | Classification | Actual source bytes, breaks, bin closure, palette, units, missing rules |
 | Main map | Classification, exact extent, output viewport, native scene |
 | Legend | Class boundaries/closure, colours, units and missing-data key |
-| Caption | Source name, actual observation year, edition, URI and view qualification |
+| Caption | Source name, declared observation year (checked against the embedded tag when present), edition, URI and view qualification |
 | Locator | Its own native map and the main viewport's geographic footprint |
 | Scale | Extent, CRS and actual displayed map width |
 
@@ -72,6 +72,11 @@ same. Changing year does the same when the classification is intentionally
 shared. The underlying map and locator data still change. Replace the entire
 `PublicationSource` with the corresponding year's actual file; a year field
 does not download, select or manufacture another dataset.
+When the GeoTIFF has an embedded `observation_year` tag, it must match the
+declared year. Without that tag, verifying the observation year remains the
+caller's responsibility. Non-identity band scale/offset metadata is rejected:
+decode and verify such values before publishing. External GDAL metadata
+sidecars (`.aux.xml`) are unsupported; inputs must be self-contained GeoTIFFs.
 
 Every map passes through `MapScene.render`, including repeat calls. The lit
 beauty frame is shaded and ACES tone-mapped (measured: every class at about
@@ -108,6 +113,11 @@ full cropped raster UV rectangle to its viewport. The locator polygon is
 therefore the actual viewport footprint. Perspective/mesh/clipmap cameras are
 rejected; no bounding box is substituted for their camera footprints.
 
+Page IDs are compared with `casefold()` and must be distinct even on a
+case-insensitive filesystem. Legend colours, including the missing-data key,
+must differ by more than the renderer check's one-level RGBA8 tolerance in at
+least one channel; duplicate or indistinguishable keys are rejected.
+
 Input must be a single-band, north-up GeoTIFF in a projected metre CRS supported
 by the native CRS helper. Geographic, foot-based, rotated/skewed and unsupported
 CRSs fail explicitly. The scale preflights that helper and pyproj, avoiding
@@ -128,6 +138,14 @@ establish physical print size or a colour profile. No editable vector text,
 PDF/press-colour or new-format qualification is claimed. Scale-bar lengths are
 quantized to whole output pixels; receipts include the drawn pixel span, its
 rectangle and the actual label from the existing `ScaleBar` helper.
+Sub-kilometre scale labels use metres. Before publication, the label's ground
+distance must agree with the measured drawn bar to within one output pixel of
+ground distance, or the recipe raises without replacing that page.
+
+The bundled default font covers ASCII. Unsupported characters, including
+superscripts, currency signs and accented place names, raise `TextShapingError`;
+there is no fallback font. Use supported text (for example, `people/km2`) with
+this first delivery.
 
 ## Real CBS demonstration
 
@@ -146,9 +164,11 @@ changes breaks, Amsterdam's extent, and observation year; it also repeats
 unchanged inputs. It asserts which dependency IDs change and which stay equal,
 that unchanged inputs hit the cache and give byte-identical pages, and that each
 revision misses. Rotterdam remains unchanged in the
-extent-only revision. Independently of the recipe, it checks every displayed
-cell's colour against a NumPy classification of the GeoTIFF, and checks the
-scale bar's placement, scale and locator pixels.
+extent-only revision. Independently of the recipe, it checks each sampled
+cell's colour against a NumPy classification of the GeoTIFF and checks the
+scale bar's placement and ground distance. Its locator-coordinate assertion
+reuses the recipe's affine formula and is a consistency check, not an
+independent test of the drawn outline.
 
 Sources accessed 29 October 2026:
 
@@ -254,8 +274,8 @@ accuracy. The 2 km bars occupy 116 pixels, corresponding to
 ground distance. On every page, the bar lies inside the drawn map rectangle:
 `[150, 949, 290, 1010]` within `[130, 100, 1060, 1030]` on base pages, and
 `[208, 949, 348, 1010]` within `[188, 100, 1002, 1030]` on the narrowed
-Amsterdam extent. All independently computed locator pixel coordinates agree
-exactly.
+Amsterdam extent. The locator-coordinate consistency check agrees exactly;
+it reuses the recipe's formula and does not independently verify the outline.
 
 **Cache.** Run from an initially empty cache. The table shows whether the main
 and locator frames hit:
@@ -279,11 +299,11 @@ storage (never published).
 **Runtime.** Validation used CPython 3.13.14, an NVIDIA RTX 3070 with Vulkan /
 driver 610.60, and the installed Forge3D 1.46.0 native extension (SHA-256
 `aef9f2bfe7bc8d830778c23fcbbe7d835c9306d97fab5b4ae8f50147df33af4e`). The edited
-Python source was overlaid on a copy of that runtime. The worktree's
-`artifacts/c06/runtime` copy lacks `data/fonts/atlas_latin_default.png`, which
-makes 9 unrelated geometric-integrity tests fail there; the overlay restored
-it. The extension was **not rebuilt** or validated as a newly packaged wheel.
-The only shared-code change is Python: the `unlit_albedo` path in `map_scene.py`.
+Python source was overlaid on a copy of that runtime with its font resources.
+The extension was **not rebuilt** or validated as a newly packaged wheel.
+Shared Python changes include MapScene's `unlit_albedo` path, immutable
+categorical-style snapshots in `raster_style.py`, package exports and scale-bar
+label formatting.
 No native code changed.
 
 **Entitlement.** Ordinary page export fails at MapPlate's existing Pro gate
@@ -292,7 +312,7 @@ without an active Pro entitlement. Milos authorized the repository's existing
 frames composed under that test entitlement. No product license gate was
 removed or weakened, and no production entitlement is claimed.
 
-Commands run from `D:/forge3d/.worktrees/c06-publication`, with
+Commands run from the repository root, with
 `FORGE3D_NO_BOOTSTRAP=1`, `WGPU_BACKEND=vulkan` and `PYTHONPATH` pointing to the
 overlaid runtime:
 
@@ -329,8 +349,8 @@ pages and Rotterdam's extent page are hash-identical copies of inspected base
 pages, covering all ten exports. All ten pages' map colours were checked by the
 cell oracle above or by their pixel hash.
 
-Local inspection receipt (file hashes, method and limitations):
-`C:/Users/milos/.codex/visualizations/2026/10/29/01a1899c-494b-7e40-a02e-29e5c9b44772/c06-r3-krita-inspection.json`.
+The local work item's inspection receipt records file hashes, method and
+limitations; that machine-local artifact is not shipped with the package.
 This closes the corrected PNGs' target-application inspection gap. It is an
 on-screen check, not a physical print or colour proof, and does not replace
 independent locator-pixel testing: the example and unit-test locator check still
@@ -348,14 +368,41 @@ validators were re-run on 30 October after updating the MAP-LINKED-PUBLICATION
 and SPEC-MAP-PUBLICATION records to this run, and pass (C06 `partial`, ticket
 `open`).
 
-Not run: hosted CI, a new wheel build, Rust/WASM lanes, goldens/certificate
+The original PR head `583ff3b1` passed the routine hosted PR gate, including
+Fast Contract and Build Docs. That Fast Contract run did not select the
+publication regressions. The fast profile now explicitly includes
+`test_publication.py`, `test_publication_ci.py` and
+`test_scale_bar_projected_units.py`; its dependencies include pyproj. The
+physical NVIDIA Vulkan lane now names `test_publication.py` and
+`test_publication_gpu.py`, enables the GPU tests and enforces zero skips.
+Selection does not prove execution: the new head's hosted results must be
+checked separately.
+
+Not run in the original local acceptance: a new wheel build, Rust/WASM lanes, goldens/certificate
 refresh, other adapters/backends, motion/GIS comparisons or production-entitled
 export. No native code, committed goldens, signed certificates or determinism
 hashes were changed.
 
-Reusable steering observations: the promoted render-quality skill is absent
-from this checkout, so no global skill was substituted; the app-managed checkout
-stalled during ignored instruction-file discovery, so implementation used the
-explicit D: worktree above. A future setup guide could document staged-runtime
-native/font resources and the Pro fixture boundary. These are proposals only;
-no agent contract, skill or registry was changed.
+## P2 follow-up validation (1 November 2026)
+
+The reviewed edge cases now reject indistinguishable legend keys,
+case-colliding page IDs, non-identity TIFF scale/offset and contradictory
+embedded observation years. Short bars use metre labels, and a measured
+label/bar mismatch exceeding one ground pixel fails before page replacement.
+
+With `FORGE3D_NO_BOOTSTRAP=1`, `FORGE3D_RUN_GPU_ANAMNESIS=1` and
+`WGPU_BACKEND=vulkan`, the candidate Python source and the installed 1.46.0
+native extension passed 63 publication/scale/CI-selection tests, including six
+physical GPU cases, and 250 shared API, cache, composition and CI-contract
+checks. Runtime warnings were treated as errors. Native 60 m and 300 m map
+probes measure the actual exported bar against independent WGS84 calculations.
+The canonical `cargo forge3d-clippy` gate also passed.
+
+The complete CBS example was rerun from empty output/cache under the approved
+Pro test fixture. Every assertion passed, and all ten PNGs are byte-identical
+to R3, so the recorded final-size inspection still applies to those exact
+bytes. The example emitted eight Rasterio/NumPy deprecation warnings; these
+were not runtime warnings or assertion failures. No fresh wheel, other-backend
+or production-entitled validation is implied. The 98-minute broad suite was
+not rerun. The known locator-test, small-frame, NumPy-break, cache-receipt and
+other broader C06 limits remain separate from these six P2 corrections.

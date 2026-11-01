@@ -320,3 +320,116 @@ def test_scale_bar_is_drawn_on_the_map_not_the_margin(publication, fake_render, 
     assert np.all(image[y0:y1, x0 - 30:x0, :3] == 255)
     with pytest.raises(ValueError, match="scale bar cannot fit"):
         recipe.render_series([replace(page, bounds=replace(page.bounds, east=600100))], tmp_path / "sliver")
+
+
+@pytest.mark.parametrize("width", [60, 300, 479, 480, 1000])
+def test_short_scale_label_matches_independently_measured_bar(publication, fake_render, tmp_path, width):
+    from PIL import Image
+    from pyproj import Geod, Transformer
+    recipe, page, values = publication
+    cell = width / 10
+    bounds = BBox(600000, 5820000 - width, 600000 + width, 5820000, "EPSG:32631")
+    gis.write_raster(recipe.source.path, values[:10, :10], crs=bounds.crs, nodata=-9999,
+                     transform=(cell, 0, bounds.west, 0, -cell, bounds.north), overwrite=True)
+    recipe.locator_bounds = bounds
+    page = replace(page, bounds=bounds)
+    receipt = recipe.render_series([page], tmp_path / "short")[0]
+    transform = Transformer.from_crs(bounds.crs, 4326, always_xy=True)
+    lon, lat = transform.transform([bounds.west, bounds.east], [bounds.center_lat] * 2)
+    ground_width = Geod(ellps="WGS84").inv(lon[0], lat[0], lon[1], lat[1])[2]
+    mpp = ground_width / receipt["main_viewport"][0]
+    image = np.asarray(Image.open(receipt["output"]["path"]).convert("RGBA"))
+    x0, y0, x1, y1 = receipt["scale"]["bar_rect"]
+    # Detect the actual border in the exported image, not a second recipe span.
+    row = np.flatnonzero(np.all(image[y0 + 12, x0:x1, :3] == 0, axis=1))
+    drawn_metres = (row[-1] - row[0] + 1) * mpp
+    number, units = receipt["scale"]["bar_label"].split()
+    assert units == "m"
+    assert abs(float(number) - drawn_metres) <= mpp
+
+
+def test_wrong_scale_label_cannot_replace_a_page(publication, fake_render, tmp_path, monkeypatch):
+    from forge3d.scale_bar import ScaleBar
+    recipe, page, _ = publication
+    old = tmp_path / "city.png"
+    old.write_bytes(b"prior page")
+    original = ScaleBar.render_geometry
+    def wrong_label(self, **kwargs):
+        image, _, anchor = original(self, **kwargs)
+        return image, "0.0 km", anchor
+    monkeypatch.setattr(ScaleBar, "render_geometry", wrong_label)
+    with pytest.raises(ValueError, match="scale bar label"):
+        recipe.render_series([page], tmp_path)
+    assert old.read_bytes() == b"prior page"
+
+
+@pytest.mark.parametrize("which", ["missing", "classes"])
+@pytest.mark.parametrize("difference", [0, 1, 2])
+def test_legend_keys_must_exceed_frame_colour_tolerance(publication, which, difference):
+    recipe, _, values = publication
+    first = recipe.palette[0]
+    close = (first[0] + difference, *first[1:])
+    if which == "missing":
+        recipe.missing_color = close
+    else:
+        recipe.palette = [first, close, recipe.palette[2]]
+    if difference <= 1:
+        with pytest.raises(ValueError, match="distinguishable"):
+            recipe._classify(values, values >= 0)
+    else:
+        recipe._classify(values, values >= 0)
+
+
+def test_casefolded_page_ids_fail_before_render_or_replacement(publication, fake_render, tmp_path):
+    recipe, page, _ = publication
+    old = tmp_path / "City.png"
+    old.write_bytes(b"prior page")
+    with pytest.raises(ValueError, match="distinct page IDs"):
+        recipe.render_series([replace(page, page_id="City"), replace(page, page_id="city")], tmp_path)
+    assert not fake_render
+    assert old.read_bytes() == b"prior page"
+
+
+def _set_gdal_metadata(path, items):
+    """Write actual embedded GeoTIFF metadata, preserving geographic TIFF tags."""
+    from PIL import Image
+    with Image.open(path) as source:
+        pixels = source.copy()
+        tags = dict(source.tag_v2)
+    tags[42112] = "<GDALMetadata>" + items + "</GDALMetadata>"
+    pixels.save(path, tiffinfo=tags)
+
+
+@pytest.mark.parametrize(("scale", "offset"), [("0.1", "0"), ("1", "5"), ("nan", "0")])
+def test_encoded_values_rejected_before_classification(publication, fake_render, tmp_path, scale, offset):
+    recipe, page, _ = publication
+    _set_gdal_metadata(recipe.source.path,
+        f'<Item name="SCALE" sample="0" role="scale">{scale}</Item>'
+        f'<Item name="OFFSET" sample="0" role="offset">{offset}</Item>')
+    with pytest.raises(ValueError, match="scale/offset"):
+        recipe.render_series([page], tmp_path / "encoded")
+    assert not fake_render
+
+
+@pytest.mark.parametrize("year", [None, "2024", "1999", ""])
+def test_observation_year_tag_must_match_declaration(publication, fake_render, tmp_path, year):
+    recipe, page, _ = publication
+    items = '<Item name="SCALE" sample="0" role="scale">1</Item><Item name="OFFSET" sample="0" role="offset">0</Item>'
+    if year is not None:
+        items += f'<Item name="observation_year">{year}</Item>'
+    _set_gdal_metadata(recipe.source.path, items)
+    if year in (None, "2024"):
+        values, _, _, _, description = recipe._read()
+        assert values.shape == (20, 30)
+    else:
+        with pytest.raises(ValueError, match="observation_year"):
+            recipe.render_series([page], tmp_path / "year")
+    assert not fake_render
+
+
+def test_external_metadata_sidecar_is_explicitly_unsupported(publication):
+    recipe, _, _ = publication
+    from pathlib import Path
+    Path(str(recipe.source.path) + ".aux.xml").write_text('<PAMDataset/>', encoding="utf-8")
+    with pytest.raises(ValueError, match="sidecar"):
+        recipe._read()
