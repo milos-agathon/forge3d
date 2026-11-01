@@ -162,8 +162,8 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "03d0f6883101",
-    "version": "1.47.0",
+    "git_sha": "4c64e0f50779",
+    "version": "1.47.1",
     "wgsl_module_hashes": {
       "concordia.compose.shader": "7a4be4fae4608d5bf09c510aa59c6314536e68e88f0123a771d3ce5a8da9c462",
       "concordia.geometry.shader": "5c81a83571c63a39c123ccb55f33da093ed4ef3e5faa0b8b2021ea1081fffb45",
@@ -185,47 +185,47 @@
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0030720001086592674,
+      "gpu_ms": 0.002047999994829297,
       "label": "concordia.resources"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 4.480000019073486,
+      "gpu_ms": 4.890624046325684,
       "label": "concordia.shadows"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 1.661952018737793,
+      "gpu_ms": 1.3486080169677734,
       "label": "concordia.geometry"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.sky"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 1.632256031036377,
+      "gpu_ms": 1.3383680582046509,
       "label": "terrain.main"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.15360000729560852,
+      "gpu_ms": 0.060416001826524734,
       "label": "concordia.depth_pyramid"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.1658879965543747,
+      "gpu_ms": 0.05119999870657921,
       "label": "concordia.ssr"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.13926400244235992,
+      "gpu_ms": 0.04198399931192398,
       "label": "p5.ssr"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.02252800017595291,
+      "gpu_ms": 0.009216000325977802,
       "label": "concordia.output_transform"
     }
   ],
@@ -233,7 +233,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "bb627d438c2011d0e4dae02f150791da5eca864f1e5c3c9773b49273ff5d4eae14439c24d49b98b9f7972c30291a542047358571ac415a18de7728a6ce92780d",
+    "sig": "13bd801a82c847c973024ee3b44498e9f5242fcc4e6b721258b9121f54668808fe024bb91053d585044505f054175ad073f31407699faa165da6107c3d037509",
     "signed_fields": [
       "adapter",
       "allocations",

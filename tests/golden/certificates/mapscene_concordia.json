@@ -215,8 +215,8 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "03d0f6883101",
-    "version": "1.47.0",
+    "git_sha": "4c64e0f50779",
+    "version": "1.47.1",
     "wgsl_module_hashes": {
       "concordia.ao_filter.shader": "b78182a96a1e3913a29f7d6af1baf83a00b1ccceee6109b6c67cfc6a3e08c8ad",
       "concordia.atmosphere.shader": "35eff75b79b15dd5f700bf442fda80873b1d3f33f1f3f027119c550f35663a3e",
@@ -245,37 +245,37 @@
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 0.09216000139713287,
+      "gpu_ms": 0.03481600061058998,
       "label": "concordia.resources"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0870399996638298,
+      "gpu_ms": 0.030719999223947525,
       "label": "concordia.cloud_shadows"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 1.0209280252456665,
+      "gpu_ms": 1.4929920434951782,
       "label": "concordia.shadows"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 8.779775619506836,
+      "gpu_ms": 7.4792962074279785,
       "label": "concordia.geometry"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 4.467711925506592,
+      "gpu_ms": 3.707904100418091,
       "label": "concordia.cartography_depth"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.sky"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 4.386816024780273,
+      "gpu_ms": 2.32857608795166,
       "label": "terrain.main"
     },
     {
@@ -285,72 +285,72 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 4.257791996002197,
+      "gpu_ms": 2.292736053466797,
       "label": "terrain.main"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.19865599274635315,
+      "gpu_ms": 0.06860800087451935,
       "label": "concordia.depth_pyramid"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.24883200228214264,
+      "gpu_ms": 0.08191999793052673,
       "label": "concordia.ao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.18943999707698822,
+      "gpu_ms": 0.060416001826524734,
       "label": "p5.ssao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.18432000279426575,
+      "gpu_ms": 0.0655359998345375,
       "label": "concordia.ssgi"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.15462400019168854,
+      "gpu_ms": 0.053247999399900436,
       "label": "p5.ssgi"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.22323200106620789,
+      "gpu_ms": 0.06963200122117996,
       "label": "concordia.ssr"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.1955839991569519,
+      "gpu_ms": 0.05939200147986412,
       "label": "p5.ssr"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.05632000043988228,
+      "gpu_ms": 0.01228800043463707,
       "label": "concordia.atmosphere"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.11059200018644333,
+      "gpu_ms": 0.035840000957250595,
       "label": "concordia.froxels"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.03379200026392937,
+      "gpu_ms": 0.01228800043463707,
       "label": "concordia.temporal"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.028672000393271446,
+      "gpu_ms": 0.011264000087976456,
       "label": "concordia.output_transform"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.021503999829292297,
+      "gpu_ms": 0.006144000217318535,
       "label": "concordia.vectors"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.004095999989658594,
+      "gpu_ms": 0.002047999994829297,
       "label": "concordia.labels"
     }
   ],
@@ -358,7 +358,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "79257316935cbc3ed385ab3bec3b05d0967c6740ddc6c402970e800e831ea4266571ccb9f1f5b0d5ccdfeefbc5365a3185b9ecd72cac87698a25daa4a64e6108",
+    "sig": "54390c66c732f73a888ecd73fc59eb75de00eec1208516ea6394aa1d9be34d3faa454aaca8a9458e299520a22cd05049433ffe7ab0f261ba226a53ec5e26f30d",
     "signed_fields": [
       "adapter",
       "allocations",
