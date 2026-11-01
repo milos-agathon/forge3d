@@ -176,8 +176,8 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "03d0f6883101",
-    "version": "1.47.0",
+    "git_sha": "4c64e0f50779",
+    "version": "1.47.1",
     "wgsl_module_hashes": {
       "concordia.ao_filter.shader": "b78182a96a1e3913a29f7d6af1baf83a00b1ccceee6109b6c67cfc6a3e08c8ad",
       "concordia.compose.shader": "7a4be4fae4608d5bf09c510aa59c6314536e68e88f0123a771d3ce5a8da9c462",
@@ -207,62 +207,62 @@
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 3.5297279357910156,
+      "gpu_ms": 5.285888195037842,
       "label": "concordia.shadows"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 2.826240062713623,
+      "gpu_ms": 2.02239990234375,
       "label": "concordia.geometry"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 1.5902719497680664,
+      "gpu_ms": 1.698815941810608,
       "label": "concordia.cartography_depth"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.sky"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 1.5400960445404053,
+      "gpu_ms": 0.28467199206352234,
       "label": "terrain.main"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.002047999994829297,
+      "gpu_ms": 0.0010239999974146485,
       "label": "terrain.sky"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 1.210368037223816,
+      "gpu_ms": 0.3102720081806183,
       "label": "terrain.main"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.1802240014076233,
+      "gpu_ms": 0.06143999844789505,
       "label": "concordia.depth_pyramid"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.15052799880504608,
+      "gpu_ms": 1.5411200523376465,
       "label": "concordia.ao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.12595200538635254,
+      "gpu_ms": 1.5308799743652344,
       "label": "p5.ssao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.02252800017595291,
+      "gpu_ms": 0.009216000325977802,
       "label": "concordia.output_transform"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.01740800030529499,
+      "gpu_ms": 0.005119999870657921,
       "label": "concordia.vectors"
     }
   ],
@@ -270,7 +270,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "2587b33c00f26ddda98b0a2913d6c1b6c1d4a86db95fb59dcb2a4a32870f6a13b5589fc0ec4b10de90571920026ee7cace6e113f86f795a15c08b73060199506",
+    "sig": "e830966367b34f31fef1487abb4493b1de7171dd5f0871fc1f6ca769c169b7243c169649829dcfc41e8fad01ade84a566383d0b516da89c35a11858925276007",
     "signed_fields": [
       "adapter",
       "allocations",
