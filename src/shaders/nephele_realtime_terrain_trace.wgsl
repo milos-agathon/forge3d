@@ -275,6 +275,8 @@ struct NepheleConvergence {
     invalid: atomic<u32>,
 }
 @group(3) @binding(30) var<storage, read_write> nd_progress: NepheleConvergence;
+// Offset of this submission's tile; see encode_cloudlight.
+@group(3) @binding(31) var<uniform> nd_slice: vec4<u32>;
 
 fn nd_pack(v: vec3<f32>) -> vec2<u32> {
     return vec2<u32>(pack2x16float(v.xy), pack2x16float(vec2<f32>(v.z, 0.0)));
@@ -491,7 +493,8 @@ fn nd_measure_change(previous_packed: vec2<u32>, next_packed: vec2<u32>) -> u32 
     return nd_units_f32_bits(maximum);
 }
 @compute @workgroup_size(4,4,4)
-fn main_nephele_directional_incoming(@builtin(global_invocation_id) id: vec3<u32>) {
+fn main_nephele_directional_incoming(@builtin(global_invocation_id) slice_id: vec3<u32>) {
+    let id = slice_id+nd_slice.xyz;
     if (any(id>=nephele.grid.xyz)) { return; }
     let at = id.x+nephele.grid.x*(id.y+nephele.grid.y*id.z);
     if (!(textureLoad(nephele_extinction,vec3<i32>(id),0).a>0.0)) { return; }
@@ -501,7 +504,8 @@ fn main_nephele_directional_incoming(@builtin(global_invocation_id) id: vec3<u32
     }
 }
 @compute @workgroup_size(4,4,4)
-fn main_nephele_directional_source(@builtin(global_invocation_id) id: vec3<u32>) {
+fn main_nephele_directional_source(@builtin(global_invocation_id) slice_id: vec3<u32>) {
+    let id = slice_id+nd_slice.xyz;
     if (any(id>=nephele.grid.xyz)) { return; }
     let at = id.x+nephele.grid.x*(id.y+nephele.grid.y*id.z);
     let rho = textureLoad(nephele_extinction,vec3<i32>(id),0).a;
@@ -520,7 +524,8 @@ fn main_nephele_directional_source(@builtin(global_invocation_id) id: vec3<u32>)
     }
 }
 @compute @workgroup_size(8,8,1)
-fn main_nephele_directional_surface(@builtin(global_invocation_id) id: vec3<u32>) {
+fn main_nephele_directional_surface(@builtin(global_invocation_id) slice_id: vec3<u32>) {
+    let id = slice_id+nd_slice.xyz;
     if (any(id.xy>=nephele.grid.xy)) { return; }
     let p = nd_vertex_point(id.xy);
     let cell = min(vec2<u32>(max((p.xz-terrain.origin_spacing.xy)/terrain.origin_spacing.zw,vec2<f32>(0.0))),terrain.dims.xy-2u);
@@ -535,7 +540,8 @@ fn main_nephele_directional_surface(@builtin(global_invocation_id) id: vec3<u32>
     nd_surface_next[at]=packed;
 }
 @compute @workgroup_size(4,4,4)
-fn main_nephele_directional_camera(@builtin(global_invocation_id) id: vec3<u32>) {
+fn main_nephele_directional_camera(@builtin(global_invocation_id) slice_id: vec3<u32>) {
+    let id = slice_id+nd_slice.xyz;
     if (any(id>=nephele.grid.xyz)) { return; }
     let at = id.x+nephele.grid.x*(id.y+nephele.grid.y*id.z);
     let rho = textureLoad(nephele_extinction,vec3<i32>(id),0).a;

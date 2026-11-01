@@ -407,6 +407,9 @@ struct CanonicalDensityNodes {
     _active_allocation: Option<ResourceHandle>,
 }
 
+/// Workgroups along y in one directional froxel-dispatch tile.
+const FROXEL_TILE_Y_GROUPS: u32 = 4;
+
 struct DirectionalTransport {
     iterations: [[CloudlightDispatch; 3]; 2],
     final_incoming: [CloudlightDispatch; 2],
@@ -414,6 +417,7 @@ struct DirectionalTransport {
     primary: [CloudlightDispatch; 2],
     clear: CloudlightDispatch,
     buffers: Vec<Arc<TrackedBuffer>>,
+    slice_offset: Arc<TrackedBuffer>,
     textures: [Arc<TrackedTexture>;4],
     cache_workgroups: [u32;3],
     surface_workgroups: [u32; 3],
@@ -2082,6 +2086,11 @@ impl TerrainMediaResources {
             let extent=wgpu::Extent3d {width,height:height as u32,depth_or_array_layers:1};
             let usage=wgpu::TextureUsages::TEXTURE_BINDING|wgpu::TextureUsages::STORAGE_BINDING;
             let source_usage=usage|wgpu::TextureUsages::COPY_SRC;
+            let slice_offset=Arc::new(tracked_create_buffer(device,&wgpu::BufferDescriptor {
+                label:Some("nephele.media.directional.slice_offset"),size:16,
+                usage:wgpu::BufferUsages::UNIFORM|wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation:false,
+            })?);
             let (source0,b0)=tracked_texture(device,"nephele.media.directional.source0",extent,wgpu::TextureDimension::D2,wgpu::TextureFormat::Rg32Uint,source_usage)?;
             let (source1,b1)=tracked_texture(device,"nephele.media.directional.source1",extent,wgpu::TextureDimension::D2,wgpu::TextureFormat::Rg32Uint,source_usage)?;
             let (incoming,bi)=tracked_texture(device,"nephele.media.directional.incoming",extent,wgpu::TextureDimension::D2,wgpu::TextureFormat::Rgba32Uint,usage)?;
@@ -2118,6 +2127,9 @@ impl TerrainMediaResources {
                     "main_nephele_directional_clear" => entries.extend([texture_entry(19,&views[1]),texture_entry(29,&views[0])]),
                     _ => unreachable!("fixed directional entry points"),
                 }
+                if !matches!(entry,"main_nephele_directional_primary"|"main_nephele_directional_clear") {
+                    entries.push(buffer_entry(31,&slice_offset));
+                }
                 cloud_dispatch(entry, label, &entries)
             };
             let iteration = |parity| Ok::<_, crate::core::error::RenderError>([
@@ -2131,7 +2143,7 @@ impl TerrainMediaResources {
             let primary = [dispatch("main_nephele_directional_primary", "nephele.media.directional.primary", 0)?,dispatch("main_nephele_directional_primary", "nephele.media.directional.primary", 1)?];
             let clear=dispatch("main_nephele_directional_clear","nephele.media.directional.clear",0)?;
             let allocation_bytes = sizes.into_iter().sum::<u64>() + nodes.bytes.len() as u64 + surface_bytes+b0+b1+bi+ba+buffers[4].size();
-            Some(DirectionalTransport { iterations, final_incoming, camera, primary, clear, buffers, textures,
+            Some(DirectionalTransport { iterations, final_incoming, camera, primary, clear, buffers, slice_offset, textures,
                 cache_workgroups:[width.div_ceil(8),(height as u32).div_ceil(8),1],
                 surface_workgroups: [self.grid.width.div_ceil(8), self.grid.height.div_ceil(8), 1], allocation_bytes,
                 solve_key: std::cell::Cell::new(None), solve_diagnostics: std::cell::Cell::new(None), executed_orders: std::cell::Cell::new(0),
@@ -2215,6 +2227,20 @@ impl TerrainMediaResources {
                 queue.submit([submitted.finish()]);
                 crate::core::gpu::wait_for_device_idle(device);
             };
+            // One submission per tile: on large terrain a whole dispatch can
+            // outlast the 2 s Windows GPU watchdog and lose the device. Every
+            // invocation writes only its own cell and reads the previous
+            // iteration, so tiling cannot change the stored bits.
+            let dispatch_tiled = |encoder: &mut wgpu::CommandEncoder, tiled: &CloudlightDispatch, groups: [u32; 3], workgroup_size: u32, y_groups_per_tile: u32| {
+                for z in 0..groups[2] {
+                    for y in (0..groups[1]).step_by(y_groups_per_tile as usize) {
+                        let offset=[0u32,y*workgroup_size,z*workgroup_size,0u32];
+                        queue.write_buffer(&directional.slice_offset,0,bytemuck::cast_slice(&offset));
+                        dispatch(encoder,tiled,[groups[0],y_groups_per_tile.min(groups[1]-y),1]);
+                        flush_dispatch(encoder);
+                    }
+                }
+            };
             dispatch(encoder,&directional.clear,directional.cache_workgroups);
             let mut orders=0u32;
             let mut previous_trace_progress=None;
@@ -2224,15 +2250,11 @@ impl TerrainMediaResources {
                 trace_stage(orders,"begin");
                 encoder.clear_buffer(&directional.buffers[4],0,None);
                 let [incoming, source, surface] = &directional.iterations[(orders%2) as usize];
-                // One submission per dispatch: on large terrain a whole order
-                // outlasts the 2 s Windows GPU watchdog and loses the device.
-                dispatch(encoder, incoming, workgroups);
-                flush_dispatch(encoder);
+                dispatch_tiled(encoder, incoming, workgroups, 4, FROXEL_TILE_Y_GROUPS);
                 trace_stage(orders,"after_incoming");
-                dispatch(encoder, source, workgroups);
-                flush_dispatch(encoder);
+                dispatch_tiled(encoder, source, workgroups, 4, FROXEL_TILE_Y_GROUPS);
                 trace_stage(orders,"after_source");
-                dispatch(encoder, surface, directional.surface_workgroups);
+                dispatch_tiled(encoder, surface, directional.surface_workgroups, 8, 1);
                 if orders==0 {
                     encoder.copy_buffer_to_buffer(&directional.buffers[1],0,&directional.buffers[3],0,directional.buffers[3].size());
                 }
@@ -2288,10 +2310,8 @@ impl TerrainMediaResources {
                 }
             }
             let parity=(orders%2) as usize;
-            dispatch(encoder, &directional.final_incoming[parity], workgroups);
-            flush_dispatch(encoder);
-            dispatch(encoder, &directional.camera, workgroups);
-            flush_dispatch(encoder);
+            dispatch_tiled(encoder, &directional.final_incoming[parity], workgroups, 4, FROXEL_TILE_Y_GROUPS);
+            dispatch_tiled(encoder, &directional.camera, workgroups, 4, FROXEL_TILE_Y_GROUPS);
             dispatch(encoder, &directional.primary[parity], [self.viewport.0.div_ceil(8), self.viewport.1.div_ceil(8), 1]);
             let submitted=std::mem::replace(encoder,device.create_command_encoder(&wgpu::CommandEncoderDescriptor {label:Some("nephele.media.directional.output")}));
             queue.submit([submitted.finish()]);

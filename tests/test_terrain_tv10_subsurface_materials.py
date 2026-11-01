@@ -259,7 +259,7 @@ class TestTerrainSubsurfaceMaterials:
     @pytest.mark.xfail(
         strict=True,
         reason="Terrain height normal under-states glacial highlight cooling; "
-        "deferred to 1.47 (milos-agathon/forge3d#277)",
+        "deferred to 1.48 (milos-agathon/forge3d#277)",
     )
     def test_glacial_ice_subsurface_cools_highlights(self, tv10_render_env) -> None:
         renderer, material_set, ibl, overlay = tv10_render_env
