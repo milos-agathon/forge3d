@@ -147,7 +147,7 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "9e616b313435",
+    "git_sha": "03d0f6883101",
     "version": "1.47.0",
     "wgsl_module_hashes": {
       "concordia.atmosphere.shader": "35eff75b79b15dd5f700bf442fda80873b1d3f33f1f3f027119c550f35663a3e",
@@ -169,22 +169,22 @@
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 0.2949120104312897,
+      "gpu_ms": 0.3020800054073334,
       "label": "concordia.resources"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.289792001247406,
+      "gpu_ms": 0.2969599962234497,
       "label": "concordia.cloud_shadows"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 4.188159942626953,
+      "gpu_ms": 4.272128105163574,
       "label": "concordia.shadows"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 1.465343952178955,
+      "gpu_ms": 1.4592000246047974,
       "label": "concordia.geometry"
     },
     {
@@ -194,12 +194,12 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 1.435647964477539,
+      "gpu_ms": 1.4325759410858154,
       "label": "terrain.main"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.04095999896526337,
+      "gpu_ms": 0.04198399931192398,
       "label": "concordia.atmosphere"
     },
     {
@@ -212,7 +212,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "c326339ac8d5dbd4c99f350fb51a54f4da897250007f60ec21ac1ee77d7ae24d5813fa4c5c3abad34785427c96577ac196671732b8dc3548fdfa39eb8c8b7909",
+    "sig": "4f0a0d2025261b123ff3f323b3b971f8a69f5dbbd04e1f3e0412930fdbac7ba6713b9ebffb16537644c31aee3af59e1d952b293138f733e6b17bca742770530d",
     "signed_fields": [
       "adapter",
       "allocations",

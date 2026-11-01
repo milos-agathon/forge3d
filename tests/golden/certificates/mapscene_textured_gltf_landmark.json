@@ -176,7 +176,7 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "9e616b313435",
+    "git_sha": "03d0f6883101",
     "version": "1.47.0",
     "wgsl_module_hashes": {
       "concordia.ao_filter.shader": "b78182a96a1e3913a29f7d6af1baf83a00b1ccceee6109b6c67cfc6a3e08c8ad",
@@ -207,17 +207,17 @@
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 3.8983678817749023,
+      "gpu_ms": 3.5297279357910156,
       "label": "concordia.shadows"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 2.9511680603027344,
+      "gpu_ms": 2.826240062713623,
       "label": "concordia.geometry"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 1.6517119407653809,
+      "gpu_ms": 1.5902719497680664,
       "label": "concordia.cartography_depth"
     },
     {
@@ -227,7 +227,7 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 1.598464012145996,
+      "gpu_ms": 1.5400960445404053,
       "label": "terrain.main"
     },
     {
@@ -237,32 +237,32 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 1.2707840204238892,
+      "gpu_ms": 1.210368037223816,
       "label": "terrain.main"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.16793599724769592,
+      "gpu_ms": 0.1802240014076233,
       "label": "concordia.depth_pyramid"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.16179199516773224,
+      "gpu_ms": 0.15052799880504608,
       "label": "concordia.ao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.13516800105571747,
+      "gpu_ms": 0.12595200538635254,
       "label": "p5.ssao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.043007999658584595,
+      "gpu_ms": 0.02252800017595291,
       "label": "concordia.output_transform"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.018432000651955605,
+      "gpu_ms": 0.01740800030529499,
       "label": "concordia.vectors"
     }
   ],
@@ -270,7 +270,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "e298f0f634cf224b063637332cdb1f745380d0bf935bf0498b556cbbf583b497a4a4318914b772e0144e9d0a45b55afbf41acf63cf2a63798b0488a1ba63a106",
+    "sig": "2587b33c00f26ddda98b0a2913d6c1b6c1d4a86db95fb59dcb2a4a32870f6a13b5589fc0ec4b10de90571920026ee7cace6e113f86f795a15c08b73060199506",
     "signed_fields": [
       "adapter",
       "allocations",
