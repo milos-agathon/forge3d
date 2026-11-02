@@ -25,6 +25,11 @@ organized by workflow rather than by Rust module layout.
 | Geometry, mesh, vector, SDF, path tracing | `geometry`, `mesh`, `vector`, `sdf`, `path_tracing` | API-level usage; not every module has a dedicated showcase script |
 | Device and memory diagnostics | `has_gpu`, `device_probe`, `mem` | diagnostics and tooling flows rather than gallery scripts |
 
+The terrain visibility-buffer clipmap route requires the device feature
+`SHADER_PRIMITIVE_INDEX`. A device configuration without it, including the
+feature-free deterministic profile, rejects that route before pipeline creation.
+TAA depth reads do not require optional float32 texture filtering.
+
 ## Pro Workflows
 
 | Area | Main APIs | Covered by examples or tutorials |

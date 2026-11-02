@@ -466,14 +466,14 @@ pub fn try_ctx() -> RenderResult<&'static GpuContext> {
             // TERRA-DETERMINATA: pin an identical device surface on every
             // adapter — no optional features (each granted feature is a
             // potential codegen path difference), WebGPU-default limits, and
-            // the terrain pipeline's exact seven-group layout. The defaults
+            // CONCORDIA terrain/atmosphere's eight-group layout. The defaults
             // already meet its floor of 8 storage buffers per stage. An adapter that cannot meet the floor fails
             // request_device loudly instead of running a different device
             // configuration. The negotiated capability record is kept for
             // diagnostics; only the granted set is zeroed.
             capabilities.granted = wgpu::Features::empty();
             limits = wgpu::Limits {
-                max_bind_groups: 7,
+                max_bind_groups: 8,
                 ..wgpu::Limits::default()
             };
         }

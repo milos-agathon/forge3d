@@ -3502,6 +3502,8 @@ def _composite_native_label_layers(
     scene_factory: Any | None = None,
     atlas_data: Mapping[str, tuple[Any, Mapping[str, Any]]] | None = None,
 ) -> tuple[Any, bool]:
+    if not _needs_native_label_composite(recipe, plans):
+        return base, False
     scene_cls = _native_scene_class()
     if scene_cls is None:
         return base, False
