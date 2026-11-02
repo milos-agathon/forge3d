@@ -24,6 +24,7 @@ def test_flyover_cache_forwarding_and_failed_delivery(publication, fake_render, 
     import json
     from types import SimpleNamespace
     from forge3d import _publication_flyover
+    from forge3d import map_scene
     from forge3d._png import load_png_rgba
     from forge3d.map_scene import OrbitCamera
     from forge3d.publication import PublicationLayout
@@ -31,6 +32,17 @@ def test_flyover_cache_forwarding_and_failed_delivery(publication, fake_render, 
     recipe.camera_mode = "flat-perspective"
     frame = replace(page, camera=OrbitCamera(distance=500,elevation_deg=30,azimuth_deg=270,fov_deg=35))
     cache_path = tmp_path / "cache"
+    # This unit fixture already substitutes native frame execution. Supply its
+    # matching camera projection without creating GPU-backed terrain parameters;
+    # real camera geometry is exercised in test_publication_gpu.py.
+    def fixture_params(scene_recipe, heights, size):
+        assert scene_recipe.camera == frame.camera
+        assert np.all(heights == 0)
+        width, height = size
+        return SimpleNamespace(project_terrain_points=lambda points: [
+            (u * width, v * height, 0.5) for u, v, _height, _offset in points
+        ])
+    monkeypatch.setattr(map_scene, "_build_mapscene_terrain_params", fixture_params)
     def native(scenes, *, base_seed, samples, out_dir, cache):
         assert cache == cache_path
         assert base_seed == 17 and samples == 1
@@ -155,7 +167,7 @@ def test_subject_series_uses_declared_source_encoding_and_shared_layout(publicat
 
 def test_locator_drawn_pixels_independent_geographic_registration(publication, fake_render, tmp_path):
     from PIL import Image
-    from rasterio.transform import from_bounds, rowcol
+    from pyproj import Transformer
     recipe, page, _ = publication
     # Interior asymmetric rectangle avoids conflating viewport border and footprint.
     bounds = BBox(600500, 5818500, 601500, 5819500, "EPSG:32631")
@@ -163,11 +175,16 @@ def test_locator_drawn_pixels_independent_geographic_registration(publication, f
     image = np.asarray(Image.open(result["output"]["path"]).convert("RGBA"))
     x0, y0, x1, y1 = result["locator_rect"]
     locator = image[y0:y1, x0:x1]
-    # Rasterio's independent inverse affine registers WORLD coordinates to the
-    # saved locator pixels; neither receipt footprint nor recipe helper is used.
-    transform = from_bounds(600000, 5818000, 603000, 5820000, x1-x0, y1-y0)
-    yy, xx = rowcol(transform, [600500, 601500, 601000, 601000],
-                             [5819000, 5819000, 5818500, 5819500])
+    # PROJ independently registers WORLD coordinates to saved locator pixels;
+    # neither receipt footprint nor recipe helper is used. Unlike rasterio,
+    # pyproj is installed in the CPU-only fast lane and has no local test stub.
+    sx, sy = (x1-x0)/3000, -(y1-y0)/2000
+    transform = Transformer.from_pipeline(
+        f"+proj=affine +s11={sx:.17g} +s22={sy:.17g} "
+        f"+xoff={-600000*sx:.17g} +yoff={-5820000*sy:.17g}")
+    xx, yy = transform.transform([600500, 601500, 601000, 601000],
+                                 [5819000, 5819000, 5818500, 5819500])
+    xx, yy = np.floor(xx).astype(int), np.floor(yy).astype(int)
     for x, y in zip(xx, yy):
         assert np.any(np.all(locator[y-1:y+2, x-1:x+2] == [18, 33, 43, 255], axis=-1))
     # No spurious extent rectangle at the source/map bounds.
