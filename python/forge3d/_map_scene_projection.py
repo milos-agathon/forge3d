@@ -6,6 +6,50 @@ import math
 import numpy as np
 
 
+def flat_ground_footprint_uv(recipe, heightmap=None, params=None):
+    """Intersect viewport corner rays with the actual native flat terrain plane.
+
+    A plane's projective transform is recovered from native camera projections,
+    then inverted at pixel edges. No orbit-camera formula is duplicated here.
+    Only fully covered flat mesh:zup:north views are accepted; sky, clip-plane
+    crossings and any corner outside the terrain are errors, never nodata.
+    """
+    from . import map_scene as ms
+    if ms._mapscene_effective_camera_mode(recipe) != "mesh:zup:north":
+        raise ValueError("Flat perspective publication requires mesh:zup:north")
+    heights = np.asarray(ms._load_native_heightmap(recipe.terrain) if heightmap is None else heightmap)
+    if heights.ndim != 2 or min(heights.shape) < 2 or not np.isfinite(heights).all() or not np.all(heights == heights.flat[0]):
+        raise ValueError("Flat perspective publication requires actual finite constant terrain heights")
+    size = (max(64, recipe.output.width), max(64, recipe.output.height))
+    if params is None:
+        params = ms._build_mapscene_terrain_params(recipe, heights, size)
+    if params is None:
+        raise ValueError("Native terrain camera projection is unavailable")
+    uv = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=float)
+    samples = params.project_terrain_points([[u, v, float(heights.flat[0]), 0] for u, v in uv])
+    if any(p is None for p in samples):
+        raise ValueError("Flat perspective ground projection crosses the camera horizon")
+    equations, rhs = [], []
+    for (u, v), (x, y, _) in zip(uv, samples):
+        equations.extend(([u, v, 1, 0, 0, 0, -x*u, -x*v], [0, 0, 0, u, v, 1, -y*u, -y*v]))
+        rhs.extend((x, y))
+    try:
+        homography = np.append(np.linalg.solve(equations, rhs), 1).reshape(3, 3)
+        corners = np.array([[0, 0, 1], [size[0], 0, 1], [size[0], size[1], 1], [0, size[1], 1]])
+        ground = corners @ np.linalg.inv(homography).T
+        if np.any(ground[:, 2] == 0):
+            raise ValueError("Perspective corner rays miss the ground at the horizon")
+        ground = ground[:, :2] / ground[:, 2:3]
+    except np.linalg.LinAlgError as exc:
+        raise ValueError("Flat perspective ground intersection is singular") from exc
+    if not np.isfinite(ground).all() or np.any(ground < 0) or np.any(ground > 1):
+        raise ValueError("Perspective corner rays miss the available terrain; uncovered pixels are unsupported")
+    projected = params.project_terrain_points([[u, v, float(heights.flat[0]), 0] for u, v in ground])
+    if any(p is None or not 0 <= p[2] <= 1 for p in projected):
+        raise ValueError("Perspective corner rays miss the ground within the camera clip planes")
+    return ground
+
+
 class TerrainPixel(tuple):
     """A projected pixel coordinate; bypass the legacy screen-coordinate heuristic."""
     terrain_projected = True
