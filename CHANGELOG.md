@@ -6,6 +6,16 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+### Added
+- Linked plan-view PNG publications from `PublicationRecipe` (#285), with native map frames, classification-derived legends, viewport locators, qualified geographic scale, cache-aware extent series and a real CBS population example.
+- Reusable publication layouts with linked inset maps, subject and declared-time series, and flat-terrain perspective views with camera-ground-footprint locators. Explicit CHRONOS camera sequences retain matching title/end PNGs and moving furniture; perspective scale bars are omitted. Output support and unsupported PDF, SVG, editable-text and print-colour routes are declared per route.
+- A minimal C04 observation-selection module with timezone-aware acquisition/validity rules, explicit hold or no-data policies, visible time/age captions and retained selection tables. C04 and C06 remain partial pending their remaining acceptance and production qualification.
+
+### Fixed
+- `ScaleBar` labels distances below one kilometre in metres even with `units="km"`, so a 500-metre bar reads `500 m` instead of `0.5 km` (#285).
+- Simple MapScene legends use declared colours, accept existing `color` entries and reject overflow instead of silently dropping entries. Automatic scale bars reject unsupported views and implausible CRS bounds while allowing ordinary national extents; the approved furniture fixture separates its legend and scale bar and declares its bounds CRS correctly.
+- Deterministic native rendering requests CONCORDIA's eight bind groups, reads TAA depth without optional float32 filtering and rejects visibility rendering when primitive-index support is unavailable. Terrain pages without accepted labels no longer load the legacy text compositor.
+
 ## [1.47.1] - 2026-11-01
 
 ### Fixed

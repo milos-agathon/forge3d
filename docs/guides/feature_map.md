@@ -25,12 +25,17 @@ organized by workflow rather than by Rust module layout.
 | Geometry, mesh, vector, SDF, path tracing | `geometry`, `mesh`, `vector`, `sdf`, `path_tracing` | API-level usage; not every module has a dedicated showcase script |
 | Device and memory diagnostics | `has_gpu`, `device_probe`, `mem` | diagnostics and tooling flows rather than gallery scripts |
 
+The terrain visibility-buffer clipmap route requires the device feature
+`SHADER_PRIMITIVE_INDEX`. A device configuration without it, including the
+feature-free deterministic profile, rejects that route before pipeline creation.
+TAA depth reads do not require optional float32 texture filtering.
+
 ## Pro Workflows
 
 | Area | Main APIs | Covered by examples or tutorials |
 | --- | --- | --- |
 | Map plates and cartographic furniture | `MapPlate`, `Legend`, `ScaleBar`, `NorthArrow` | `map_plate.ipynb`, GIS tutorial 03 |
-| Linked plan-view PNG publications | `PublicationSource`, `PublicationExtent`, `PublicationRecipe`; native unlit-albedo scene with validated cache reuse, style-derived legend, viewport locator, qualified on-map scale and extent series | [C06 guide](linked_publication.md), `examples/c06_population_publication.py`; local first delivery, broader C06 remains partial |
+| Linked PNG publications | `PublicationRecipe`, reusable layouts with linked insets, extent/subject/C04-selected time series, camera-linked flyover frames and endpoint PNGs, style-derived legend and actual plan/flat-terrain perspective locator; perspective scale omitted | [C06 guide](linked_publication.md), `examples/c06_population_publication.py`, `examples/c06_time_publication.py`, `examples/c06_oblique_publication.py`, `examples/c06_flyover_publication.py`; per-route output limits declared, C04/C06 remain partial pending their acceptance |
 | Vector export | `export_svg`, `export_pdf`, `VectorScene` | gallery vector-export workflow |
 | Buildings | `add_buildings`, `add_buildings_cityjson`, `add_buildings_3dtiles` | `buildings_viewer_interactive.py`, GIS tutorial 04 |
 | Mapbox-style import | `style.load_style`, `style.apply_style` | `style_viewer_interactive.py` |

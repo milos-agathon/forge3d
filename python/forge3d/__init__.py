@@ -509,7 +509,8 @@ from . import media
 # P4: Map Plate / Creator Workflow
 # -----------------------------------------------------------------------------
 from .map_plate import MapPlate, MapPlateConfig, BBox, PlateRegion
-from .publication import PublicationSource, PublicationExtent, PublicationRecipe
+from .publication import (PublicationSource, PublicationExtent, PublicationRecipe,
+                          PublicationInset, PublicationLayout, PublicationSubject, publication_output_support)
 from .legend import Legend, LegendConfig
 from .raster_style import RasterHeightSurfaceStyle, CategoricalRasterStyle, BivariateRasterStyle, RasterStyleResult
 from .scale_bar import ScaleBar, ScaleBarConfig
@@ -966,6 +967,10 @@ __all__ = [
     "PublicationSource",
     "PublicationExtent",
     "PublicationRecipe",
+    "PublicationInset",
+    "PublicationLayout",
+    "PublicationSubject",
+    "publication_output_support",
     "BBox",
     "PlateRegion",
     "Legend",
