@@ -301,7 +301,7 @@ jobs:
       matrix:
         include:
           - leg: apple
-            os: macos-14
+            os: macos-15
             backend: metal
             gated: true
     runs-on: ${{ matrix.os }}
