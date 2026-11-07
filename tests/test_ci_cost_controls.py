@@ -760,9 +760,9 @@ def test_full_python_lane_records_measured_timings_and_skips(tmp_path) -> None:
 
     workflow = yaml.load(_workflow("test-python-wheel.yml"), Loader=yaml.BaseLoader)
     job = workflow["jobs"]["test"]
-    # Owner-approved physical Windows allowance; hosted lanes keep 35 minutes.
-    physical_timeout = "${{ inputs.physical_windows_gpu && 90 || 35 }}"
-    assert job["timeout-minutes"] in ("35", physical_timeout)
+    # Owner-approved allowances: physical Windows 90 minutes, hosted 45 minutes.
+    physical_timeout = "${{ inputs.physical_windows_gpu && 90 || 45 }}"
+    assert job["timeout-minutes"] == physical_timeout
     if job["timeout-minutes"] == physical_timeout:
         option = workflow["on"]["workflow_call"]["inputs"]["physical_windows_gpu"]
         assert option["type"] == "boolean" and option["default"] == "false"
