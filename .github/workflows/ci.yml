@@ -811,7 +811,7 @@ jobs:
     uses: ./.github/workflows/build-wheel.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      runner: ubuntu-latest
+      runner: ubuntu-24.04
       target: x86_64-unknown-linux-gnu
       maturin_args: --release --out dist -i python3.10
       manylinux: 'off'
