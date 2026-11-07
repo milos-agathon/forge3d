@@ -689,6 +689,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libvulkan-dev libproj-dev libsqlite3-dev sqlite3 pkg-config
 
+      - name: Set up Python for Rust linking (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Select Python for PyO3 (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        # Use the selected interpreter's libpython, not a cached system path
+        # from an older Ubuntu runner image.
+        run: echo "PYO3_PYTHON=$(python -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
+
       - name: Run cargo check
         run: cargo check --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe,splat-fusion
 
