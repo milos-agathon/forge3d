@@ -644,7 +644,8 @@ jobs:
     name: Test Rust (${{ matrix.os }})
     needs: preflight
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.scope == 'full')
-    runs-on: ${{ matrix.os }}
+    # Keep system PROJ on the image with passing full Rust acceptance.
+    runs-on: ${{ matrix.runner || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -653,6 +654,7 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
           - os: ubuntu-latest
+            runner: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
           - os: macos-latest
             target: x86_64-apple-darwin
@@ -679,9 +681,9 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.runner || matrix.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-${{ matrix.runner || matrix.os }}-cargo-
 
       - name: Install system dependencies (Linux)
         if: matrix.os == 'ubuntu-latest'
