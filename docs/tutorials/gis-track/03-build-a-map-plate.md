@@ -30,8 +30,8 @@ with f3d.open_viewer_async(
     width=900,
     height=560,
 ) as viewer:
-    viewer.set_z_scale(0.1)
-    viewer.set_orbit_camera(phi_deg=28, theta_deg=49, radius=5400, fov_deg=42)
+    viewer.set_z_scale(1.5)
+    viewer.set_orbit_camera(phi_deg=28, theta_deg=55, radius=48000, fov_deg=42)
     viewer.set_sun(azimuth_deg=315, elevation_deg=30)
     viewer.snapshot(snapshot_path, width=900, height=560)
 

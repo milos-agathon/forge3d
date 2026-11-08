@@ -18,7 +18,8 @@ snapshot.
 import forge3d as f3d
 
 with f3d.open_viewer_async(terrain_path=f3d.fetch_dem("rainier")) as viewer:
-    viewer.set_orbit_camera(phi_deg=28, theta_deg=49, radius=5400)
+    viewer.set_z_scale(1.5)
+    viewer.set_orbit_camera(phi_deg=28, theta_deg=55, radius=48000, fov_deg=42)
     viewer.set_sun(azimuth_deg=302, elevation_deg=24)
     viewer.snapshot("rainier.png")
 ```

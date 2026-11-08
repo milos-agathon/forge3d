@@ -65,7 +65,8 @@ pub struct ViewerTerrainData {
     pub domain: (f32, f32),
     pub revision: u64,
     pub raster_info: crate::gis::types::RasterInfo,
-    /// Absolute viewer-world X/Z origin: `(map X, -map Y)`.
+    /// Absolute viewer-world X/Z origin: `(map X, -map Y)`. An Earth-geographic
+    /// DEM uses local metres instead, with its north-west corner at zero.
     pub world_origin_xz: DVec2,
     /// Positive physical viewer-world X/Z span.
     pub world_span_xz: DVec2,
