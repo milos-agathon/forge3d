@@ -683,7 +683,8 @@ def render_01_rainier() -> None:
         "examples/terrain_viewer_interactive.py",
         "--dem", "assets/tif/dem_rainier.tif",
         "--width", str(W), "--height", str(H),
-        "--cam-radius", "5200",
+        "--cam-theta", "55", "--cam-radius", "48000", "--cam-fov", "42",
+        "--z-scale", "1.5",
         "--pbr", "--msaa", "8",
         "--shadow-technique", "pcss", "--shadow-map-res", "4096",
         "--exposure", "1.35",
@@ -850,12 +851,14 @@ def render_07_flyover() -> None:
     angles = [0, 120, 240]
     frame_paths: list[Path] = []
 
-    for _i, phi in enumerate(angles):
+    for phi in angles:
         tmp = WORK_DIR / f"07-frame-{phi}.png"
         run_example(f"07 frame {phi}deg", [
             "examples/terrain_viewer_interactive.py",
             "--dem", "assets/tif/dem_rainier.tif",
             "--width", str(frame_w), "--height", str(H - 72),
+            "--cam-phi", str(phi), "--cam-theta", "55", "--cam-fov", "65",
+            "--z-scale", "1.5",
             "--pbr", "--msaa", "8",
             "--shadow-technique", "pcss", "--shadow-map-res", "4096",
             "--exposure", "1.25",
