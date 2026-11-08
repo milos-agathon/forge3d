@@ -32,7 +32,7 @@ setup:
 python examples/terrain_viewer_interactive.py ^
   --dem assets/tif/dem_rainier.tif ^
   --width 1200 --height 720 ^
-  --cam-radius 5200 ^
+  --cam-theta 55 --cam-radius 48000 --cam-fov 42 --z-scale 1.5 ^
   --pbr --msaa 8 ^
   --shadow-technique pcss --shadow-map-res 4096 ^
   --exposure 1.35 ^

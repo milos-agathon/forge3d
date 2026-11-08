@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -29,7 +30,7 @@ from _import_shim import ensure_repo_import
 
 ensure_repo_import()
 
-from forge3d.animation import CameraAnimation
+from forge3d.animation import CameraAnimation, CameraKeyframe
 from forge3d.viewer_ipc import set_oit_enabled
 
 # P0.3/M2: Sun ephemeris - calculate realistic sun position from location and time
@@ -46,6 +47,14 @@ except ImportError:
 # Asset paths
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
 DEFAULT_DEM = ASSETS_DIR / "tif" / "dem_rainier.tif"
+# The Rainier preset was authored against the 2,111-pixel terrain width.
+# Its longest side in the viewer's local metric frame is about 33.3 km.
+RAINIER_RADIUS_SCALE = 33_300.0 / 2111.0
+
+
+def _drain_viewer_output(stream) -> None:
+    for _ in stream:
+        pass
 
 
 def create_orbit_animation(duration: float = 10.0) -> CameraAnimation:
@@ -244,15 +253,7 @@ def run_interactive_preview(
                 break
 
         # Drain any remaining stdout to prevent pipe buffer blocking
-        import threading
-        def drain_output():
-            try:
-                for _line in iter(process.stdout.readline, ""):
-                    pass  # Discard output
-            except:
-                pass
-        drain_thread = threading.Thread(target=drain_output, daemon=True)
-        drain_thread.start()
+        threading.Thread(target=_drain_viewer_output, args=(process.stdout,), daemon=True).start()
 
         if port is None:
             print("ERROR: Viewer did not report ready")
@@ -568,6 +569,8 @@ def export_animation_frames(
             process.terminate()
             return
 
+        threading.Thread(target=_drain_viewer_output, args=(process.stdout,), daemon=True).start()
+
         # Connect
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(30.0)
@@ -751,8 +754,8 @@ Examples:
         help="Output height for export (default: 1080)"
     )
     parser.add_argument(
-        "--z-scale", type=float, default=0.15,
-        help="Terrain height exaggeration (default: 0.15)"
+        "--z-scale", type=float,
+        help="Terrain height exaggeration (default: 1.0 for Rainier, 0.15 for a custom DEM)"
     )
     parser.add_argument(
         "--preview-only", action="store_true",
@@ -871,6 +874,15 @@ Examples:
         anim = create_flyover_animation(args.duration)
     else:  # sunrise
         anim = create_sunrise_animation(args.duration)
+
+    using_rainier = args.dem.resolve() == DEFAULT_DEM.resolve()
+    if using_rainier:
+        anim.replace_keyframes([
+            CameraKeyframe(key.time, key.phi_deg, key.theta_deg, key.radius * RAINIER_RADIUS_SCALE, key.fov_deg)
+            for key in anim.get_keyframes()
+        ])
+    if args.z_scale is None:
+        args.z_scale = 1.0 if using_rainier else 0.15
 
     # Preview interpolation
     preview_animation_interpolation(anim, fps=2)

@@ -7,7 +7,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ## [Unreleased]
 
 ### Fixed
-- The interactive viewer renders EPSG:4326 and other Earth-geographic DEMs (#289). Their footprint was taken in degrees against heights in metres, so the terrain became a sub-unit-wide spike and the frame was blank; they are now placed in local metres from their north-west corner, scaled with WGS84 at the footprint centre. Planetary (IAU) geographic CRSs are unchanged.
+- The interactive viewer renders EPSG:4326 and other degree-based Earth-geographic DEMs (#289). It scales the horizontal footprint to local metres from the north-west corner using WGS84 at the footprint centre.
 - The interactive viewer's default (non-PBR) terrain shader draws heights in metres again, matching the PBR and shadow passes (#289). Since 1.33.1 it drew relief at 0.1% of the terrain width, so terrain looked flat. Scenes tuned with `set_z_scale` on the default shader will look taller.
 - Rainier viewer snippets in the README and docs use camera and z-scale values in metres.
 
