@@ -14,7 +14,8 @@ use tiff::decoder::{ChunkType, Decoder};
 use crate::gis::affine::PixelWindow;
 use crate::gis::error::{GisError, GisResult};
 use crate::gis::raster_tags::{
-    compression_name, dtype_per_band, nodata_per_band, read_crs, read_transform, sample_count,
+    compression_name, dtype_per_band, nodata_per_band, read_crs, read_geokey_model,
+    read_transform, sample_count,
 };
 use crate::gis::raster_write::RasterArray;
 use crate::gis::types::{
@@ -24,6 +25,7 @@ use crate::gis::types::{
 };
 
 pub(crate) use crate::gis::raster_read::read_raster_data;
+pub(crate) use crate::gis::raster_tags::GeoKeyModel;
 pub(crate) use crate::gis::raster_values::{
     copy_window, f64_to_raster_data, raster_to_f64, valid_mask,
 };
@@ -57,6 +59,17 @@ pub fn read_raster_info(path: impl AsRef<Path>) -> GisResult<RasterInfo> {
     let file = File::open(path)?;
     let mut decoder = Decoder::new(BufReader::new(file))?;
     raster_info_from_decoder(&mut decoder, normalized_path(path))
+}
+
+/// Horizontal coordinate model declared by a local GeoTIFF's GeoKeys; see
+/// [`read_geokey_model`]. `RasterInfo` keeps only the CRS authority code, which
+/// does not say whether coordinates are degrees or projected map units.
+pub(crate) fn read_geokey_model_from_path(path: impl AsRef<Path>) -> GisResult<Option<GeoKeyModel>> {
+    let path = path.as_ref();
+    validate_tiff_path(path)?;
+    let file = File::open(path)?;
+    let mut decoder = Decoder::new(BufReader::new(file))?;
+    read_geokey_model(&mut decoder)
 }
 
 /// Build a `RasterInfo` from an already-open decoder over any `Read + Seek`

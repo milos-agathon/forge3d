@@ -6,11 +6,60 @@ use glam::{DVec2, DVec3};
 
 const MAX_VIEWER_TERRAIN_GRID_RESOLUTION: u32 = 2048;
 
+const WGS84_SEMI_MAJOR_M: f64 = 6_378_137.0;
+const WGS84_ECCENTRICITY_SQ: f64 = 6.694_379_990_141_316e-3;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct TerrainFootprint {
     pub world_origin_xz: DVec2,
     pub world_span_xz: DVec2,
     pub fallback: bool,
+    /// Metres per degree (longitude, latitude) applied to a geographic DEM.
+    pub metres_per_degree: Option<DVec2>,
+}
+
+/// Unit of the DEM's horizontal coordinates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TerrainHorizontalUnits {
+    /// Projected (or unlabeled) map units, used as viewer-world units directly.
+    MapUnits,
+    /// Earth longitude/latitude degrees. Heights are metres, so the footprint
+    /// is scaled to metres or the terrain becomes a sub-unit-wide spike.
+    EarthDegrees,
+}
+
+/// Classify a DEM's horizontal units from its GeoKey model and CRS metadata.
+/// Planetary (IAU) geographic CRSs keep map units: an Earth ellipsoid would
+/// give them the wrong scale.
+pub(super) fn terrain_horizontal_units(
+    info: &crate::gis::types::RasterInfo,
+    model: Option<crate::gis::raster_info::GeoKeyModel>,
+) -> TerrainHorizontalUnits {
+    let wkt_geographic = info.crs_wkt.as_deref().is_some_and(|wkt| {
+        let upper = wkt.trim_start().to_ascii_uppercase();
+        upper.starts_with("GEOGCRS[") || upper.starts_with("GEOGCS[")
+    });
+    let planetary = info
+        .crs_authority
+        .as_ref()
+        .and_then(|authority| authority.get("name"))
+        .is_some_and(|name| name.eq_ignore_ascii_case("IAU"));
+    let geographic =
+        model == Some(crate::gis::raster_info::GeoKeyModel::Geographic) || wkt_geographic;
+    if geographic && !planetary {
+        TerrainHorizontalUnits::EarthDegrees
+    } else {
+        TerrainHorizontalUnits::MapUnits
+    }
+}
+
+/// Metres per degree of longitude and latitude at `latitude_deg` on WGS84.
+fn wgs84_metres_per_degree(latitude_deg: f64) -> DVec2 {
+    let phi = latitude_deg.to_radians();
+    let w = (1.0 - WGS84_ECCENTRICITY_SQ * phi.sin().powi(2)).sqrt();
+    let prime_vertical = WGS84_SEMI_MAJOR_M / w;
+    let meridional = WGS84_SEMI_MAJOR_M * (1.0 - WGS84_ECCENTRICITY_SQ) / w.powi(3);
+    DVec2::new(prime_vertical * phi.cos(), meridional) * std::f64::consts::PI / 180.0
 }
 
 #[derive(Debug, Clone)]
@@ -36,16 +85,21 @@ impl TerrainPathPreflight {
 }
 
 /// Translate a north-up GeoTIFF affine into the viewer basis
-/// `(map X, display height, -map Y)`. Invalid present metadata fails closed;
-/// only genuinely absent transform metadata selects the legacy local fallback.
+/// `(map X, display height, -map Y)`. Earth-geographic DEMs have no metric map
+/// coordinate, so they use local metres instead: the origin is the north-west
+/// corner and degrees are scaled by WGS84 metres per degree at the footprint's
+/// centre latitude. Invalid present metadata fails closed; only genuinely
+/// absent transform metadata selects the legacy local fallback.
 pub(super) fn terrain_footprint_from_info(
     info: &crate::gis::types::RasterInfo,
+    units: TerrainHorizontalUnits,
 ) -> crate::gis::error::GisResult<TerrainFootprint> {
     let Some((a, b, c, d, e, f)) = info.transform else {
         return Ok(TerrainFootprint {
             world_origin_xz: DVec2::ZERO,
             world_span_xz: DVec2::new(f64::from(info.width), f64::from(info.height)),
             fallback: true,
+            metres_per_degree: None,
         });
     };
     let coefficients = [a, b, c, d, e, f];
@@ -74,10 +128,34 @@ pub(super) fn terrain_footprint_from_info(
             info.path
         )));
     }
+    if units == TerrainHorizontalUnits::MapUnits {
+        return Ok(TerrainFootprint {
+            world_origin_xz: DVec2::new(c, -f),
+            world_span_xz: span,
+            fallback: false,
+            metres_per_degree: None,
+        });
+    }
+    let bottom = f - span.y;
+    if f > 90.0 || bottom < -90.0 {
+        return Err(crate::gis::error::GisError::InvalidTransform(format!(
+            "unsupported_geographic_extent: path={} latitude {bottom}..{f} is outside -90..90",
+            info.path
+        )));
+    }
+    let scale = wgs84_metres_per_degree(f - span.y * 0.5);
+    let metric_span = span * scale;
+    if !metric_span.is_finite() || metric_span.x <= 0.0 || metric_span.y <= 0.0 {
+        return Err(crate::gis::error::GisError::InvalidTransform(format!(
+            "invalid_zero_or_non_finite_span: path={} geographic span={span:?} scale={scale:?}",
+            info.path
+        )));
+    }
     Ok(TerrainFootprint {
-        world_origin_xz: DVec2::new(c, -f),
-        world_span_xz: span,
+        world_origin_xz: DVec2::ZERO,
+        world_span_xz: metric_span,
         fallback: false,
+        metres_per_degree: Some(scale),
     })
 }
 
@@ -87,7 +165,11 @@ impl ViewerTerrainScene {
     /// or GPU-resource allocation can begin.
     pub(crate) fn preflight_terrain_path(path: &str) -> Result<TerrainPathPreflight> {
         let raster_info = crate::gis::raster_info::read_raster_info(path)?;
-        let footprint = terrain_footprint_from_info(&raster_info)?;
+        let units = terrain_horizontal_units(
+            &raster_info,
+            crate::gis::raster_info::read_geokey_model_from_path(path)?,
+        );
+        let footprint = terrain_footprint_from_info(&raster_info, units)?;
         Ok(TerrainPathPreflight {
             raster_info,
             footprint,
@@ -318,6 +400,12 @@ impl ViewerTerrainScene {
             "[terrain] Loaded {}x{} DEM, domain: {:.1}..{:.1}, grid={}x{}",
             width, height, min_h, max_h, grid_res, grid_res
         );
+        if let Some(scale) = footprint.metres_per_degree {
+            println!(
+                "[terrain] Geographic CRS: degrees scaled to metres ({:.1} m/deg lon, {:.1} m/deg lat)",
+                scale.x, scale.y
+            );
+        }
         Ok(())
     }
 
@@ -466,9 +554,24 @@ fn create_grid_mesh(resolution: u32) -> (Vec<f32>, Vec<u32>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{terrain_footprint_from_info, terrain_grid_resolution};
+    use super::{
+        terrain_footprint_from_info, terrain_grid_resolution, terrain_horizontal_units,
+        wgs84_metres_per_degree, TerrainHorizontalUnits,
+    };
+    use crate::gis::raster_info::GeoKeyModel;
     use crate::gis::types::RasterInfo;
+    use std::collections::HashMap;
     use std::path::PathBuf;
+
+    const MAP: TerrainHorizontalUnits = TerrainHorizontalUnits::MapUnits;
+    const DEGREES: TerrainHorizontalUnits = TerrainHorizontalUnits::EarthDegrees;
+
+    fn authority(name: &str, code: &str) -> Option<HashMap<String, String>> {
+        Some(HashMap::from([
+            ("name".to_string(), name.to_string()),
+            ("code".to_string(), code.to_string()),
+        ]))
+    }
 
     #[test]
     fn viewer_terrain_grid_resolution_keeps_small_heightmaps_native() {
@@ -484,10 +587,13 @@ mod tests {
     #[test]
     fn missing_transform_uses_exact_legacy_pixel_footprint() {
         let info = RasterInfo::new(PathBuf::from("local.tif"), 640, 480, 1);
-        let footprint = terrain_footprint_from_info(&info).unwrap();
-        assert_eq!(footprint.world_origin_xz, glam::DVec2::ZERO);
-        assert_eq!(footprint.world_span_xz, glam::DVec2::new(640.0, 480.0));
-        assert!(footprint.fallback);
+        for units in [MAP, DEGREES] {
+            let footprint = terrain_footprint_from_info(&info, units).unwrap();
+            assert_eq!(footprint.world_origin_xz, glam::DVec2::ZERO);
+            assert_eq!(footprint.world_span_xz, glam::DVec2::new(640.0, 480.0));
+            assert!(footprint.fallback);
+            assert_eq!(footprint.metres_per_degree, None);
+        }
     }
 
     #[test]
@@ -498,14 +604,90 @@ mod tests {
             ("authority".to_string(), "EXAMPLE".to_string()),
             ("code".to_string(), "987654".to_string()),
         ]));
-        let footprint = terrain_footprint_from_info(&info).unwrap();
+        let footprint = terrain_footprint_from_info(&info, MAP).unwrap();
         assert_eq!(
             footprint.world_origin_xz,
             glam::DVec2::new(500_000.25, -5_500_000.75)
         );
         assert_eq!(footprint.world_span_xz, glam::DVec2::new(600.0, 200.0));
         assert!(!footprint.fallback);
+        assert_eq!(footprint.metres_per_degree, None);
         assert_eq!(info.crs_wkt, None);
+    }
+
+    #[test]
+    fn wgs84_metres_per_degree_matches_reference_table() {
+        // Published WGS84 lengths of one degree (longitude, latitude).
+        for (latitude, lon_m, lat_m) in [
+            (0.0, 111_319.491, 110_574.276),
+            (45.0, 78_846.806, 111_131.745),
+            (60.0, 55_799.979, 111_412.244),
+        ] {
+            let scale = wgs84_metres_per_degree(latitude);
+            assert!((scale.x - lon_m).abs() < 0.5, "lon at {latitude}: {}", scale.x);
+            assert!((scale.y - lat_m).abs() < 0.5, "lat at {latitude}: {}", scale.y);
+        }
+    }
+
+    #[test]
+    fn geographic_dem_footprint_is_scaled_to_metres() {
+        // Issue 289: the shipped Mount Rainier DEM (EPSG:4326, 2111 x 2110).
+        let mut info = RasterInfo::new(PathBuf::from("dem_rainier.tif"), 2111, 2110, 1);
+        info.transform = Some((
+            0.000_142_155_012_399_535_75,
+            0.0,
+            -121.910_021_902_833_07,
+            0.0,
+            -0.000_142_155_012_399_533_15,
+            46.999_952_276_297_584,
+        ));
+        info.crs_authority = authority("EPSG", "4326");
+        let footprint = terrain_footprint_from_info(&info, DEGREES).unwrap();
+        let span = footprint.world_span_xz;
+        // ~0.30 deg x 0.30 deg near 46.85 N is roughly 22.9 km x 33.3 km; the
+        // pre-fix degree footprint was 0.30 world units across.
+        assert!((22_700.0..23_100.0).contains(&span.x), "{span:?}");
+        assert!((33_200.0..33_500.0).contains(&span.y), "{span:?}");
+        // Local metres from the north-west corner keep world values small.
+        assert_eq!(footprint.world_origin_xz, glam::DVec2::ZERO);
+        assert!(footprint.metres_per_degree.is_some());
+        assert!(!footprint.fallback);
+    }
+
+    #[test]
+    fn geographic_dem_outside_latitude_range_fails_closed() {
+        let mut info = RasterInfo::new(PathBuf::from("pole.tif"), 10, 10, 1);
+        info.transform = Some((1.0, 0.0, 0.0, 0.0, -1.0, 95.0));
+        let error = terrain_footprint_from_info(&info, DEGREES).unwrap_err();
+        assert!(error.to_string().contains("unsupported_geographic_extent"), "{error}");
+        info.transform = Some((1.0, 0.0, 0.0, 0.0, -1.0, 90.0));
+        assert!(terrain_footprint_from_info(&info, MAP).is_ok());
+    }
+
+    #[test]
+    fn horizontal_units_follow_geokey_model_and_wkt() {
+        let mut info = RasterInfo::new(PathBuf::from("dem.tif"), 4, 4, 1);
+        info.crs_authority = authority("EPSG", "4326");
+        assert_eq!(
+            terrain_horizontal_units(&info, Some(GeoKeyModel::Geographic)),
+            DEGREES
+        );
+        assert_eq!(terrain_horizontal_units(&info, None), MAP);
+        info.crs_authority = authority("EPSG", "32610");
+        assert_eq!(
+            terrain_horizontal_units(&info, Some(GeoKeyModel::Projected)),
+            MAP
+        );
+        info.crs_authority = None;
+        info.crs_wkt = Some("GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\"]]".to_string());
+        assert_eq!(terrain_horizontal_units(&info, None), DEGREES);
+        // Planetary geographic CRSs are not on the Earth ellipsoid.
+        info.crs_wkt = None;
+        info.crs_authority = authority("IAU", "30100");
+        assert_eq!(
+            terrain_horizontal_units(&info, Some(GeoKeyModel::Geographic)),
+            MAP
+        );
     }
 
     #[test]
@@ -518,7 +700,8 @@ mod tests {
         ] {
             let mut info = RasterInfo::new(PathBuf::from("invalid.tif"), 16, 16, 1);
             info.transform = Some(transform);
-            assert!(terrain_footprint_from_info(&info).is_err());
+            assert!(terrain_footprint_from_info(&info, MAP).is_err());
+            assert!(terrain_footprint_from_info(&info, DEGREES).is_err());
         }
     }
 }

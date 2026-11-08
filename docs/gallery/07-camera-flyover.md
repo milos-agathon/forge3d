@@ -19,8 +19,9 @@ loop, but TV17 also adds reusable terrain rig authoring that bakes straight into
 import forge3d as f3d
 
 with f3d.open_viewer_async(terrain_path=f3d.fetch_dem("rainier")) as viewer:
+    viewer.set_z_scale(1.5)
     for step, phi in enumerate(range(0, 360, 20)):
-        viewer.set_orbit_camera(phi_deg=phi, theta_deg=50, radius=5400)
+        viewer.set_orbit_camera(phi_deg=phi, theta_deg=55, radius=48000, fov_deg=42)
         viewer.snapshot(f"frames/frame-{step:03d}.png")
 ```
 
