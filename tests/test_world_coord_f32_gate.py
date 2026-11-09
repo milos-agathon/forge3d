@@ -602,9 +602,22 @@ def _undo_viewer_terrain_grid_axes_transition(sites):
     return sites[:start] + removed + sites[start + len(added):]
 
 
+def _undo_viewer_terrain_clip_planes_transition(sites):
+    """Drop the near-plane distance cast that ``clip_planes`` added."""
+    transition = _ledger_data()["viewer_terrain_clip_planes"]
+    added = list(map(tuple, transition["added"]))
+    assert all(sites.count(site) == 1 for site in added), "clip_planes cast changed or moved"
+    return [site for site in sites if site not in added]
+
+
+def _grid_axes_conversion_inventory():
+    """The scanned inventory as it stood after the grid-axes transition."""
+    return _undo_viewer_terrain_clip_planes_transition(_scanned_conversion_inventory())
+
+
 def _raw_conversion_inventory():
     """The production inventory every freeze below describes."""
-    return _undo_viewer_terrain_grid_axes_transition(_scanned_conversion_inventory())
+    return _undo_viewer_terrain_grid_axes_transition(_grid_axes_conversion_inventory())
 
 
 def _undo_splat_env_map_transition(sites):
@@ -1197,7 +1210,7 @@ def test_splat_fused_inventory_transition_is_exact():
 def test_viewer_terrain_grid_axes_inventory_transition_is_exact():
     transition = _ledger_data()["viewer_terrain_grid_axes"]
     assert transition["review"]
-    sites = _scanned_conversion_inventory()
+    sites = _grid_axes_conversion_inventory()
     assert (len(sites), _inventory_digest(sites)) == (
         transition["result_count"], transition["result_digest"],
     )
@@ -1220,6 +1233,32 @@ def test_viewer_terrain_grid_axes_inventory_transition_is_exact():
         assert fn == "create_grid_mesh" and op == "as_f32"
     body = _function_body("src/viewer/terrain/scene/terrain_load.rs", "create_grid_mesh")
     assert "position" not in body.lower()
+    assert "to_render_f32" not in body
+
+
+def test_viewer_terrain_clip_planes_inventory_transition_is_exact():
+    transition = _ledger_data()["viewer_terrain_clip_planes"]
+    assert transition["review"]
+    sites = _scanned_conversion_inventory()
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    base = _undo_viewer_terrain_clip_planes_transition(sites)
+    assert (len(base), _inventory_digest(base)) == (
+        transition["base_count"], transition["base_digest"],
+    )
+    grid_axes = _ledger_data()["viewer_terrain_grid_axes"]
+    assert (transition["base_count"], transition["base_digest"]) == (
+        grid_axes["result_count"], grid_axes["result_digest"],
+    )
+    added = list(map(tuple, transition["added"]))
+    assert (len(transition["removed"]), len(added)) == (0, 1)
+    # One scalar: the eye-to-terrain distance narrowed to the f32 near plane.
+    # No world position is narrowed here; positions still go through Anchor.
+    [(rel, fn, op, _occ, stmt)] = added
+    assert (rel, fn, op) == ("src/viewer/terrain/scene.rs", "clip_planes", "as_f32")
+    assert "gap" in stmt
+    body = _function_body("src/viewer/terrain/scene.rs", "clip_planes")
     assert "to_render_f32" not in body
 
 

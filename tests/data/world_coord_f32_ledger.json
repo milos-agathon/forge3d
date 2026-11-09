@@ -6456,5 +6456,22 @@
         "let v = y as f32 * inv_v"
       ]
     ]
+  },
+  "viewer_terrain_clip_planes": {
+    "added": [
+      [
+        "src/viewer/terrain/scene.rs",
+        "clip_planes",
+        "as_f32",
+        1,
+        "let near = floor.max((0.5 * gap) as f32)"
+      ]
+    ],
+    "base_count": 1941,
+    "base_digest": "9024c8c4e92db70204033bce2801b31baf2c956731c1ec8e28e3163771137261",
+    "removed": [],
+    "result_count": 1942,
+    "result_digest": "9edcc6da84f3a5570286e2d44cd3efd8324c5be35ce7822f61f744d858796b09",
+    "review": "PR 299: ViewerTerrainData::clip_planes pushes the terrain camera's near plane out to half the eye's distance from the terrain bounding box (a fixed near <= 1.0 z-fought steep walls under a long lens). The one cast narrows that scalar f64 distance to the f32 near plane; it is never a world position, which still crosses f64 -> f32 only through Anchor."
   }
 }

@@ -337,6 +337,8 @@ impl ViewerTerrainScene {
             render_origin_span,
             h_range,
             shader_z_scale,
+            near: frame.near,
+            far: frame.far,
             vo_view_proj: view_proj.to_cols_array_2d(),
             vo_sun_dir: [sun_dir.x, sun_dir.y, sun_dir.z],
             vo_lighting,
