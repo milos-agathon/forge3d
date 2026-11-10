@@ -716,6 +716,8 @@ from .preparation import (
 )
 from .landscape import LandscapeLayout, export_landscape, verify_landscape_import
 from .chronos import FlythroughManifest, render_flythrough
+from .subject_story import (CompiledSubjectShot, StoryAnnotation, StoryObstacle, SubjectFeature,
+                            SubjectShotInfeasible, compile_subject_shot)
 from .alignment import (
     alignment_report,
     alignment_residual,
@@ -1093,6 +1095,12 @@ __all__ = [
     "render_compiled_frame",
     "FlythroughManifest",
     "render_flythrough",
+    "CompiledSubjectShot",
+    "StoryAnnotation",
+    "StoryObstacle",
+    "SubjectFeature",
+    "SubjectShotInfeasible",
+    "compile_subject_shot",
     "recipe_manifest",
     "PreparationError",
     "PreparationGrid",

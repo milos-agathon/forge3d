@@ -417,6 +417,14 @@ examples/**/*.py
 !examples/c05_qgis.py
 !examples/c05_qgis_3d.py
 !examples/c05_report.py
+!examples/_chronos_video.py
+!examples/c07_grindelwald_eiger.py
+!examples/c07_swiss_sources.py
+!examples/test_c07_swiss_sources.py
+!examples/c07_unreal/
+examples/c07_unreal/*
+!examples/c07_unreal/*.py
+!examples/c07_unreal/README.md
 !examples/splat_fused_map.py
 tests/test_*example*.py
 tests/test_*examples*.py
