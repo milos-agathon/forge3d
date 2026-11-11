@@ -685,6 +685,7 @@ from .label_plan import (
 # -----------------------------------------------------------------------------
 # Typed MapScene recipe contract
 # -----------------------------------------------------------------------------
+from . import semantic_scale
 from .map_scene import (
     RenderPassInput,
     RenderPassSpec,
@@ -1071,6 +1072,7 @@ __all__ = [
     "MapSceneNativeUnavailable",
     "MapSceneTextLayoutError",
     "CompiledScenePlan",
+    "semantic_scale",
     "SceneRecipe",
     "TerrainSource",
     "RasterOverlay",

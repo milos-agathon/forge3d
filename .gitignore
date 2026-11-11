@@ -411,6 +411,7 @@ examples/**/*.py
 !examples/vector_line_drape.py
 !examples/terrain_water_optics.py
 !examples/prepare_scene.py
+!examples/c03_semantic_scale.py
 !examples/c05_sources.py
 !examples/c05_real_data.py
 !examples/c05_render.py
