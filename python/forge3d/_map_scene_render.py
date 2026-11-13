@@ -1453,6 +1453,49 @@ def _compose_north_arrow(image: Any, recipe: Any, options: Mapping[str, Any]) ->
     )
 
 
+def _compose_semantic_scale_locator(image: Any, locator: Mapping[str, Any]) -> None:
+    """Paint the already compiled, north-up locator in its reserved viewport."""
+    height, width = image.shape[:2]
+    x0, y0, x1, y1 = locator["rect"]
+    left, top, right, bottom = round(x0 * width), round(y0 * height), round(x1 * width), round(y1 * height)
+    panel = image[top:bottom, left:right]
+    h, w = panel.shape[:2]
+    if not h or not w:
+        return
+    ink, paper = (232, 239, 235, 255), (18, 34, 37, 248)
+    route = _color(locator.get("route_color"), (246, 190, 102, 255))
+    focus = (89, 219, 211, 255)
+    _blend_rect(panel, 0, 0, w, h, paper)
+    # Keep the map viewport fixed when the notice appears or disappears.
+    map_panel = panel[:round(h * 0.8)]
+    footer = panel[map_panel.shape[0]:]
+    map_height = map_panel.shape[0]
+    map_h = min(map_height * 0.8, w * 0.8 / locator["aspect"])
+    map_w = map_h * locator["aspect"]
+
+    def px(point):
+        return ((w - map_w) / 2 + point[0] * map_w,
+                (map_height - map_h) / 2 + point[1] * map_h)
+
+    for path in locator["routes"].values():
+        _draw_polyline(map_panel, [px(point) for point in path], route, width_px=2,
+                       join="round", clip_to_geometry=True)
+    for point in locator["landmarks"].values():
+        _draw_disc(map_panel, *px(point), ink, 2.0, clip_to_geometry=True)
+    _draw_disc(map_panel, *px(locator["focus"]), focus, 3.5, clip_to_geometry=True)
+    _draw_text(map_panel, "N", (round(w * 0.86), round(h * 0.06)),
+               color=ink, halo=paper, font_size=min(w, h) * 0.12)
+    if footer.size and (locator.get("route_in_locator_only") or locator.get("route_continues_in_locator")):
+        notice = "Route in locator" if locator.get("route_in_locator_only") else "Full route in locator"
+        font_size = min(w, h) * 0.12
+        text_w, _, bounds = _text_outline_metrics(notice, font_size)
+        if text_w > w * 0.88:
+            font_size *= w * 0.88 / text_w
+            _, _, bounds = _text_outline_metrics(notice, font_size)
+        if bounds is not None:
+            anchor = _text_anchor_for_visual_center(w / 2, footer.shape[0] / 2, font_size, bounds)
+            _draw_text(footer, notice, anchor, color=ink, halo=paper, font_size=font_size)
+
 def _compose_furniture(image: Any, recipe: Any) -> None:
     furniture = getattr(recipe, "map_furniture", None)
     if furniture is None:
@@ -1470,3 +1513,6 @@ def _compose_furniture(image: Any, recipe: Any) -> None:
     if north_arrow:
         _compose_north_arrow(image, recipe, north_arrow)
     _draw_title(image, str(getattr(furniture, "title", "") or ""))
+    locator = (furniture.metadata or {}).get("semantic_scale_locator")
+    if locator:
+        _compose_semantic_scale_locator(image, locator)

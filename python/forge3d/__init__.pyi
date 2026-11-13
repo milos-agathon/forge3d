@@ -113,6 +113,7 @@ from .label_plan import (
     PriorityClass,
     RejectedLabel,
 )
+from . import semantic_scale as semantic_scale
 from .map_scene import (
     RenderPassInput as RenderPassInput,
     RenderPassSpec as RenderPassSpec,
