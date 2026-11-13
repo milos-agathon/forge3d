@@ -3277,6 +3277,16 @@ def _fade_label_run(base: Any, opaque: Any, alpha: float) -> Any:
     return np.ascontiguousarray(np.clip(faded, 0.0, 255.0).astype(np.uint8))
 
 
+def _native_glyph_box(
+    anchor: tuple[int, int], origin: Sequence[float], glyph: Mapping[str, Any],
+    render_size: float, atlas_font_size: float,
+) -> tuple[float, float, float, float]:
+    scale = render_size / atlas_font_size
+    x = float(anchor[0]) + float(origin[0]) * render_size + float(glyph["ox"]) * scale
+    y = float(anchor[1]) + float(origin[1]) * render_size + float(glyph["oy"]) * scale
+    return x, y, float(glyph["w"]) * scale, float(glyph["h"]) * scale
+
+
 def _mapscene_native_label_batches(
     recipe: "SceneRecipe", plans: Mapping[str, Any], width: int, height: int, *,
     atlas_sources: Mapping[str, tuple[Path, Path, bool]] | None = None,
@@ -3443,10 +3453,9 @@ def _mapscene_native_label_batches(
                     glyph_y = float(glyph["y"])
                     glyph_w = float(glyph["w"])
                     glyph_h = float(glyph["h"])
-                    x = float(anchor_x) + float(origin[0]) * render_size + float(glyph["ox"]) * atlas_scale
-                    y = float(anchor_y) + float(origin[1]) * render_size + float(glyph["oy"]) * atlas_scale
-                    w = glyph_w * atlas_scale
-                    h = glyph_h * atlas_scale
+                    x, y, w, h = _native_glyph_box(
+                        (anchor_x, anchor_y), origin, glyph, render_size, atlas_font_size
+                    )
                     rotation = float(positioned_glyph.get("rotation",0.0))
                     if rotation:
                         # The shader rotates around the rectangle centre. Move

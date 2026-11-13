@@ -156,6 +156,14 @@ from .chronos import (
     FlythroughManifest as FlythroughManifest,
     render_flythrough as render_flythrough,
 )
+from .subject_story import (
+    CompiledSubjectShot as CompiledSubjectShot,
+    StoryAnnotation as StoryAnnotation,
+    StoryObstacle as StoryObstacle,
+    SubjectFeature as SubjectFeature,
+    SubjectShotInfeasible as SubjectShotInfeasible,
+    compile_subject_shot as compile_subject_shot,
+)
 from .alignment import (
     alignment_report,
     alignment_residual,

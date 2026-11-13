@@ -24,12 +24,11 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import shutil
-import subprocess
 from pathlib import Path
 
 import numpy as np
 
+from _chronos_video import encode_video
 from _import_shim import ensure_repo_import
 
 ensure_repo_import()
@@ -353,49 +352,6 @@ def run_example(
     return manifest
 
 
-def encode_video(frames_dir: Path, output_path: Path, fps: int) -> None:
-    # Read-only over the CHRONOS frames: the PNG bytes are the provenance
-    # record, so the encoder must never re-save or filter them.
-    ffmpeg = shutil.which("ffmpeg")
-    if ffmpeg is None:
-        raise RuntimeError("ffmpeg is required to encode the flyover MP4")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [
-            ffmpeg,
-            "-y",
-            "-loglevel",
-            "error",
-            "-framerate",
-            str(int(fps)),
-            "-i",
-            str(frames_dir / "frame_%08d.png"),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "slow",
-            "-pix_fmt",
-            "yuv420p",
-            "-crf",
-            "18",
-            # Tag BT.709 explicitly: untagged yuv420p gets guessed as bt601 by
-            # some players, visibly shifting the palette.
-            "-vf",
-            "scale=out_color_matrix=bt709",
-            "-colorspace",
-            "bt709",
-            "-color_primaries",
-            "bt709",
-            "-color_trc",
-            "bt709",
-            "-movflags",
-            "+faststart",
-            str(output_path),
-        ],
-        check=True,
-    )
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Render the Bryce Canyon CHRONOS flyover."
@@ -427,7 +383,7 @@ def main(argv: list[str] | None = None) -> int:
     video_path = None
     if args.video:
         video_path = args.out_dir / "bryce_canyon_flyover.mp4"
-        encode_video(args.out_dir, video_path, args.fps)
+        encode_video(args.out_dir, video_path, args.fps, transfer="bt709", frame_count=len(manifest.frames))
 
     pixel_hashes = [record["pixel_hash"] for record in manifest.frames]
     if args.json:
