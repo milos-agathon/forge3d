@@ -605,7 +605,7 @@ def render_fused(
         sky_*: Hosek-Wilkie sky turbidity, ground albedo and intensity.
         env_map: path to an equirect HDRI (``.hdr`` / ``.rgbe`` / ``.exr``)
             whose sky replaces the Hosek-Wilkie bake: downsampled to at most
-            1024 texels wide, exposure-normalised so its median upper-hemisphere
+            4096 texels wide, exposure-normalised so its median upper-hemisphere
             luminance is 1 (then ``sky_intensity`` scales it as usual), and
             clamped so its own sun disc reads as a bright blob instead of an
             IBL firefly. ``sky_turbidity`` / ``sky_ground_albedo`` are ignored

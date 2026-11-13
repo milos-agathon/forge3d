@@ -1995,9 +1995,13 @@ def _render_terrain_renderer_result_impl(
         # because labels request terrain occlusion; render must be a pure
         # consumer of that compiled plan.
         unlit_albedo = _mapscene_unlit_albedo(recipe)
-        if unlit_albedo and (needs_offline or requested_effects
-                             or _mapscene_effective_camera_mode(recipe) != "screen"):
-            raise ValueError("unlit_albedo supports only one-shot flat screen views without effects")
+        if unlit_albedo:
+            mode = _mapscene_effective_camera_mode(recipe)
+            if needs_offline or requested_effects or mode not in {"screen", "mesh:zup:north"}:
+                raise ValueError("unlit_albedo supports only one-shot screen or flat mesh:zup:north views without effects")
+            if mode == "mesh:zup:north":
+                from ._map_scene_projection import flat_ground_footprint_uv
+                flat_ground_footprint_uv(recipe, heightmap, params)
         needs_aov = bool(output.aovs) or emit_provenance or unlit_albedo
         if requested_effects and int(output.bit_depth)!=8:
             _mapscene_pipeline_block(requested_effects,"interactive output uses RGBA8; the requested bit depth has no matching GPU output transform")
@@ -3502,6 +3506,8 @@ def _composite_native_label_layers(
     scene_factory: Any | None = None,
     atlas_data: Mapping[str, tuple[Any, Mapping[str, Any]]] | None = None,
 ) -> tuple[Any, bool]:
+    if not _needs_native_label_composite(recipe, plans):
+        return base, False
     scene_cls = _native_scene_class()
     if scene_cls is None:
         return base, False
