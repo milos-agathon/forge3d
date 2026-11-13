@@ -214,6 +214,7 @@ def _base_scene(
     bit_depth: int = 8,
     map_furniture: f3d.MapFurnitureLayer | None = None,
     terrain_metadata: dict[str, object] | None = None,
+    terrain_crs: str = "EPSG:32610",
     lighting_settings: dict[str, object] | None = None,
     heightmap: np.ndarray | None = None,
 ) -> f3d.MapScene:
@@ -230,7 +231,7 @@ def _base_scene(
     return f3d.MapScene(
         terrain=f3d.TerrainSource(
             data=data,
-            crs="EPSG:32610",
+            crs=terrain_crs,
             metadata=metadata,
             elevation_sampling_available=True,
         ),
@@ -738,8 +739,9 @@ def _furniture(tmp_path: Path) -> f3d.MapScene:
     furniture = f3d.MapFurnitureLayer(
         title="Recipe Golden",
         legend={"items": [{"label": "Forest", "color": "#2f855a"}, {"label": "Snow", "color": "#f8fafc"}]},
-        scale_bar={"length_m": 1000, "units": "km", "location": "lower_left", "geodesic": True},
-        north_arrow={"location": "upper_right", "size": 34},
+        scale_bar={"units": "km", "position": "top-center", "margin_px": 90,
+                   "width_px": 100, "geodesic": True},
+        north_arrow={"position": "top-right", "margin_px": 42, "size": 34},
         graticule={
             "bounds": (-122.5, 46.6, -121.9, 47.0),
             "projected_bounds": (-122.5, 46.6, -121.9, 47.0),
@@ -748,7 +750,76 @@ def _furniture(tmp_path: Path) -> f3d.MapScene:
             "include_labels": True,
         },
     )
-    return _base_scene(tmp_path, "mapscene_furniture_graticule", map_furniture=furniture, width=128, height=88)
+    # Keep the 128-pixel longitude span (~358 m/px), and reserve separate
+    # vertical bands for title, arrow, scale and legend. Bounds are degrees.
+    return _base_scene(tmp_path, "mapscene_furniture_graticule", map_furniture=furniture,
+                       terrain_crs="EPSG:4326", width=128, height=288)
+
+
+def test_furniture_fixture_scale_and_final_swatches(tmp_path, monkeypatch):
+    """Measure fully composited pixels, after scale/arrow/title overlays."""
+    if not terrain_rendering_available():
+        pytest.skip("Recipe goldens require a terrain-capable hardware-backed forge3d runtime")
+    from forge3d import _map_scene_render as compositor
+    from forge3d.scale_bar import ScaleBar
+    from pyproj import Geod
+
+    swatches, scales, furniture_rects = [], [], []
+    draw = compositor._draw_pixel_block
+    geometry = ScaleBar.render_geometry
+
+    def swatch(image, x, y, colour, radius=1):
+        swatches.append({"rect": [x-radius, y-radius, x+radius+1, y+radius+1], "rgba": list(colour)})
+        return draw(image, x, y, colour, radius=radius)
+
+    def scale(bar, **kwargs):
+        result = geometry(bar, **kwargs)
+        scales.append({"meters_per_pixel": bar.meters_per_pixel, "label": result[1],
+                       "size": list(result[0].shape[1::-1])})
+        return result
+
+    monkeypatch.setattr(compositor, "_draw_pixel_block", swatch)
+    monkeypatch.setattr(ScaleBar, "render_geometry", scale)
+    for name in ("_draw_simple_legend", "_compose_scale_bar", "_compose_north_arrow", "_draw_title"):
+        original = getattr(compositor, name)
+        def inspect(image, *args, _original=original, _name=name, **kwargs):
+            before = image.copy()
+            result = _original(image, *args, **kwargs)
+            yy, xx = np.nonzero(np.any(image != before, axis=2))
+            assert len(xx), _name
+            furniture_rects.append({"name": _name,
+                "rect": [int(xx.min()), int(yy.min()), int(xx.max()+1), int(yy.max()+1)]})
+            return result
+        monkeypatch.setattr(compositor, name, inspect)
+    scene = _furniture(tmp_path)
+    scene.render()
+    assert scene.last_render_backend == "gpu_terrain"
+    actual = f3d.png_to_numpy(scene.recipe.output.path)
+    assert actual.shape == (288, 128, 4)
+    expected = abs(Geod(ellps="WGS84").inv(-122.5, 46.8, -121.9, 46.8)[2]) / 128
+    assert len(scales) == 1 and scales[0]["meters_per_pixel"] == pytest.approx(expected, rel=1e-12)
+    assert scales[0]["label"] == "25 km"
+    for i, first in enumerate(furniture_rects):
+        a, b, c, d = first["rect"]
+        for second in furniture_rects[i+1:]:
+            e, f, g, h = second["rect"]
+            assert c <= e or g <= a or d <= f or h <= b, (first, second)
+    # Independently measure the final bar's top border, including both edges.
+    overlay_w, overlay_h = scales[0]["size"]
+    left, top = (128-overlay_w)//2, 90
+    border = np.flatnonzero(np.all(actual[top+8, left:left+overlay_w, :3] == 0, axis=1))
+    span = int(border[-1]-border[0]+1)
+    assert abs(span * expected - 25000) < expected  # One final output pixel.
+    scales[0]["final_bar_pixel_span"] = span
+    assert [s["rgba"] for s in swatches] == [[47, 133, 90, 255], [248, 250, 252, 255]]
+    for sample in swatches:
+        x0, y0, x1, y1 = sample["rect"]
+        pixels = actual[y0:y1, x0:x1].astype(np.int16)
+        sample["max_channel_deviation"] = int(np.abs(pixels - sample["rgba"]).max())
+        assert sample["max_channel_deviation"] == 0
+    (tmp_path / "furniture-measurements.json").write_text(json.dumps({
+        "size": [128, 288], "bounds_crs": scene.recipe.terrain.crs,
+        "scales": scales, "final_swatches": swatches, "furniture_rects": furniture_rects}, indent=2), encoding="utf-8")
 
 
 def _alignment(tmp_path: Path) -> f3d.MapScene:
