@@ -6,10 +6,19 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+### Added
+- Linked plan-view PNG publications from `PublicationRecipe` (#285), with native map frames, classification-derived legends, viewport locators, qualified geographic scale, cache-aware extent series and a real CBS population example.
+- Reusable publication layouts with linked inset maps, subject and declared-time series, and flat-terrain perspective views with camera-ground-footprint locators. Explicit CHRONOS camera sequences retain matching title/end PNGs and moving furniture; perspective scale bars are omitted. Output support and unsupported PDF, SVG, editable-text and print-colour routes are declared per route.
+- A minimal C04 observation-selection module with timezone-aware acquisition/validity rules, explicit hold or no-data policies, visible time/age captions and retained selection tables. C04 and C06 remain partial pending their remaining acceptance and production qualification.
+
 ### Fixed
 - The interactive viewer renders EPSG:4326 and other degree-based Earth-geographic DEMs (#289). It scales the horizontal footprint to local metres from the north-west corner using WGS84 at the footprint centre.
 - The interactive viewer's default (non-PBR) terrain shader draws heights in metres again, matching the PBR and shadow passes (#289). Since 1.33.1 it drew relief at 0.1% of the terrain width, so terrain looked flat. Scenes tuned with `set_z_scale` on the default shader will look taller.
 - Rainier viewer snippets in the README and docs use camera and z-scale values in metres.
+- SPLAT-FUSED: an HDRI `env_map` sky no longer renders as visible blocks. The background interpolates between texels, and the source is kept up to 4096 texels wide instead of 1024. Lighting and the default analytic sky are unchanged. A 4096-wide sky uses 134 MB of the 512 MiB render budget, so large frames may need a smaller `tile`.
+- `ScaleBar` labels distances below one kilometre in metres even with `units="km"`, so a 500-metre bar reads `500 m` instead of `0.5 km` (#285).
+- Simple MapScene legends use declared colours, accept existing `color` entries and reject overflow instead of silently dropping entries. Automatic scale bars reject unsupported views and implausible CRS bounds while allowing ordinary national extents; the approved furniture fixture separates its legend and scale bar and declares its bounds CRS correctly.
+- Deterministic native rendering requests CONCORDIA's eight bind groups, reads TAA depth without optional float32 filtering and rejects visibility rendering when primitive-index support is unavailable. Terrain pages without accepted labels no longer load the legacy text compositor.
 
 ## [1.47.1] - 2026-11-01
 

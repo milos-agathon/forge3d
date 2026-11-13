@@ -644,7 +644,8 @@ jobs:
     name: Test Rust (${{ matrix.os }})
     needs: preflight
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.scope == 'full')
-    runs-on: ${{ matrix.os }}
+    # Keep system PROJ on the image with passing full Rust acceptance.
+    runs-on: ${{ matrix.runner || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -653,6 +654,7 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
           - os: ubuntu-latest
+            runner: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
           - os: macos-latest
             target: x86_64-apple-darwin
@@ -679,15 +681,28 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.runner || matrix.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-${{ matrix.runner || matrix.os }}-cargo-
 
       - name: Install system dependencies (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y libvulkan-dev libproj-dev libsqlite3-dev sqlite3 pkg-config
+
+      - name: Set up Python for Rust linking (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Select Python for PyO3 (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        # Use the selected interpreter's libpython, not a cached system path
+        # from an older Ubuntu runner image.
+        run: echo "PYO3_PYTHON=$(python -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
 
       - name: Run cargo check
         run: cargo check --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe,splat-fusion
@@ -796,7 +811,7 @@ jobs:
     uses: ./.github/workflows/build-wheel.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      runner: ubuntu-latest
+      runner: ubuntu-24.04
       target: x86_64-unknown-linux-gnu
       maturin_args: --release --out dist -i python3.10
       manylinux: 'off'
@@ -892,7 +907,7 @@ jobs:
     uses: ./.github/workflows/test-python-wheel.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      runner: ubuntu-latest
+      runner: ubuntu-24.04
       python_versions: '["3.10", "3.11", "3.12", "3.13"]'
       wheel_artifact: wheels-linux
       test_mode: full
