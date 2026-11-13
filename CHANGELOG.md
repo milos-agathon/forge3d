@@ -12,7 +12,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 - A minimal C04 observation-selection module with timezone-aware acquisition/validity rules, explicit hold or no-data policies, visible time/age captions and retained selection tables. C04 and C06 remain partial pending their remaining acceptance and production qualification.
 
 ### Fixed
-- The interactive viewer renders EPSG:4326 and other Earth-geographic DEMs (#289). Their footprint was taken in degrees against heights in metres, so the terrain became a sub-unit-wide spike and the frame was blank; they are now placed in local metres from their north-west corner, scaled with WGS84 at the footprint centre. Planetary (IAU) geographic CRSs are unchanged.
+- The interactive viewer renders EPSG:4326 and other degree-based Earth-geographic DEMs (#289). It scales the horizontal footprint to local metres from the north-west corner using WGS84 at the footprint centre.
 - The interactive viewer's default (non-PBR) terrain shader draws heights in metres again, matching the PBR and shadow passes (#289). Since 1.33.1 it drew relief at 0.1% of the terrain width, so terrain looked flat. Scenes tuned with `set_z_scale` on the default shader will look taller.
 - Rainier viewer snippets in the README and docs use camera and z-scale values in metres.
 - SPLAT-FUSED: an HDRI `env_map` sky no longer renders as visible blocks. The background interpolates between texels, and the source is kept up to 4096 texels wide instead of 1024. Lighting and the default analytic sky are unchanged. A 4096-wide sky uses 134 MB of the 512 MiB render budget, so large frames may need a smaller `tile`.

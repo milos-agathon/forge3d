@@ -56,6 +56,7 @@ angles, then composites the frames into one image:
 python examples/terrain_viewer_interactive.py ^
   --dem assets/tif/dem_rainier.tif ^
   --width 400 --height 648 ^
+  --cam-phi 0 --cam-theta 55 --cam-fov 65 --z-scale 1.5 ^
   --pbr --msaa 8 ^
   --shadow-technique pcss --shadow-map-res 4096 ^
   --exposure 1.25 ^
