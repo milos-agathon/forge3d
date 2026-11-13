@@ -44,12 +44,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      - uses: dtolnay/rust-toolchain@stable
-        if: runner.os != 'macOS'
-
       # objc2 0.4.1 fails to compile on macOS with Rust 1.100.0.
+      # The evidence verifier requires matching compiler provenance across runners.
       - uses: dtolnay/rust-toolchain@1.99.1
-        if: runner.os == 'macOS'
 
       - name: Install native build and test tooling
         run: python -m pip install --upgrade pip maturin pytest
