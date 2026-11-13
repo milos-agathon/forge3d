@@ -250,7 +250,9 @@ class _BoundRaster:
     def _check_camera(self, scene, size):
         recipe = scene.recipe
         low, high = recipe.terrain.metadata["statistical_height_domain"]
-        params = _build_mapscene_terrain_params(recipe, _load_native_heightmap(recipe.terrain), size)
+        params = _build_mapscene_terrain_params(
+            recipe, _load_native_heightmap(recipe.terrain), size, projection_only=True,
+        )
         if params is None or not callable(getattr(params, "project_terrain_points", None)):
             raise RuntimeError("Native statistical camera projection is unavailable")
         corners = [(u, v, h, 0.0) for (u, v), h in product(product((0., 1.), repeat=2), (low, high))]

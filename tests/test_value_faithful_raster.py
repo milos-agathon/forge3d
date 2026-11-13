@@ -107,7 +107,14 @@ def test_mesh_rejects_cells_finer_than_native_centre_registration(tmp_path):
         binding._resolve()
 
 
-def test_camera_rejects_far_plane_and_partial_viewport_clipping(binding):
+def test_camera_rejects_far_plane_and_partial_viewport_clipping(binding, monkeypatch):
+    # The fast profile has no adapter. Exercise the real native camera math
+    # and fail if preflight tries to allocate either kind of render overlay.
+    def unexpected_gpu_resource(*args, **kwargs):
+        pytest.fail("Camera preflight must not allocate a GPU overlay")
+
+    monkeypatch.setattr(f3d, "Colormap1D", type("Colormap", (), {"from_stops": unexpected_gpu_resource}))
+    monkeypatch.setattr(f3d, "OverlayLayer", type("Overlay", (), {"from_raster_rgba": unexpected_gpu_resource}))
     active = binding._resolve()
     size = (480, 480)
     camera = f3d.OrbitCamera(distance=1200, elevation_deg=0, fov_deg=45)

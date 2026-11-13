@@ -1489,6 +1489,7 @@ def _build_mapscene_terrain_params(
     nodata_height_below: float | None = None,
     chronos_frame_json: str | None = None,
     albedo_path: str | None = None,
+    projection_only: bool = False,
 ) -> Any | None:
     try:
         import forge3d as f3d
@@ -1497,7 +1498,9 @@ def _build_mapscene_terrain_params(
     except Exception:
         return None
 
-    if not all(hasattr(f3d, name) for name in ("Colormap1D", "OverlayLayer", "TerrainRenderParams")):
+    if not hasattr(f3d, "TerrainRenderParams"):
+        return None
+    if not projection_only and not all(hasattr(f3d, name) for name in ("Colormap1D", "OverlayLayer")):
         return None
 
     if nodata_height_below is None:
@@ -1521,32 +1524,36 @@ def _build_mapscene_terrain_params(
     denoise_enabled = _mapscene_denoise_enabled(output)
     settings = _metadata_dict(recipe.lighting.settings)
     preset_name = settings.get("resolved_preset")
-    if preset_name:
-        from .terrain_demo import _build_colormap
+    thematic = None
+    overlays = []
+    if not projection_only:
+        if preset_name:
+            from .terrain_demo import _build_colormap
 
-        colormap = _build_colormap(domain, colormap_name=str(settings.get("colormap", "terrain")), heightmap=heightmap)
-    else:
-        colormap = f3d.Colormap1D.from_stops(
-            stops=[
-                (domain[0], "#243b2f"),
-                ((domain[0] + domain[1]) * 0.5, "#8b7d4d"),
-                (domain[1], "#f5f7fb"),
-            ],
+            colormap = _build_colormap(domain, colormap_name=str(settings.get("colormap", "terrain")), heightmap=heightmap)
+        else:
+            colormap = f3d.Colormap1D.from_stops(
+                stops=[
+                    (domain[0], "#243b2f"),
+                    ((domain[0] + domain[1]) * 0.5, "#8b7d4d"),
+                    (domain[1], "#f5f7fb"),
+                ],
+                domain=domain,
+            )
+        overlay = f3d.OverlayLayer.from_colormap1d(
+            colormap,
+            strength=1.0,
+            offset=0.0,
+            blend_mode="Alpha",
             domain=domain,
         )
-    overlay = f3d.OverlayLayer.from_colormap1d(
-        colormap,
-        strength=1.0,
-        offset=0.0,
-        blend_mode="Alpha",
-        domain=domain,
-    )
-    thematic = _mapscene_thematic_surface(recipe, heightmap.shape)
-    if thematic is not None:
-        if not callable(getattr(f3d.OverlayLayer, "from_raster_rgba", None)):
-            raise MapSceneNativeUnavailable(diagnostic_block(layer="thematic", reason="native thematic terrain color source is unavailable; rebuild the bindings", required_native="OverlayLayer.from_raster_rgba"))
-        styled_layers = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay) and layer.style is not None]
-        overlay = f3d.OverlayLayer.from_raster_rgba(thematic.rgba, strength=styled_layers[0].opacity if styled_layers else 1.0)
+        thematic = _mapscene_thematic_surface(recipe, heightmap.shape)
+        if thematic is not None:
+            if not callable(getattr(f3d.OverlayLayer, "from_raster_rgba", None)):
+                raise MapSceneNativeUnavailable(diagnostic_block(layer="thematic", reason="native thematic terrain color source is unavailable; rebuild the bindings", required_native="OverlayLayer.from_raster_rgba"))
+            styled_layers = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay) and layer.style is not None]
+            overlay = f3d.OverlayLayer.from_raster_rgba(thematic.rgba, strength=styled_layers[0].opacity if styled_layers else 1.0)
+        overlays.append(overlay)
     azimuth, elevation = _sun_angles_from_direction(recipe.lighting.sun_direction)
     # sun_direction carries a compass azimuth (0 = north, 90 = east). The
     # renderer reads a math angle from +X (east) toward +Y in the terrain
@@ -1608,7 +1615,7 @@ def _build_mapscene_terrain_params(
         **_mapscene_lighting_extras(settings),
         clip=clip,
         shadows=_mapscene_shadow_settings(renderer_config.shadows),
-        overlays=[overlay],
+        overlays=overlays,
         aa_samples=max(1, int(output.samples if output is not None else 1)),
         aa_seed=_mapscene_aa_seed(recipe),
         aov=_mapscene_aov_settings(
