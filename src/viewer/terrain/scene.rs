@@ -128,6 +128,31 @@ impl ViewerTerrainData {
         )
     }
 
+    /// Near and far clip planes for the terrain camera.
+    ///
+    /// The near plane is pushed out to half the eye's distance from the
+    /// terrain's bounding box. A fixed near of at most 1.0 left a long lens far
+    /// away (12 deg at ~40,000 units) with depth steps of tens of units at the
+    /// terrain, so the front and back faces of steep walls z-fought into speckle.
+    pub fn clip_planes(&self) -> (f32, f32) {
+        let floor = (self.cam_radius * 0.001).clamp(0.001, 1.0);
+        let far = (self.cam_radius * 10.0).max(10.0);
+        // Generous vertical bounds: overlays and scatter can sit above the
+        // heightfield, water below it.
+        let span = self.world_span_xz.x.max(self.world_span_xz.y);
+        let top = f64::from(self.height_range() * self.z_scale) * 1.5 + 0.05 * span;
+        let lo = DVec3::new(self.world_origin_xz.x, -0.05 * span, self.world_origin_xz.y);
+        let hi = DVec3::new(
+            self.world_origin_xz.x + self.world_span_xz.x,
+            top,
+            self.world_origin_xz.y + self.world_span_xz.y,
+        );
+        let eye = self.camera_eye();
+        let gap = (lo - eye).max(eye - hi).max(DVec3::ZERO).length();
+        let near = floor.max((0.5 * gap) as f32);
+        (near, far.max(near * 2.0))
+    }
+
     pub fn camera_eye_for(target: DVec3, phi_deg: f32, theta_deg: f32, radius: f32) -> DVec3 {
         let phi = phi_deg.to_radians();
         let theta = theta_deg.to_radians();

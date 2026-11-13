@@ -115,7 +115,6 @@ impl ViewerTerrainScene {
                 (vol_target, self.volumetrics_pass.as_mut())
             {
                 let terrain = self.terrain.as_ref().unwrap();
-                let cam_radius = terrain.cam_radius;
                 let terrain_sun_intensity = terrain.sun_intensity;
 
                 if let Err(e) = vol_pass.apply(
@@ -132,8 +131,8 @@ impl ViewerTerrainScene {
                     height,
                     state.view_proj.inverse().to_cols_array_2d(),
                     [state.eye.x, state.eye.y, state.eye.z],
-                    1.0,
-                    cam_radius * 10.0,
+                    state.near,
+                    state.far,
                     [state.sun_dir.x, state.sun_dir.y, state.sun_dir.z],
                     terrain_sun_intensity,
                     [
@@ -182,11 +181,6 @@ impl ViewerTerrainScene {
                 (dof_target, self.dof_pass.as_mut())
             {
                 let _ = dof.get_input_view(width, height, scene_format);
-                let cam_radius = self
-                    .terrain
-                    .as_ref()
-                    .map(|t| t.cam_radius)
-                    .unwrap_or(2000.0);
                 let dof_cfg = dof::DofConfig {
                     focus_distance: self.pbr_config.dof.focus_distance,
                     f_stop: self.pbr_config.dof.f_stop,
@@ -208,8 +202,8 @@ impl ViewerTerrainScene {
                     height,
                     scene_format,
                     &dof_cfg,
-                    1.0,
-                    cam_radius * 10.0,
+                    state.near,
+                    state.far,
                 ) {
                     eprintln!("[terrain] DoF apply failed: {e}");
                 }

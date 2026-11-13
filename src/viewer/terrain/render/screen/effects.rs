@@ -242,8 +242,8 @@ impl ViewerTerrainScene {
                     height,
                     state.view_proj.inverse().to_cols_array_2d(),
                     [state.eye.x, state.eye.y, state.eye.z],
-                    1.0,
-                    state.cam_radius * 10.0,
+                    state.near,
+                    state.far,
                     [state.sun_dir.x, state.sun_dir.y, state.sun_dir.z],
                     terrain.sun_intensity,
                     [
@@ -302,8 +302,8 @@ impl ViewerTerrainScene {
                         height,
                         self.surface_format,
                         &dof_cfg,
-                        1.0,
-                        state.cam_radius * 10.0,
+                        state.near,
+                        state.far,
                     )
                 } else {
                     dof.apply_from_input(
@@ -315,8 +315,8 @@ impl ViewerTerrainScene {
                         height,
                         self.surface_format,
                         &dof_cfg,
-                        1.0,
-                        state.cam_radius * 10.0,
+                        state.near,
+                        state.far,
                     )
                 };
                 if let Err(e) = result {
