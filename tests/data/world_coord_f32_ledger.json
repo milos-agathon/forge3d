@@ -6396,5 +6396,82 @@
     "result_count": 1940,
     "result_digest": "bbc0fe72aadecc3d746f1c4daee24629ea23943e217bd849696b67b7fb8656b0",
     "review": "2026-10-30: Milos explicitly approved this combined freeze when main (PR #255) was merged into PR #172. The merged tree carries the 1936-site NEPHELE integration inventory plus the four splat_fused_env_map env_from_hdr_image radiance and texture narrowings; nothing else changes and no absolute world coordinate is narrowed."
+  },
+  "viewer_terrain_grid_axes": {
+    "review": "PR 299: create_grid_mesh builds a cols x rows terrain mesh (FORGE3D_VIEWER_MAX_TERRAIN_GRID). The single square-grid step and its two texture-coordinate products become one step per axis; all four casts are integer vertex indices narrowed to [0, 1] texture coordinates, never world positions.",
+    "base_count": 1940,
+    "base_digest": "bbc0fe72aadecc3d746f1c4daee24629ea23943e217bd849696b67b7fb8656b0",
+    "result_count": 1941,
+    "result_digest": "9024c8c4e92db70204033bce2801b31baf2c956731c1ec8e28e3163771137261",
+    "removed": [
+      [
+        "src/viewer/terrain/scene/terrain_load.rs",
+        "create_grid_mesh",
+        "as_f32",
+        1,
+        "let inv = 1.0 / (resolution - 1) as f32"
+      ],
+      [
+        "src/viewer/terrain/scene/terrain_load.rs",
+        "create_grid_mesh",
+        "as_f32",
+        2,
+        "let u = x as f32 * inv"
+      ],
+      [
+        "src/viewer/terrain/scene/terrain_load.rs",
+        "create_grid_mesh",
+        "as_f32",
+        3,
+        "let v = y as f32 * inv"
+      ]
+    ],
+    "added": [
+      [
+        "src/viewer/terrain/scene/terrain_load.rs",
+        "create_grid_mesh",
+        "as_f32",
+        1,
+        "let inv_u = 1.0 / (cols - 1) as f32"
+      ],
+      [
+        "src/viewer/terrain/scene/terrain_load.rs",
+        "create_grid_mesh",
+        "as_f32",
+        2,
+        "let inv_v = 1.0 / (rows - 1) as f32"
+      ],
+      [
+        "src/viewer/terrain/scene/terrain_load.rs",
+        "create_grid_mesh",
+        "as_f32",
+        3,
+        "let u = x as f32 * inv_u"
+      ],
+      [
+        "src/viewer/terrain/scene/terrain_load.rs",
+        "create_grid_mesh",
+        "as_f32",
+        4,
+        "let v = y as f32 * inv_v"
+      ]
+    ]
+  },
+  "viewer_terrain_clip_planes": {
+    "added": [
+      [
+        "src/viewer/terrain/scene.rs",
+        "clip_planes",
+        "as_f32",
+        1,
+        "let near = floor.max((0.5 * gap) as f32)"
+      ]
+    ],
+    "base_count": 1941,
+    "base_digest": "9024c8c4e92db70204033bce2801b31baf2c956731c1ec8e28e3163771137261",
+    "removed": [],
+    "result_count": 1942,
+    "result_digest": "9edcc6da84f3a5570286e2d44cd3efd8324c5be35ce7822f61f744d858796b09",
+    "review": "PR 299: ViewerTerrainData::clip_planes pushes the terrain camera's near plane out to half the eye's distance from the terrain bounding box (a fixed near <= 1.0 z-fought steep walls under a long lens). The one cast narrows that scalar f64 distance to the f32 near plane; it is never a world position, which still crosses f64 -> f32 only through Anchor."
   }
 }

@@ -5,6 +5,9 @@ use crate::viewer::ipc::TerrainVolumetricsReport;
 use glam::{DVec2, DVec3};
 
 const MAX_VIEWER_TERRAIN_GRID_RESOLUTION: u32 = 2048;
+/// Opt-in mesh cap for large poster renders. Mesh memory grows with the square
+/// of the grid, so the default stays at MAX_VIEWER_TERRAIN_GRID_RESOLUTION.
+const VIEWER_TERRAIN_GRID_ENV: &str = "FORGE3D_VIEWER_MAX_TERRAIN_GRID";
 
 const WGS84_SEMI_MAJOR_M: f64 = 6_378_137.0;
 const WGS84_ECCENTRICITY_SQ: f64 = 6.694_379_990_141_316e-3;
@@ -265,8 +268,8 @@ impl ViewerTerrainScene {
         );
 
         let heightmap_view = heightmap_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let grid_res = terrain_grid_resolution(width, height);
-        let (vertices, indices) = create_grid_mesh(grid_res);
+        let (grid_cols, grid_rows) = terrain_grid_dims(width, height);
+        let (vertices, indices) = create_grid_mesh(grid_cols, grid_rows);
 
         let vertex_buffer = tracked_create_buffer_init(
             &self.device,
@@ -398,7 +401,7 @@ impl ViewerTerrainScene {
 
         println!(
             "[terrain] Loaded {}x{} DEM, domain: {:.1}..{:.1}, grid={}x{}",
-            width, height, min_h, max_h, grid_res, grid_res
+            width, height, min_h, max_h, grid_cols, grid_rows
         );
         if let Some(scale) = footprint.metres_per_degree {
             println!(
@@ -516,36 +519,74 @@ impl ViewerTerrainScene {
     }
 }
 
+/// Mesh columns x rows for a heightmap. By default a square grid of the short
+/// side, capped at MAX_VIEWER_TERRAIN_GRID_RESOLUTION. With the opt-in
+/// VIEWER_TERRAIN_GRID_ENV cap each axis follows the heightmap (capped), so a
+/// non-square heightmap gets one vertex per texel instead of a resampled lattice.
+fn terrain_grid_dims(width: u32, height: u32) -> (u32, u32) {
+    let (cols, rows) = match terrain_grid_cap_override() {
+        None => {
+            let grid = terrain_grid_resolution(width, height);
+            (grid, grid)
+        }
+        Some(cap) => terrain_grid_dims_with_cap(width, height, cap),
+    };
+    println!("FORGE3D_VIEWER_TERRAIN_GRID grid={cols}x{rows} heightmap={width}x{height}");
+    (cols, rows)
+}
+
 fn terrain_grid_resolution(width: u32, height: u32) -> u32 {
     width
         .min(height)
         .clamp(2, MAX_VIEWER_TERRAIN_GRID_RESOLUTION)
 }
 
-fn create_grid_mesh(resolution: u32) -> (Vec<f32>, Vec<u32>) {
+fn terrain_grid_dims_with_cap(width: u32, height: u32, cap: u32) -> (u32, u32) {
+    (width.clamp(2, cap), height.clamp(2, cap))
+}
+
+fn terrain_grid_cap_override() -> Option<u32> {
+    let raw = std::env::var(VIEWER_TERRAIN_GRID_ENV).ok()?;
+    let cap = parse_terrain_grid_cap(&raw);
+    if cap.is_none() {
+        eprintln!(
+            "FORGE3D_VIEWER_TERRAIN_GRID ignored {VIEWER_TERRAIN_GRID_ENV}={raw:?}: expected an integer from 2 to {}; using the default grid",
+            max_u32_index_grid()
+        );
+    }
+    cap
+}
+
+/// Largest square grid whose u32 index buffer (6 indices per cell) cannot overflow.
+fn max_u32_index_grid() -> u32 {
+    ((u32::MAX / 6) as f64).sqrt() as u32 + 1
+}
+
+fn parse_terrain_grid_cap(raw: &str) -> Option<u32> {
+    raw.trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|cap| (2..=max_u32_index_grid()).contains(cap))
+}
+
+fn create_grid_mesh(cols: u32, rows: u32) -> (Vec<f32>, Vec<u32>) {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
-    let inv = 1.0 / (resolution - 1) as f32;
+    let inv_u = 1.0 / (cols - 1) as f32;
+    let inv_v = 1.0 / (rows - 1) as f32;
 
-    for y in 0..resolution {
-        for x in 0..resolution {
-            let u = x as f32 * inv;
-            let v = y as f32 * inv;
+    for y in 0..rows {
+        for x in 0..cols {
+            let u = x as f32 * inv_u;
+            let v = y as f32 * inv_v;
             vertices.extend_from_slice(&[u, v, u, v]);
         }
     }
 
-    for y in 0..(resolution - 1) {
-        for x in 0..(resolution - 1) {
-            let i = y * resolution + x;
-            indices.extend_from_slice(&[
-                i,
-                i + resolution,
-                i + 1,
-                i + 1,
-                i + resolution,
-                i + resolution + 1,
-            ]);
+    for y in 0..(rows - 1) {
+        for x in 0..(cols - 1) {
+            let i = y * cols + x;
+            indices.extend_from_slice(&[i, i + cols, i + 1, i + 1, i + cols, i + cols + 1]);
         }
     }
 
@@ -555,7 +596,8 @@ fn create_grid_mesh(resolution: u32) -> (Vec<f32>, Vec<u32>) {
 #[cfg(test)]
 mod tests {
     use super::{
-        terrain_footprint_from_info, terrain_grid_resolution, terrain_horizontal_units,
+        create_grid_mesh, parse_terrain_grid_cap, terrain_footprint_from_info,
+        terrain_grid_dims_with_cap, terrain_grid_resolution, terrain_horizontal_units,
         wgs84_metres_per_degree, TerrainHorizontalUnits,
     };
     use crate::gis::raster_info::GeoKeyModel;
@@ -582,6 +624,39 @@ mod tests {
     fn viewer_terrain_grid_resolution_caps_large_heightmaps() {
         assert_eq!(terrain_grid_resolution(11589, 10518), 2048);
         assert_eq!(terrain_grid_resolution(5794, 5259), 2048);
+    }
+
+    #[test]
+    fn viewer_terrain_grid_cap_override_follows_each_axis() {
+        assert_eq!(terrain_grid_dims_with_cap(6144, 5411, 8192), (6144, 5411));
+        assert_eq!(terrain_grid_dims_with_cap(6144, 5411, 4096), (4096, 4096));
+        assert_eq!(terrain_grid_dims_with_cap(3000, 2500, 4096), (3000, 2500));
+    }
+
+    #[test]
+    fn viewer_terrain_grid_mesh_puts_a_vertex_on_every_texel() {
+        let (cols, rows) = (5u32, 3u32);
+        let (vertices, indices) = create_grid_mesh(cols, rows);
+        assert_eq!(vertices.len() as u32, cols * rows * 4);
+        assert_eq!(indices.len() as u32, 6 * (cols - 1) * (rows - 1));
+        // Vertex x maps to texel floor(u * width) = x (the shader's heightmap lookup).
+        for x in 0..cols {
+            let u = vertices[(x * 4) as usize];
+            assert_eq!(((u * cols as f32) as u32).min(cols - 1), x);
+        }
+        assert_eq!(*indices.iter().max().unwrap(), cols * rows - 1);
+    }
+
+    #[test]
+    fn viewer_terrain_grid_cap_override_rejects_unsafe_values() {
+        assert_eq!(parse_terrain_grid_cap(" 4096 "), Some(4096));
+        assert_eq!(parse_terrain_grid_cap("1"), None);
+        assert_eq!(parse_terrain_grid_cap("big"), None);
+        // 6 * (n - 1)^2 indices must fit in u32; the bound is the largest such n.
+        assert_eq!(parse_terrain_grid_cap("30000"), None);
+        let n = super::max_u32_index_grid() as u64;
+        assert!(6 * (n - 1) * (n - 1) <= u32::MAX as u64);
+        assert!(6 * n * n > u32::MAX as u64);
     }
 
     #[test]

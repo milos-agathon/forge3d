@@ -24,6 +24,8 @@ from .legend import Legend, LegendConfig
 from .raster_style import RasterHeightSurfaceStyle as RasterHeightSurfaceStyle, CategoricalRasterStyle as CategoricalRasterStyle, BivariateRasterStyle as BivariateRasterStyle, RasterStyleResult as RasterStyleResult
 from .map_plate import BBox, MapPlate, MapPlateConfig, PlateRegion
 from .publication import PublicationSource as PublicationSource, PublicationExtent as PublicationExtent, PublicationRecipe as PublicationRecipe
+from .publication import PublicationInset as PublicationInset, PublicationLayout as PublicationLayout, PublicationSubject as PublicationSubject, publication_output_support as publication_output_support
+from .value_faithful import ValueFaithfulRasterBinding as ValueFaithfulRasterBinding
 from .north_arrow import NorthArrow, NorthArrowConfig
 from .scale_bar import ScaleBar, ScaleBarConfig
 from .bundle import (
@@ -154,6 +156,14 @@ from .landscape import (
 from .chronos import (
     FlythroughManifest as FlythroughManifest,
     render_flythrough as render_flythrough,
+)
+from .subject_story import (
+    CompiledSubjectShot as CompiledSubjectShot,
+    StoryAnnotation as StoryAnnotation,
+    StoryObstacle as StoryObstacle,
+    SubjectFeature as SubjectFeature,
+    SubjectShotInfeasible as SubjectShotInfeasible,
+    compile_subject_shot as compile_subject_shot,
 )
 from .alignment import (
     alignment_report,

@@ -404,6 +404,7 @@ examples/out/
 examples/output/
 examples/**/*.py
 !examples/c06_population_publication.py
+!examples/c02_amsterdam_value_faithful.py
 !examples/moon_south_pole.py
 !examples/orbis_swiss_alps_descent.py
 !examples/mapscene_thematic_rasters.py
@@ -418,6 +419,14 @@ examples/**/*.py
 !examples/c05_qgis.py
 !examples/c05_qgis_3d.py
 !examples/c05_report.py
+!examples/_chronos_video.py
+!examples/c07_grindelwald_eiger.py
+!examples/c07_swiss_sources.py
+!examples/test_c07_swiss_sources.py
+!examples/c07_unreal/
+examples/c07_unreal/*
+!examples/c07_unreal/*.py
+!examples/c07_unreal/README.md
 !examples/splat_fused_map.py
 tests/test_*example*.py
 tests/test_*examples*.py

@@ -19,6 +19,79 @@ def test_scale_bar_uses_geodesic_distance_when_pyproj_is_available():
     assert meters_per_pixel == pytest.approx(abs(expected_distance) / 200.0, rel=1.0e-6)
 
 
+@pytest.mark.parametrize("bounds,crs", [
+    ((-122.5, 46.6, -121.9, 47.0), "EPSG:32610"),
+    ((3, 50.5, 7.3, 53.7), "EPSG:3035"),
+    ((0, 90, 1, 91), "EPSG:4326"),
+])
+def test_automatic_scale_rejects_bounds_outside_declared_crs(tmp_path, bounds, crs):
+    from dataclasses import replace
+    from forge3d._map_scene_render import _compose_scale_bar
+    scene = _furniture_scene(tmp_path / "invalid.png", furniture=None)
+    scene.recipe.terrain = replace(scene.recipe.terrain, crs=crs, metadata={"bounds": bounds})
+    with pytest.raises(ValueError, match="bounds cannot be validated for CRS"):
+        _compose_scale_bar(np.zeros((224, 128, 4), np.uint8), scene.recipe, {})
+
+
+def test_automatic_scale_uses_registered_bounds_not_graticule_bounds(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from forge3d._map_scene_render import _compose_scale_bar, _validate_scale_bounds
+    from forge3d.scale_bar import ScaleBar
+    # Small projected coordinates can be valid: do not guess units by magnitude.
+    _validate_scale_bounds((0, 0, 1, 1), "EPSG:3857")
+    scene = _furniture_scene(tmp_path / "registered.png", furniture=f3d.MapFurnitureLayer(
+        graticule={"bounds": [-122.5, 46.6, -121.9, 47.0]}))
+    scene.recipe.terrain = replace(scene.recipe.terrain, crs="EPSG:32610",
+        metadata={"bounds": [500000, 5200000, 510000, 5210000]})
+    seen = []
+    original = ScaleBar.compute_meters_per_pixel
+    def measure(bbox, width, **kwargs):
+        seen.append(bbox)
+        return original(bbox, width, **kwargs)
+    monkeypatch.setattr(ScaleBar, "compute_meters_per_pixel", staticmethod(measure))
+    _compose_scale_bar(np.zeros((224, 128, 4), np.uint8), scene.recipe, {"width_px": 100})
+    assert seen[0].west == 500000 and seen[0].crs == "EPSG:32610"
+
+
+@pytest.mark.parametrize("crs,geographic_bounds,geodesic", [
+    ("EPSG:32631", (3, 50.5, 7.3, 53.7), True),  # Netherlands crossing 6 E.
+    ("EPSG:32632", (5.5, 47, 15.5, 55.5), True),  # Germany crossing 12 E.
+    # The native projection engine does not support these two transforms.
+    # Exercise the existing explicit projected-distance option, without fallback.
+    ("EPSG:28992", (2.5, 50.5, 7.5, 54), False),  # RD New with the North Sea.
+    ("EPSG:2056", (5.5, 45.5, 11, 48.5), False),  # LV95 beyond Switzerland.
+])
+def test_automatic_scale_accepts_national_map_edges_outside_area(tmp_path, crs, geographic_bounds, geodesic):
+    from dataclasses import replace
+    from pyproj import CRS, Transformer
+    from forge3d._map_scene_render import _compose_scale_bar, _bounds_edge_samples, _validate_scale_bounds
+    projected = Transformer.from_crs("EPSG:4326", crs, always_xy=True).transform_bounds(*geographic_bounds)
+    inverse = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+    lon, lat = inverse.transform(*np.asarray(_bounds_edge_samples(projected)).T)
+    area = CRS.from_user_input(crs).area_of_use
+    # These fixtures exercise the old edge rejection, not just small valid maps.
+    assert np.any((lon < area.west) | (lon > area.east) | (lat < area.south) | (lat > area.north))
+    centre = inverse.transform((projected[0]+projected[2])/2, (projected[1]+projected[3])/2)
+    assert area.west <= centre[0] <= area.east and area.south <= centre[1] <= area.north
+    _validate_scale_bounds(projected, crs)
+    scene = _furniture_scene(tmp_path / "national.png", furniture=None)
+    scene.recipe.terrain = replace(scene.recipe.terrain, crs=crs, metadata={"bounds": projected})
+    image = np.zeros((224, 128, 4), np.uint8)
+    _compose_scale_bar(image, scene.recipe, {"width_px": 100, "geodesic": geodesic})
+    assert np.any(image)
+
+
+def test_explicit_scale_does_not_infer_crs_or_bounds(tmp_path, monkeypatch):
+    from forge3d import _map_scene_render as compositor
+    scene = _furniture_scene(tmp_path / "measured.png", furniture=None)
+    def unexpected(*args):
+        raise AssertionError("An explicit measured scale must not infer scale from bounds")
+    monkeypatch.setattr(compositor, "_validate_scale_bounds", unexpected)
+    image = np.zeros((224, 128, 4), np.uint8)
+    compositor._compose_scale_bar(image, scene.recipe, {"meters_per_pixel": 358, "width_px": 100})
+    assert np.any(image)
+
+
 def test_graticule_generates_lines_labels_and_explicit_target_crs():
     graticule = generate_graticule(
         GraticuleSpec(bounds=(0.0, 0.0, 2.0, 2.0), interval_deg=1.0, line_steps=4)

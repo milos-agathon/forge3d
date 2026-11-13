@@ -803,7 +803,7 @@ def _mapscene_aov_settings(
 
 
 def _mapscene_unlit_albedo(recipe: "SceneRecipe") -> bool:
-    """Flat thematic maps publish the unlit albedo as the frame, not shaded beauty."""
+    """Thematic publications can use native unlit albedo as the display frame."""
     return bool(_metadata_dict(recipe.lighting.settings).get("unlit_albedo"))
 
 
@@ -1489,6 +1489,7 @@ def _build_mapscene_terrain_params(
     nodata_height_below: float | None = None,
     chronos_frame_json: str | None = None,
     albedo_path: str | None = None,
+    projection_only: bool = False,
 ) -> Any | None:
     try:
         import forge3d as f3d
@@ -1497,7 +1498,9 @@ def _build_mapscene_terrain_params(
     except Exception:
         return None
 
-    if not all(hasattr(f3d, name) for name in ("Colormap1D", "OverlayLayer", "TerrainRenderParams")):
+    if not hasattr(f3d, "TerrainRenderParams"):
+        return None
+    if not projection_only and not all(hasattr(f3d, name) for name in ("Colormap1D", "OverlayLayer")):
         return None
 
     if nodata_height_below is None:
@@ -1509,36 +1512,48 @@ def _build_mapscene_terrain_params(
 
         values = np.asarray(heightmap, dtype=np.float32)
         domain = _heightmap_domain(values[values >= nodata_height_below])
+    statistical_domain = _metadata_dict(recipe.terrain.metadata).get("statistical_height_domain")
+    if statistical_domain is not None:
+        if recipe.terrain.style is None:
+            raise ValueError("A statistical height domain requires a raster height style")
+        low, high = map(float, statistical_domain)
+        if low != 0 or not math.isfinite(high) or high <= low:
+            raise ValueError("Statistical height domain must start at zero and end at a finite positive height")
+        domain = (low, high)
     output = recipe.output
     denoise_enabled = _mapscene_denoise_enabled(output)
     settings = _metadata_dict(recipe.lighting.settings)
     preset_name = settings.get("resolved_preset")
-    if preset_name:
-        from .terrain_demo import _build_colormap
+    thematic = None
+    overlays = []
+    if not projection_only:
+        if preset_name:
+            from .terrain_demo import _build_colormap
 
-        colormap = _build_colormap(domain, colormap_name=str(settings.get("colormap", "terrain")), heightmap=heightmap)
-    else:
-        colormap = f3d.Colormap1D.from_stops(
-            stops=[
-                (domain[0], "#243b2f"),
-                ((domain[0] + domain[1]) * 0.5, "#8b7d4d"),
-                (domain[1], "#f5f7fb"),
-            ],
+            colormap = _build_colormap(domain, colormap_name=str(settings.get("colormap", "terrain")), heightmap=heightmap)
+        else:
+            colormap = f3d.Colormap1D.from_stops(
+                stops=[
+                    (domain[0], "#243b2f"),
+                    ((domain[0] + domain[1]) * 0.5, "#8b7d4d"),
+                    (domain[1], "#f5f7fb"),
+                ],
+                domain=domain,
+            )
+        overlay = f3d.OverlayLayer.from_colormap1d(
+            colormap,
+            strength=1.0,
+            offset=0.0,
+            blend_mode="Alpha",
             domain=domain,
         )
-    overlay = f3d.OverlayLayer.from_colormap1d(
-        colormap,
-        strength=1.0,
-        offset=0.0,
-        blend_mode="Alpha",
-        domain=domain,
-    )
-    thematic = _mapscene_thematic_surface(recipe, heightmap.shape)
-    if thematic is not None:
-        if not callable(getattr(f3d.OverlayLayer, "from_raster_rgba", None)):
-            raise MapSceneNativeUnavailable(diagnostic_block(layer="thematic", reason="native thematic terrain color source is unavailable; rebuild the bindings", required_native="OverlayLayer.from_raster_rgba"))
-        styled_layers = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay) and layer.style is not None]
-        overlay = f3d.OverlayLayer.from_raster_rgba(thematic.rgba, strength=styled_layers[0].opacity if styled_layers else 1.0)
+        thematic = _mapscene_thematic_surface(recipe, heightmap.shape)
+        if thematic is not None:
+            if not callable(getattr(f3d.OverlayLayer, "from_raster_rgba", None)):
+                raise MapSceneNativeUnavailable(diagnostic_block(layer="thematic", reason="native thematic terrain color source is unavailable; rebuild the bindings", required_native="OverlayLayer.from_raster_rgba"))
+            styled_layers = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay) and layer.style is not None]
+            overlay = f3d.OverlayLayer.from_raster_rgba(thematic.rgba, strength=styled_layers[0].opacity if styled_layers else 1.0)
+        overlays.append(overlay)
     azimuth, elevation = _sun_angles_from_direction(recipe.lighting.sun_direction)
     # sun_direction carries a compass azimuth (0 = north, 90 = east). The
     # renderer reads a math angle from +X (east) toward +Y in the terrain
@@ -1550,7 +1565,10 @@ def _build_mapscene_terrain_params(
     ibl = settings.get("ibl") if isinstance(settings.get("ibl"), Mapping) else {}
     sun = settings.get("sun") if isinstance(settings.get("sun"), Mapping) else {}
     terrain_span = max(1.0, _terrain_scene_diagonal(recipe.terrain))
-    clip_far = max(6000.0, terrain_span * 1.5)
+    clip = (0.1, max(6000.0, terrain_span * 1.5))
+    if statistical_domain is not None:
+        clip = (recipe.camera.near if recipe.camera.near is not None else clip[0],
+                recipe.camera.far if recipe.camera.far is not None else clip[1])
     preset_albedo = "mix" if preset_name else "colormap"
     preset_colormap_strength = 0.5 if preset_name else 1.0
     configured_colormap_strength = settings.get("colormap_strength")
@@ -1595,9 +1613,9 @@ def _build_mapscene_terrain_params(
         fov_y_deg=float(recipe.camera.fov_deg),
         camera_mode=camera_mode,
         **_mapscene_lighting_extras(settings),
-        clip=(0.1, clip_far),
+        clip=clip,
         shadows=_mapscene_shadow_settings(renderer_config.shadows),
-        overlays=[overlay],
+        overlays=overlays,
         aa_samples=max(1, int(output.samples if output is not None else 1)),
         aa_seed=_mapscene_aa_seed(recipe),
         aov=_mapscene_aov_settings(
@@ -1995,9 +2013,13 @@ def _render_terrain_renderer_result_impl(
         # because labels request terrain occlusion; render must be a pure
         # consumer of that compiled plan.
         unlit_albedo = _mapscene_unlit_albedo(recipe)
-        if unlit_albedo and (needs_offline or requested_effects
-                             or _mapscene_effective_camera_mode(recipe) != "screen"):
-            raise ValueError("unlit_albedo supports only one-shot flat screen views without effects")
+        if unlit_albedo:
+            mode = _mapscene_effective_camera_mode(recipe)
+            if needs_offline or requested_effects or mode not in {"screen", "mesh:zup:north"}:
+                raise ValueError("unlit_albedo supports only one-shot screen or mesh:zup:north views without effects")
+            if mode == "mesh:zup:north" and recipe.terrain.style is None:
+                from ._map_scene_projection import flat_ground_footprint_uv
+                flat_ground_footprint_uv(recipe, heightmap, params)
         needs_aov = bool(output.aovs) or emit_provenance or unlit_albedo
         if requested_effects and int(output.bit_depth)!=8:
             _mapscene_pipeline_block(requested_effects,"interactive output uses RGBA8; the requested bit depth has no matching GPU output transform")
@@ -3255,6 +3277,16 @@ def _fade_label_run(base: Any, opaque: Any, alpha: float) -> Any:
     return np.ascontiguousarray(np.clip(faded, 0.0, 255.0).astype(np.uint8))
 
 
+def _native_glyph_box(
+    anchor: tuple[int, int], origin: Sequence[float], glyph: Mapping[str, Any],
+    render_size: float, atlas_font_size: float,
+) -> tuple[float, float, float, float]:
+    scale = render_size / atlas_font_size
+    x = float(anchor[0]) + float(origin[0]) * render_size + float(glyph["ox"]) * scale
+    y = float(anchor[1]) + float(origin[1]) * render_size + float(glyph["oy"]) * scale
+    return x, y, float(glyph["w"]) * scale, float(glyph["h"]) * scale
+
+
 def _mapscene_native_label_batches(
     recipe: "SceneRecipe", plans: Mapping[str, Any], width: int, height: int, *,
     atlas_sources: Mapping[str, tuple[Path, Path, bool]] | None = None,
@@ -3421,10 +3453,9 @@ def _mapscene_native_label_batches(
                     glyph_y = float(glyph["y"])
                     glyph_w = float(glyph["w"])
                     glyph_h = float(glyph["h"])
-                    x = float(anchor_x) + float(origin[0]) * render_size + float(glyph["ox"]) * atlas_scale
-                    y = float(anchor_y) + float(origin[1]) * render_size + float(glyph["oy"]) * atlas_scale
-                    w = glyph_w * atlas_scale
-                    h = glyph_h * atlas_scale
+                    x, y, w, h = _native_glyph_box(
+                        (anchor_x, anchor_y), origin, glyph, render_size, atlas_font_size
+                    )
                     rotation = float(positioned_glyph.get("rotation",0.0))
                     if rotation:
                         # The shader rotates around the rectangle centre. Move
@@ -3502,6 +3533,8 @@ def _composite_native_label_layers(
     scene_factory: Any | None = None,
     atlas_data: Mapping[str, tuple[Any, Mapping[str, Any]]] | None = None,
 ) -> tuple[Any, bool]:
+    if not _needs_native_label_composite(recipe, plans):
+        return base, False
     scene_cls = _native_scene_class()
     if scene_cls is None:
         return base, False

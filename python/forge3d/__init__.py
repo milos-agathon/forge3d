@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.47.1"
+__version__ = "1.48.0"
 version = __version__
 
 import numpy as np
@@ -509,7 +509,9 @@ from . import media
 # P4: Map Plate / Creator Workflow
 # -----------------------------------------------------------------------------
 from .map_plate import MapPlate, MapPlateConfig, BBox, PlateRegion
-from .publication import PublicationSource, PublicationExtent, PublicationRecipe
+from .publication import (PublicationSource, PublicationExtent, PublicationRecipe,
+                          PublicationInset, PublicationLayout, PublicationSubject, publication_output_support)
+from .value_faithful import ValueFaithfulRasterBinding
 from .legend import Legend, LegendConfig
 from .raster_style import RasterHeightSurfaceStyle, CategoricalRasterStyle, BivariateRasterStyle, RasterStyleResult
 from .scale_bar import ScaleBar, ScaleBarConfig
@@ -717,6 +719,8 @@ from .preparation import (
 )
 from .landscape import LandscapeLayout, export_landscape, verify_landscape_import
 from .chronos import FlythroughManifest, render_flythrough
+from .subject_story import (CompiledSubjectShot, StoryAnnotation, StoryObstacle, SubjectFeature,
+                            SubjectShotInfeasible, compile_subject_shot)
 from .alignment import (
     alignment_report,
     alignment_residual,
@@ -967,6 +971,11 @@ __all__ = [
     "PublicationSource",
     "PublicationExtent",
     "PublicationRecipe",
+    "PublicationInset",
+    "PublicationLayout",
+    "PublicationSubject",
+    "publication_output_support",
+    "ValueFaithfulRasterBinding",
     "BBox",
     "PlateRegion",
     "Legend",
@@ -1095,6 +1104,12 @@ __all__ = [
     "render_compiled_frame",
     "FlythroughManifest",
     "render_flythrough",
+    "CompiledSubjectShot",
+    "StoryAnnotation",
+    "StoryObstacle",
+    "SubjectFeature",
+    "SubjectShotInfeasible",
+    "compile_subject_shot",
     "recipe_manifest",
     "PreparationError",
     "PreparationGrid",
