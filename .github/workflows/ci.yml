@@ -1402,7 +1402,7 @@ jobs:
           $dir = Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR "c06"
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
           $junit = Join-Path $dir "junit.xml"
-          python -m pytest tests/test_publication.py tests/test_publication_gpu.py -v --tb=short --junitxml="$junit"
+          python -m pytest tests/test_publication.py tests/test_publication_gpu.py tests/test_value_faithful_raster.py -v --tb=short --junitxml="$junit"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/assert_junit_zero_skips.py "$junit"
           exit $LASTEXITCODE

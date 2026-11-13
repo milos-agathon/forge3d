@@ -14,6 +14,7 @@ def test_fast_profile_executes_publication_regressions():
     args = module.build_pytest_args("fast", [])
     assert "tests/test_publication.py" in args
     assert "tests/test_publication_ci.py" in args
+    assert "tests/test_value_faithful_raster.py" in args
     assert "tests/test_scale_bar_projected_units.py" in args
     workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     fast_job = workflow.split("  test-fast-contract:", 1)[1].split("  test-orbis-wasm:", 1)[0]
@@ -26,4 +27,5 @@ def test_physical_gpu_lane_executes_publication_with_zero_skips():
     step = workflow.split("- name: Run C06 publication physical GPU gate", 1)[1].split("- name:", 1)[0]
     assert "FORGE3D_RUN_GPU_ANAMNESIS: '1'" in step
     assert "pytest tests/test_publication.py tests/test_publication_gpu.py" in step
+    assert "tests/test_value_faithful_raster.py" in step
     assert 'assert_junit_zero_skips.py "$junit"' in step

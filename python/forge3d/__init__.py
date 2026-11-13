@@ -511,6 +511,7 @@ from . import media
 from .map_plate import MapPlate, MapPlateConfig, BBox, PlateRegion
 from .publication import (PublicationSource, PublicationExtent, PublicationRecipe,
                           PublicationInset, PublicationLayout, PublicationSubject, publication_output_support)
+from .value_faithful import ValueFaithfulRasterBinding
 from .legend import Legend, LegendConfig
 from .raster_style import RasterHeightSurfaceStyle, CategoricalRasterStyle, BivariateRasterStyle, RasterStyleResult
 from .scale_bar import ScaleBar, ScaleBarConfig
@@ -973,6 +974,7 @@ __all__ = [
     "PublicationLayout",
     "PublicationSubject",
     "publication_output_support",
+    "ValueFaithfulRasterBinding",
     "BBox",
     "PlateRegion",
     "Legend",

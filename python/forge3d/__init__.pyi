@@ -25,6 +25,7 @@ from .raster_style import RasterHeightSurfaceStyle as RasterHeightSurfaceStyle, 
 from .map_plate import BBox, MapPlate, MapPlateConfig, PlateRegion
 from .publication import PublicationSource as PublicationSource, PublicationExtent as PublicationExtent, PublicationRecipe as PublicationRecipe
 from .publication import PublicationInset as PublicationInset, PublicationLayout as PublicationLayout, PublicationSubject as PublicationSubject, publication_output_support as publication_output_support
+from .value_faithful import ValueFaithfulRasterBinding as ValueFaithfulRasterBinding
 from .north_arrow import NorthArrow, NorthArrowConfig
 from .scale_bar import ScaleBar, ScaleBarConfig
 from .bundle import (

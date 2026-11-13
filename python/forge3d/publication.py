@@ -40,7 +40,7 @@ def _bbox(b: BBox) -> None:
         raise ValueError("Publication bounds must be finite with positive area; no antimeridian wrapping")
 
 
-def _check_source_metadata(path: Path, year: str) -> None:
+def _check_source_metadata(path: Path, year: str, *, expected_tags=None) -> None:
     """Validate embedded GDAL metadata without decoding or transforming pixels."""
     from PIL.TiffImagePlugin import ImageFileDirectory_v2
     from xml.etree import ElementTree
@@ -56,10 +56,8 @@ def _check_source_metadata(path: Path, year: str) -> None:
         stream.seek(directory.next)
         directory.load(stream)
         metadata = directory.get(42112)  # GDAL_METADATA TIFF tag.
-    if metadata is None:
-        return
     try:
-        items = ElementTree.fromstring(metadata).findall("Item")
+        items = [] if metadata is None else ElementTree.fromstring(metadata).findall("Item")
     except (ElementTree.ParseError, TypeError) as exc:
         raise ValueError("Publication GeoTIFF metadata is unreadable") from exc
     for item in items:
@@ -73,6 +71,11 @@ def _check_source_metadata(path: Path, year: str) -> None:
                 raise ValueError("Publication GeoTIFF scale/offset must be identity; decode values before publishing")
         if item.get("name") == "observation_year" and (item.text or "").strip() != year.strip():
             raise ValueError("Publication source year differs from the GeoTIFF observation_year tag")
+    if expected_tags:
+        tags = {item.get("name"): item.text for item in items if item.get("sample") is None}
+        for name, value in expected_tags.items():
+            if tags.get(name) != value:
+                raise ValueError(f"Prepared GeoTIFF requires {name}={value!r}")
 
 
 @dataclass(frozen=True)
@@ -308,39 +311,7 @@ class PublicationRecipe:
         return receipts
 
     def _read(self):
-        from pyproj import CRS, Geod  # Require the geodesic backend; no approximate fallback.
-        from .crs import transform_coords
-
-        description = self.source.description()
-        path = Path(self.source.path)
-        source_sha = hashlib.sha256(path.read_bytes()).hexdigest()
-        loaded = gis.read_raster(path, masked=True)
-        info = loaded["info"]
-        values = np.asarray(loaded["array"])
-        if values.ndim != 3 or values.shape[0] != 1:
-            raise ValueError("Publication requires a single-band GeoTIFF")
-        _check_source_metadata(path, self.source.year)
-        values = values[0]
-        valid = np.asarray(loaded["mask"], dtype=bool).reshape(values.shape) & np.isfinite(values)
-        authority = info.get("crs_authority")
-        crs = f"{authority['name']}:{authority['code']}" if authority else info.get("crs_wkt")
-        if not crs or not info.get("transform"):
-            raise ValueError("Publication requires explicit CRS and affine registration")
-        axes = CRS.from_user_input(crs)
-        if not axes.is_projected or any(a.unit_conversion_factor != 1 for a in axes.axis_info):
-            raise ValueError("Publication requires a projected CRS with metre axes")
-        a, b, x, d, e, y = info["transform"]
-        if b != 0 or d != 0 or a <= 0 or e >= 0:
-            raise ValueError("Publication requires a north-up grid; rotated/skewed grids are unsupported")
-        bounds = BBox(x, y + e * values.shape[0], x + a * values.shape[1], y, crs)
-        _bbox(bounds)
-        # Preflight the same transform/backend used by ScaleBar, which otherwise
-        # has a legacy approximate fallback. Unsupported CRSs fail here.
-        transform_coords(np.array([[bounds.west, bounds.center_lat],
-                                   [bounds.east, bounds.center_lat]]), crs, "EPSG:4326")
-        Geod(ellps="WGS84")
-        description.update(sha256=source_sha, grid=asdict(bounds), transform=list(info["transform"]))
-        return values.copy(), valid.copy(), bounds, (a, -e), description
+        return _read_publication_source(self.source)
 
     @staticmethod
     def _window(bounds, grid, resolution, shape):
@@ -404,17 +375,7 @@ class PublicationRecipe:
         return max(1, round(bounds.width * factor)), max(1, round(bounds.height * factor))
 
     def _scene(self, classes, style, bounds, size, description):
-        return MapScene(
-            terrain=TerrainSource(data=np.zeros(classes.shape, np.float32), crs=bounds.crs,
-                metadata={"bounds": [bounds.west, bounds.south, bounds.east, bounds.north],
-                          "resolution": [bounds.width / classes.shape[1], bounds.height / classes.shape[0]]}),
-            layers=[RasterOverlay("publication", data=classes, style=style, crs=bounds.crs,
-                                  metadata={"source": description})],
-            camera=OrbitCamera(),
-            # The lit beauty frame is shaded and tone-mapped, so its colours do
-            # not match the legend. The frame itself is the native unlit albedo.
-            lighting=LightingPreset(settings={"unlit_albedo": True, "cli_params": {"camera_mode": "screen"}}),
-            output=OutputSpec(width=size[0], height=size[1]))
+        return _publication_scene(classes, style, bounds, size, description, record_dimensions=False)
 
     def _page_scene(self, classes, style, page, size, description):
         scene = self._scene(classes, style, page.bounds, size, description)
@@ -445,12 +406,7 @@ class PublicationRecipe:
             raise ValueError("Native publication frame dimensions do not match the requested viewport")
         # Fresh or reused, every drawn colour must be a legend colour, up to the
         # 8-bit rounding of the native half-float albedo; otherwise the legend lies.
-        palette = np.array(list(style.palette.values()), np.int16)
-        colours = np.unique(pixels.reshape(-1, 4), axis=0).astype(np.int16)
-        deviation = int(np.abs(colours[:, None] - palette[None]).max(axis=2).min(axis=1).max())
-        if deviation > _LEGEND_TOLERANCE:
-            raise ValueError(f"Native map colours differ from the legend by {deviation} levels")
-        return deviation
+        return _check_frame_palette(pixels, style.palette.values())
 
     def render_series(self, pages: Sequence[PublicationExtent], directory: str | Path,
                       *, cache: str | Path | None = None,
@@ -678,6 +634,75 @@ class PublicationRecipe:
         return receipts
 
 
+def _read_publication_source(source, *, require_scale=True, expected_tags=None):
+    from pyproj import CRS
+
+    description = source.description()
+    path = Path(source.path)
+    source_sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    loaded = gis.read_raster(path, masked=True)
+    info = loaded["info"]
+    values = np.asarray(loaded["array"])
+    if values.ndim != 3 or values.shape[0] != 1:
+        raise ValueError("Publication requires a single-band GeoTIFF")
+    _check_source_metadata(path, source.year, expected_tags=expected_tags)
+    values = values[0]
+    valid = np.asarray(loaded["mask"], dtype=bool).reshape(values.shape) & np.isfinite(values)
+    authority = info.get("crs_authority")
+    crs = f"{authority['name']}:{authority['code']}" if authority else info.get("crs_wkt")
+    if not crs or not info.get("transform"):
+        raise ValueError("Publication requires explicit CRS and affine registration")
+    axes = CRS.from_user_input(crs)
+    if not axes.is_projected or any(a.unit_conversion_factor != 1 for a in axes.axis_info):
+        raise ValueError("Publication requires a projected CRS with metre axes")
+    a, b, x, d, e, y = info["transform"]
+    if b != 0 or d != 0 or a <= 0 or e >= 0:
+        raise ValueError("Publication requires a north-up grid; rotated/skewed grids are unsupported")
+    bounds = BBox(x, y + e * values.shape[0], x + a * values.shape[1], y, crs)
+    _bbox(bounds)
+    if require_scale:
+        from .crs import transform_coords
+        from pyproj import Geod
+
+        # Preflight the same transform used by ScaleBar, which has a legacy
+        # approximate fallback. Unsupported CRSs fail here.
+        transform_coords(np.array([[bounds.west, bounds.center_lat],
+                                   [bounds.east, bounds.center_lat]]), crs, "EPSG:4326")
+        Geod(ellps="WGS84")
+    description.update(sha256=source_sha, grid=asdict(bounds), transform=list(info["transform"]))
+    if expected_tags:
+        description["nodata"] = info.get("nodata_per_band")
+    return values.copy(), valid.copy(), bounds, (a, -e), description
+
+
+def _publication_scene(classes, style, bounds, size, description, *, values=None,
+                       height_style=None, camera=None, camera_mode="screen", aovs=(),
+                       record_dimensions=True):
+    rows, cols = classes.shape
+    metadata = {"bounds": [bounds.west, bounds.south, bounds.east, bounds.north],
+                "resolution": [bounds.width / cols, bounds.height / rows]}
+    if record_dimensions:
+        metadata.update(width=cols, height=rows)
+    return MapScene(
+        terrain=TerrainSource(data=np.zeros(classes.shape, np.float32) if values is None else values,
+            style=height_style, crs=bounds.crs, nodata_policy="preserve" if height_style else "fill",
+            metadata=metadata),
+        layers=[RasterOverlay("publication", data=classes, style=style, crs=bounds.crs,
+                              metadata={"source": description})],
+        camera=OrbitCamera() if camera is None else camera,
+        lighting=LightingPreset(settings={"unlit_albedo": True, "cli_params": {"camera_mode": camera_mode}}),
+        output=OutputSpec(width=size[0], height=size[1], aovs=aovs))
+
+
+def _check_frame_palette(pixels, palette):
+    palette = np.array(list(palette), np.int16)
+    colours = np.unique(pixels.reshape(-1, 4), axis=0).astype(np.int16)
+    deviation = int(np.abs(colours[:, None] - palette[None]).max(axis=2).min(axis=1).max())
+    if deviation > _LEGEND_TOLERANCE:
+        raise ValueError(f"Native map colours differ from the legend by {deviation} levels")
+    return deviation
+
+
 def _distinct_ids(values):
     if (not values or any(not isinstance(v, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", v) for v in values)
             or len({v.casefold() for v in values}) != len(values)):
@@ -721,13 +746,19 @@ def _text_block(image, text, origin, width, height, font_size):
     return len(lines) * line_height
 
 
-def _sidebar(legend, locator, footprint, width, height):
-    canvas = np.full((height, width, 4), 255, np.uint8)
+def _legend_block(canvas, legend):
+    height, width = canvas.shape[:2]
     y = _text_block(canvas, legend["units"], (15, 0), width - 30, height, 25) + 15
     for entry in legend["entries"]:
         canvas[y:y + 24, 15:45] = entry["rgba"]
         used = _text_block(canvas, entry["label"], (60, y - 2), width - 75, height - y, 22)
         y += max(30, used) + 10
+    return y
+
+
+def _sidebar(legend, locator, footprint, width, height):
+    canvas = np.full((height, width, 4), 255, np.uint8)
+    y = _legend_block(canvas, legend)
     y += 16
     y += _text_block(canvas, "Locator / grid north up", (15, y), width - 30, height - y, 22) + 8
     h, w = locator.shape[:2]
