@@ -803,7 +803,7 @@ def _mapscene_aov_settings(
 
 
 def _mapscene_unlit_albedo(recipe: "SceneRecipe") -> bool:
-    """Flat thematic maps publish the unlit albedo as the frame, not shaded beauty."""
+    """Thematic publications can use native unlit albedo as the display frame."""
     return bool(_metadata_dict(recipe.lighting.settings).get("unlit_albedo"))
 
 
@@ -1509,6 +1509,14 @@ def _build_mapscene_terrain_params(
 
         values = np.asarray(heightmap, dtype=np.float32)
         domain = _heightmap_domain(values[values >= nodata_height_below])
+    statistical_domain = _metadata_dict(recipe.terrain.metadata).get("statistical_height_domain")
+    if statistical_domain is not None:
+        if recipe.terrain.style is None:
+            raise ValueError("A statistical height domain requires a raster height style")
+        low, high = map(float, statistical_domain)
+        if low != 0 or not math.isfinite(high) or high <= low:
+            raise ValueError("Statistical height domain must start at zero and end at a finite positive height")
+        domain = (low, high)
     output = recipe.output
     denoise_enabled = _mapscene_denoise_enabled(output)
     settings = _metadata_dict(recipe.lighting.settings)
@@ -1550,7 +1558,10 @@ def _build_mapscene_terrain_params(
     ibl = settings.get("ibl") if isinstance(settings.get("ibl"), Mapping) else {}
     sun = settings.get("sun") if isinstance(settings.get("sun"), Mapping) else {}
     terrain_span = max(1.0, _terrain_scene_diagonal(recipe.terrain))
-    clip_far = max(6000.0, terrain_span * 1.5)
+    clip = (0.1, max(6000.0, terrain_span * 1.5))
+    if statistical_domain is not None:
+        clip = (recipe.camera.near if recipe.camera.near is not None else clip[0],
+                recipe.camera.far if recipe.camera.far is not None else clip[1])
     preset_albedo = "mix" if preset_name else "colormap"
     preset_colormap_strength = 0.5 if preset_name else 1.0
     configured_colormap_strength = settings.get("colormap_strength")
@@ -1595,7 +1606,7 @@ def _build_mapscene_terrain_params(
         fov_y_deg=float(recipe.camera.fov_deg),
         camera_mode=camera_mode,
         **_mapscene_lighting_extras(settings),
-        clip=(0.1, clip_far),
+        clip=clip,
         shadows=_mapscene_shadow_settings(renderer_config.shadows),
         overlays=[overlay],
         aa_samples=max(1, int(output.samples if output is not None else 1)),
@@ -1995,9 +2006,11 @@ def _render_terrain_renderer_result_impl(
         # because labels request terrain occlusion; render must be a pure
         # consumer of that compiled plan.
         unlit_albedo = _mapscene_unlit_albedo(recipe)
+        camera_mode = _mapscene_effective_camera_mode(recipe)
+        statistical_mesh = camera_mode == "mesh:zup:north" and recipe.terrain.style is not None
         if unlit_albedo and (needs_offline or requested_effects
-                             or _mapscene_effective_camera_mode(recipe) != "screen"):
-            raise ValueError("unlit_albedo supports only one-shot flat screen views without effects")
+                             or (camera_mode != "screen" and not statistical_mesh)):
+            raise ValueError("unlit_albedo requires a one-shot screen or styled Z-up mesh view without effects")
         needs_aov = bool(output.aovs) or emit_provenance or unlit_albedo
         if requested_effects and int(output.bit_depth)!=8:
             _mapscene_pipeline_block(requested_effects,"interactive output uses RGBA8; the requested bit depth has no matching GPU output transform")

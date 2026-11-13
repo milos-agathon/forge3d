@@ -35,6 +35,7 @@ FAST_LANE_FILES = [
     "tests/test_api_contracts.py",
     "tests/test_publication.py",
     "tests/test_publication_ci.py",
+    "tests/test_value_faithful_raster.py",
     "tests/test_scale_bar_projected_units.py",
     "tests/test_native_capabilities.py",
     "tests/test_solar_spa.py",

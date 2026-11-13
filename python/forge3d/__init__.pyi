@@ -24,6 +24,7 @@ from .legend import Legend, LegendConfig
 from .raster_style import RasterHeightSurfaceStyle as RasterHeightSurfaceStyle, CategoricalRasterStyle as CategoricalRasterStyle, BivariateRasterStyle as BivariateRasterStyle, RasterStyleResult as RasterStyleResult
 from .map_plate import BBox, MapPlate, MapPlateConfig, PlateRegion
 from .publication import PublicationSource as PublicationSource, PublicationExtent as PublicationExtent, PublicationRecipe as PublicationRecipe
+from .value_faithful import ValueFaithfulRasterBinding as ValueFaithfulRasterBinding
 from .north_arrow import NorthArrow, NorthArrowConfig
 from .scale_bar import ScaleBar, ScaleBarConfig
 from .bundle import (
