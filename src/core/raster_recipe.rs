@@ -3,6 +3,9 @@ use crate::core::overlay_layer::OverlayLayer;
 use crate::core::resource_tracker::{
     tracked_create_buffer, tracked_create_buffer_init, TrackedBuffer, TrackedTexture,
 };
+use crate::core::shader_registry::{
+    create_labeled_shader_module, try_create_compute_pipeline_scoped,
+};
 use crate::terrain::ColormapLUT;
 use numpy::{IntoPyArray, PyReadonlyArray2, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -156,19 +159,27 @@ impl ResidentRasterRecipe {
             ));
         }
         let (normalize, classify) = scoped(ctx, || {
-            let shader = ctx
-                .device
-                .create_shader_module(wgpu::include_wgsl!("../shaders/raster_recipe.wgsl"));
-            let pipeline = |entry_point| {
-                ctx.device
-                    .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                        label: Some(entry_point),
+            let shader = create_labeled_shader_module(
+                &ctx.device,
+                "raster_recipe.shader",
+                include_str!("../shaders/raster_recipe.wgsl"),
+            );
+            let pipeline = |label, entry_point| {
+                try_create_compute_pipeline_scoped(
+                    &ctx.device,
+                    &wgpu::ComputePipelineDescriptor {
+                        label: Some(label),
                         layout: None,
                         module: &shader,
                         entry_point,
-                    })
+                    },
+                )
+                .map_err(gpu_error)
             };
-            Ok((pipeline("normalize"), pipeline("classify")))
+            Ok((
+                pipeline("raster_recipe.normalize", "normalize")?,
+                pipeline("raster_recipe.classify", "classify")?,
+            ))
         })?;
         Ok(Self {
             normalize,
