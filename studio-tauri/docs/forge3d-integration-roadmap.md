@@ -1156,7 +1156,7 @@ camera moves and cascade/light-size/ambient-occlusion are not ported
 deltas on Mount Fuji at 512² against the starter look (|Δ|>8, changed
 samples): **outdoor_sun 159,556** (exposure 1.0), **rainier_showcase
 206,585** (sun 135°/25°, 4.0), **rainier_relief 66,613** (zScale 1.5),
-**studio_pbr 158,376** (sun 6.0), **toon_viz 159,585** (IBL 0) — pinned by
+**studio_pbr 257,284** (sun 6.0, IBL off, flat backdrop — the preset's atmosphere-off mapped to the sky toggle; 102,960 of those samples are the sky alone), **toon_viz 159,585** (IBL 0) — pinned by
 the recipe conformance tests in `tests/test_studio_render_service.py`.
 
 ### 5.34 The stranger-installable deb, with honest engine discovery (0.5 day) — **done**

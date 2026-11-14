@@ -51,7 +51,7 @@ Presets ship as named recipes (UI + tests + measured deltas) and the deb passes 
 presets are named recipes under Render → "Look presets"; one undoable `Batch`
 per recipe; tooltip names the engine preset and deviations; conformance tests
 with measured deltas (outdoor_sun 159,556, rainier_showcase 206,585,
-rainier_relief 66,613, studio_pbr 158,376, toon_viz 159,585 changed samples at
+rainier_relief 66,613, studio_pbr 257,284, toon_viz 159,585 changed samples at
 512², Fuji), plus a node-lane payload test (`src/state/recipes.test.ts`)
 that applies each recipe to a starter-like project and asserts the exact
 command batch (render settings, sun specs, angles, terrain exaggeration) —

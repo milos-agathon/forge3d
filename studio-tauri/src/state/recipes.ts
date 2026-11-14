@@ -112,7 +112,8 @@ export const RECIPES: Recipe[] = [
     note:
       "Cross-light from 135° azimuth at 25° elevation, PCSS 4k shadows, IBL 0.3 so " +
       "shadows dominate, relief ×1.35. Camera moves omitted — recipe sets the look, " +
-      "not the framing. Cascades/light-size are not ported (not available on the terrain pipe).",
+      "not the framing. Cascades/light-size/ambient occlusion are not ported " +
+      "(no terrain-pipe or Rendered-AO control); the preset's builtin clear_sky env maps to Studio's built-in sky at the same 0.3.",
     build: (project) => {
       const terrain = findTerrain(project);
       const sun = withSun(project);
@@ -152,7 +153,8 @@ export const RECIPES: Recipe[] = [
     note:
       "Low 18° sun from 225°, PCSS 4k, IBL 0.25 so relief dominates, relief ×1.5. " +
       "Camera offspring of the upstream preset (mesh view, 65° theta/45° phi) is omitted — " +
-      "recipe sets the look, not the framing. Cascades/light-size/ambient-occlusion not ported.",
+      "recipe sets the look, not the framing. Cascades/light-size/ambient-occlusion not ported; " +
+      "the preset's builtin clear_sky env maps to Studio's built-in sky at the same 0.25.",
     build: (project) => {
       const terrain = findTerrain(project);
       const sun = withSun(project);
@@ -190,7 +192,8 @@ export const RECIPES: Recipe[] = [
     name: "Studio PBR",
     enginePreset: "studio_pbr",
     note:
-      "Stage-key look: exposure 1.0, 2×2048 PCF shadows, IBL off. " +
+      "Stage-key look: exposure 1.0, 2×2048 PCF shadows, IBL off, flat backdrop " +
+      "(the preset disables atmosphere — the sky toggle maps to Studio's flat off). " +
       "The preset's sun direction vector is engine-frame and is not ported.",
     build: (project) => {
       const sun = withSun(project);
@@ -201,6 +204,7 @@ export const RECIPES: Recipe[] = [
           shadowTechnique: "pcf",
           shadowResolution: 2048,
           iblIntensity: 0.0,
+          sky: false,
         }),
         ...(sun ? [setSun(sun, { intensity: 6.0, color: [1.0, 0.98, 0.95] })] : []),
       ];

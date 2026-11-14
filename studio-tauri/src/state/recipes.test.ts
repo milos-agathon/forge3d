@@ -191,6 +191,7 @@ eq("studioPbr.exposure", pbr.render!.exposure, 1.0);
 eq("studioPbr.technique", pbr.render!.shadowTechnique, "pcf");
 eq("studioPbr.map", pbr.render!.shadowResolution, 2048);
 eq("studioPbr.ibl", pbr.render!.iblIntensity, 0.0);
+eq("studioPbr.sky", pbr.render!.sky, false);
 eq("studioPbr.sunIntensity", pbr.sun!.intensity, 6.0);
 eq("studioPbr.sunColor", JSON.stringify(pbr.sun!.color), JSON.stringify([1.0, 0.98, 0.95]));
 eq("studioPbr.noSunAngles", pbr.sunAngles, undefined);

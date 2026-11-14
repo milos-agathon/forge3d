@@ -227,7 +227,7 @@ download once into a hash-keyed cache and open as a normal DEM. Renderer
 presets and the tile-laddered progressive preview stay gated behind their
 own triggers (`docs/phase-17-plan.md`).
 
-**Phase 17b — the renderer presets as named look recipes.** The engine's five
+**Phase 17b — the renderer presets as named look recipes.** Line-by-line against `forge3d/presets.py`: `studio_pbr`'s disabled atmosphere maps to the flat backdrop (sky off), and every preset term with no honest Studio mapping is named in its tooltip (cascades, light-size, AO, toon BRDF, engine-frame sun vectors, builtin clear_sky env → Studio's built-in sky at the preset's IBL intensity). The engine's five
 `forge3d.presets` lighting packages are one-click recipes under Render → "Look
 presets" — `outdoor_sun`, `rainier_showcase`, `rainier_relief`, `studio_pbr`,
 `toon_viz`. Each is one undoable `Batch` (exposure, PCF/PCSS filter and map
@@ -238,7 +238,7 @@ light-size and AO are not ported either — the tooltips say so). toon_viz's
 toon BRDF has no terrain-pipeline equivalent and applies the closest honest
 PCF. Measured deltas against the starter look, Mount Fuji at 512²
 (|Δ|>8 changed samples): outdoor_sun 159,556; rainier_showcase 206,585;
-rainier_relief 66,613; studio_pbr 158,376; toon_viz 159,585 — pinned by the
+rainier_relief 66,613; studio_pbr 257,284; toon_viz 159,585 — pinned by the
 recipe conformance tests; the command payloads each recipe emits are
 asserted by `src/state/recipes.test.ts` (node lane), and the command-level
 `SetSunAngles` round-trip is unit-tested in Rust. The still now honours the
