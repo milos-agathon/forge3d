@@ -122,6 +122,7 @@ from .diagnostics import (
 from .render_pass import RenderPassInput, RenderPassSpec, compile_passes, decode_passes, execute_passes
 
 if TYPE_CHECKING:
+    from .raster_recipe import RasterRecipe
     from .graticule import GraticuleSpec
 
 
@@ -661,6 +662,27 @@ def _terrain_scene_diagonal(terrain: "TerrainSource") -> float:
     resolution = _metadata_resolution(metadata)
     if resolution is not None:
         return float(max(max(1.0, width) * resolution[0], max(1.0, height) * resolution[1]))
+    grid = _terrain_alignment_grid(terrain)
+    if grid is not None:
+        from .alignment import _affine_from_metadata, _require_rasterio
+
+        try:
+            rasterio = _require_rasterio()
+        except ImportError:
+            pass
+        else:
+            try:
+                crs = rasterio.crs.CRS.from_user_input(grid["crs"])
+                if crs.is_projected and crs.linear_units_factor[1] == 1:
+                    transform = _affine_from_metadata(grid["transform"])
+                    span = max(
+                        grid["width"] * math.hypot(transform.a, transform.d),
+                        grid["height"] * math.hypot(transform.b, transform.e),
+                    )
+                    if math.isfinite(span) and span > 0:
+                        return span
+            except (ValueError, TypeError, rasterio.errors.CRSError):
+                pass
     if terrain.data is not None:
         arr = np.asarray(terrain.data)
         if arr.ndim >= 2:
@@ -1490,6 +1512,7 @@ def _build_mapscene_terrain_params(
     chronos_frame_json: str | None = None,
     albedo_path: str | None = None,
     projection_only: bool = False,
+    resident_raster: tuple[Any, dict[str, Any], str] | None = None,
 ) -> Any | None:
     try:
         import forge3d as f3d
@@ -1547,8 +1570,12 @@ def _build_mapscene_terrain_params(
             blend_mode="Alpha",
             domain=domain,
         )
-        thematic = _mapscene_thematic_surface(recipe, heightmap.shape)
-        if thematic is not None:
+        if resident_raster is not None:
+            thematic = resident_raster[1]
+            overlay = resident_raster[0]
+        else:
+            thematic = _mapscene_thematic_surface(recipe, heightmap.shape)
+        if thematic is not None and resident_raster is None:
             if not callable(getattr(f3d.OverlayLayer, "from_raster_rgba", None)):
                 raise MapSceneNativeUnavailable(diagnostic_block(layer="thematic", reason="native thematic terrain color source is unavailable; rebuild the bindings", required_native="OverlayLayer.from_raster_rgba"))
             styled_layers = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay) and layer.style is not None]
@@ -1908,6 +1935,7 @@ def _render_terrain_renderer_result(
     native_vector_batches: Sequence[Mapping[str, Any]] | None = None,
     native_furniture_batches: Sequence[Mapping[str, Any]] | None = None,
     native_point_batches: Sequence[Mapping[str, Any]] | None = None,
+    resident_raster: tuple[Any, dict[str, Any], str] | None = None,
 ) -> _MapSceneNativeRenderResult | None:
     from ._map_scene_rasters import terrain_raster_drape
 
@@ -1919,9 +1947,13 @@ def _render_terrain_renderer_result(
             native_label_batches=native_label_batches,
             native_vector_batches=native_vector_batches, native_furniture_batches=native_furniture_batches,
             native_point_batches=native_point_batches,
+            **({"resident_raster": resident_raster} if resident_raster is not None else {}),
         )
         if result is not None:
-            if layer_count:
+            if resident_raster is not None:
+                result.metadata["raster_overlay_backend"] = "native_terrain_rgba_cells"
+                result.metadata["raster_overlay_layer_count"] = 1
+            elif layer_count:
                 result.metadata["raster_overlay_backend"] = "native_terrain_uv"
                 result.metadata["raster_overlay_layer_count"] = layer_count
             elif any(isinstance(layer, RasterOverlay) and layer.style is not None for layer in recipe.layers):
@@ -1944,6 +1976,7 @@ def _render_terrain_renderer_result_impl(
     native_vector_batches: Sequence[Mapping[str, Any]] | None = None,
     native_furniture_batches: Sequence[Mapping[str, Any]] | None = None,
     native_point_batches: Sequence[Mapping[str, Any]] | None = None,
+    resident_raster: tuple[Any, dict[str, Any], str] | None = None,
 ) -> _MapSceneNativeRenderResult | None:
     try:
         import forge3d as f3d
@@ -1981,6 +2014,7 @@ def _render_terrain_renderer_result_impl(
         nodata_height_below=nodata_height_below,
         chronos_frame_json=chronos_frame_json,
         albedo_path=albedo_path,
+        **({"resident_raster": resident_raster} if resident_raster is not None else {}),
     )
     if params is None:
         return None
@@ -2040,7 +2074,11 @@ def _render_terrain_renderer_result_impl(
             "adaptive": False,
         }
         thematic = _mapscene_thematic_surface(recipe, heightmap.shape)
-        if thematic is not None:
+        if resident_raster is not None:
+            metadata["thematic_backend"] = "native_terrain_rgba_cells"
+            metadata["thematic_legend"] = resident_raster[1]
+            metadata["raster_recipe_identity"] = resident_raster[2]
+        elif thematic is not None:
             metadata["thematic_backend"] = "native_terrain_rgba_cells"
             metadata["thematic_legend"] = thematic.legend
         metadata.update(_mapscene_clipmap_metadata(recipe, heightmap))
@@ -4283,6 +4321,8 @@ def _render_native_offscreen_result(
     compiled: "CompiledScenePlan",
     *,
     emit_provenance: bool = False,
+    resident_raster: tuple[Any, dict[str, Any], str] | None = None,
+    resident_grid_shape: tuple[int, int] | None = None,
 ) -> _MapSceneNativeRenderResult | None:
     if not isinstance(compiled, CompiledScenePlan):
         raise RuntimeError(
@@ -4298,6 +4338,8 @@ def _render_native_offscreen_result(
     heightmap = _load_native_heightmap(recipe.terrain)
     if heightmap is None or recipe.output is None:
         return None
+    if resident_grid_shape is not None and heightmap.shape != resident_grid_shape:
+        raise ValueError("Raster recipe grid shape mismatch with terrain samples")
     # Terrain is the prerequisite for every draped layer. Preserve the native
     # terrain diagnostic when the DEM is unavailable before inspecting overlays.
     raster_content_hashes(recipe)
@@ -4331,6 +4373,8 @@ def _render_native_offscreen_result(
         # Keywords passed only when enabled so existing call-compatible test
         # doubles for `_render_terrain_renderer_result` stay valid.
         render_kwargs: dict[str, Any] = {}
+        if resident_raster is not None:
+            render_kwargs["resident_raster"] = resident_raster
         if emit_provenance:
             render_kwargs["emit_provenance"] = True
         if nodata_height_below is not None:
@@ -6169,8 +6213,16 @@ class MapScene:
         provenance_signing_key: bytes | None = None,
         certificate: "bool | str | os.PathLike[str]" = False,
         cache: "str | os.PathLike[str] | None" = None,
+        raster_recipe: "RasterRecipe | None" = None,
     ) -> ValidationReport:
         """Render the scene; ``cache`` holds path-free per-scene subfolders."""
+        if raster_recipe is not None and (cache is not None or emit_provenance or certificate
+                                          or _mapscene_native_effects(self.recipe)
+                                          or (self.recipe.output is not None and
+                                              (self.recipe.output.samples != 1 or self.recipe.output.hdr
+                                               or self.recipe.output.format.lower() != "png"
+                                               or _mapscene_denoise_enabled(self.recipe.output)))):
+            raise ValueError("Resident raster recipes require one-shot PNG terrain rendering without cache, provenance, certificates, denoising, or screen effects")
         if self.recipe.pass_specs:
             raise MapSceneNativeUnavailable(diagnostic_block(
                 layer="render_passes",
@@ -6267,6 +6319,7 @@ class MapScene:
                 path,
                 emit_provenance=emit_provenance,
                 provenance_signing_key=provenance_signing_key,
+                **({"raster_recipe": raster_recipe} if raster_recipe is not None else {}),
             )
         if certificate:
             sha = _certificate.emit_render_certificate(certificate)
@@ -6346,6 +6399,7 @@ class MapScene:
         *,
         emit_provenance: bool = False,
         provenance_signing_key: bytes | None = None,
+        raster_recipe: "RasterRecipe | None" = None,
     ) -> ValidationReport:
         output = self.recipe.output
         target = path or (output.path if output is not None else None)
@@ -6370,9 +6424,17 @@ class MapScene:
                 raise RuntimeError("MapScene.render blocked by warning diagnostics")
             raise RuntimeError("MapScene.render blocked by blocking diagnostics")
 
-        native_result = _render_native_offscreen_result(
-            self.recipe, compiled, emit_provenance=emit_provenance
-        )
+        if raster_recipe is None:
+            native_result = _render_native_offscreen_result(
+                self.recipe, compiled, emit_provenance=emit_provenance
+            )
+        else:
+            with raster_recipe._for_render(self.recipe) as resident:
+                native_result = _render_native_offscreen_result(
+                    self.recipe, compiled, resident_raster=resident,
+                    resident_grid_shape=(raster_recipe.grid.height, raster_recipe.grid.width),
+                )
+                del resident
         if native_result is None:
             raise MapSceneNativeUnavailable(
                 diagnostic_block(
@@ -6513,6 +6575,7 @@ class MapScene:
             "thematic_backend",
             "frame_color_source",
             "thematic_legend",
+            "raster_recipe_identity",
             "vector_backend",
             "point_cloud_backend",
             "point_cloud_edl_backend",

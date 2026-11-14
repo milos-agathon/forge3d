@@ -170,6 +170,8 @@ pub mod text_overlay;
 // Overlay layer for terrain rendering
 #[cfg(feature = "extension-module")]
 pub mod overlay_layer;
+#[cfg(feature = "extension-module")]
+pub(crate) mod raster_recipe;
 
 // D11: 3D Text Mesh (native)
 pub mod text_mesh;
