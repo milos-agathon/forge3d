@@ -1153,6 +1153,10 @@ function TerrainEditor({
         checked={hillshade}
         onChange={(value) => void actions.setHillshade(value)}
       />
+      <p className="hint">
+        Preview aid — the still does not bake a hillshade; it decides its own
+        highlight response. Nothing here changes the output frame.
+      </p>
       <label className="field">
         <span className="field-label">
           Solid mesh · {terrainResolution} × {terrainResolution}

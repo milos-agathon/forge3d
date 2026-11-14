@@ -1051,10 +1051,27 @@ work in both states (reach 0.5 → 0.15 changed 92,457 samples).
   frame the still will compose into. It is an aspect indicator, not the
   page: the plate compositor still cuts the subject silhouette onto the page
   in Python at render time, and no three.js code mimics it.
-- **What is still open for Phase 16** — the preview's shadows aligned with the
-  still's PCF, and the Material preview's lighting matched to the still's
-  `lambert_physical`. Each lands in its own increment, measured against the
-  still.
+- **The third slice landed: the Material preview matches the still's terrain
+  light and shadow rig.** The terrain's Material material is now a
+  `MeshPhysicalMaterial` with `specularIntensity = 0` — the engine's
+  `lambert_physical` terrain is diffuse only (albedo/π · nDotL · PCF visibility
+  + env irradiance), and so is the preview's. The project's shadow settings
+  now drive the preview's shadow rig instead of a hardcoded 1024 / PCF:
+  `shadowResolution` sets the map size, `shadowTechnique` maps to `pcf`
+  → `PCFShadowMap` / `pcss` → `PCFSoftShadowMap` (three has no blocker
+  search; the softer PCF variant stands in for PCSS, documented),
+  `slope_scale_bias` 1e-04 maps to a −1e-04 depth bias, and a world-space
+  normal bias (0.05 at viewer scale) replaces the metre-scale 1e-05. The
+  engine's ray-marched sun visibility (a ridge shadowing the ground behind
+  it) has no three.js equivalent and stays a documented gap — the preview
+  shows the PCF term only. Also open question closed: the preview's
+  Material tooltip no longer claims "soft shadows"; the stale
+  `render_scale`-supersampling comment and the Inspector's hillshade toggle
+  (preview aid, not in the still) are fixed.
+- **Phase 16 is done.** The still and the preview agree on the stack, the
+  exposure, the tone-map, the lighting rig, the shadow rig and the map's
+  overlay; the one unmatched term is the engine's ray-marched sun visibility,
+  documented in `feature-coverage.md`.
 
 
 ## 6. Increment 10.0 — High-quality stills: AOV + denoise (1 day) — **done**

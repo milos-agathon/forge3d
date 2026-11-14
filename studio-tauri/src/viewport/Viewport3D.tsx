@@ -28,7 +28,7 @@ import {
 } from "./assets";
 import { viewStore } from "./viewStore";
 import { graticuleLayers, labelLayers, topImagery, topRamp, vectorLayers } from "../state/cartography";
-import { lightingRig } from "./lighting";
+import { lightingRig, type LightingRig } from "./lighting";
 import { rampColor } from "./colormap";
 import { TERRAIN_VIEW_SIZE, computeRenderView } from "./viewMath";
 import {
@@ -86,6 +86,8 @@ interface Runtime {
   labelLayer: HTMLDivElement | null;
   /** Line materials, whose resolution follows the canvas size in pixels. */
   lineMaterials: LineMaterial[];
+  /** The shadow rig values the renderer is currently configured with. */
+  shadowKey: string;
   orbit: OrbitControls;
   gizmo: TransformControls;
   sun: THREE.DirectionalLight;
@@ -396,6 +398,52 @@ function applyEnvironment(
   }
 }
 
+/**
+ * Apply the project's shadow settings to the directional light.
+ *
+ * The still renders with the project's shadow filter and map size
+ * (`renderer_config.shadows`: `shadowTechnique`, `shadowResolution`,
+ * `slope_scale_bias` 1e-04, `normal_bias` 1e-05). The preview honours the
+ * filter and the map size: `pcf` keeps three's PCF, `pcss` maps to
+ * PCFSoftShadowMap (three has no blocker search — this is the softer PCF
+ * variant, not the engine's PCSS). The slope bias maps to a depth bias of
+ * the same magnitude, with a world-space normal bias so the 12-unit viewer
+ * does not acne at grazing light.
+ *
+ * The engine's ray-marched sun visibility has no equivalent in three.js:
+ * a ridge cannot shadow the ground behind it here. That gap is documented,
+ * not worked around.
+ */
+function applyShadowRig(runtime: Runtime, rig: LightingRig): void {
+  const enabled = rig.shadows.enabled && runtime.glStep < 3;
+  const key = `${enabled ? 1 : 0}|${rig.shadows.technique}|${rig.shadows.resolution}`;
+  runtime.sun.castShadow = enabled;
+  if (runtime.shadowKey === key) return;
+  runtime.shadowKey = key;
+  const size = Math.max(256, Math.min(8192, Math.round(rig.shadows.resolution)));
+  if (runtime.sun.shadow.mapSize.x !== size) {
+    runtime.sun.shadow.mapSize.set(size, size);
+    // A map of a different size never reallocates on its own: free it and
+    // the next frame builds one at the new size.
+    if (runtime.sun.shadow.map) {
+      runtime.sun.shadow.map.dispose();
+      runtime.sun.shadow.map = null;
+    }
+  }
+  // The still's slope_scale_bias is a slope-proportional depth offset; at
+  // the viewer's scale the same magnitude is applied uniformly.
+  runtime.sun.shadow.bias = -1.0e-4;
+  runtime.sun.shadow.normalBias = 0.05;
+  const type =
+    rig.shadows.technique === "pcss" ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+  if (runtime.renderer.shadowMap.type !== type) {
+    runtime.renderer.shadowMap.type = type;
+    // three bakes the PCF strides into the material programs; a type change
+    // without a recompile keeps stale samplers.
+    recompileMaterials(runtime);
+  }
+}
+
 /** A small frustum, drawn where the project's active camera sits. */
 function buildCameraGizmo(camera: CameraObject): THREE.LineSegments {
   const forward = 1.15;
@@ -595,8 +643,17 @@ function buildTerrainMesh(
   }
 
   geometry.computeVertexNormals();
-  const material = clayMaterial(THREE.DoubleSide);
-  material.roughness = 0.95;
+  // The still lights terrain with lambert_physical: a Lambertian BRDF with
+  // direct-sun visibility — no specular lobe, not even a dielectric one.
+  // MeshPhysicalMaterial with specularIntensity 0 is exactly that, so the
+  // Material preview's slopes glint no more than the clay would.
+  const material = new THREE.MeshPhysicalMaterial({
+    color: CLAY_COLOUR,
+    roughness: 0.95,
+    metalness: 0.0,
+    specularIntensity: 0.0,
+    side: THREE.DoubleSide,
+  });
   // Hillshade stays in the mesh so the workspace can flip it live; its
   // texture is baked once against the DEM.
   const hillshadeTexel = bakeHillshade(preview);
@@ -1126,6 +1183,7 @@ export function Viewport3D() {
       overlay,
       labelLayer,
       lineMaterials: [],
+      shadowKey: "",
       glStep: 0,
       glProbed: false,
       needsRender: true,
@@ -1769,7 +1827,7 @@ export function Viewport3D() {
     // Rendered; the preview now agrees instead of running 0.95 against the
     // engine's 1.35.
     runtime.renderer.toneMappingExposure = rig.exposure;
-    runtime.sun.castShadow = rig.shadows.enabled && runtime.glStep < 3;
+    applyShadowRig(runtime, rig);
 
     runtime.grid.visible = project.viewport.gridVisible;
 
@@ -2244,12 +2302,11 @@ export function Viewport3D() {
    *  the selector shows is the size the engine renders. The cap scales the
    *  whole frame down uniformly so the aspect never changes.
    *
-   *  The cap is 2048, not 4096, because the engine supersamples every preview
-   *  (`render_scale` 2): a 2048 frame is rendered at 4096 and blitted down,
-   *  which is what removes the terrain's per-cell aliasing. Asking for 4096
-   *  put the frame over the payload's supersampling budget, so the engine
-   *  rendered it at scale 1 — full of sparkles — and sent four times the
-   *  pixels over IPC for the worse picture. */
+   *  The cap is 2048, not 4096: the engine renders frames natively at the
+   *  requested size and the transfer rides IPC as base64, so a frame bigger
+   *  than 2048 costs the webview megabytes of decode for no visible gain on
+   *  a preview surface. A still render skips both the cap and the base64
+   *  (`render_still`); use that for the output file. */
   const requestSize = useCallback(() => {
     const base =
       renderScale === "project"

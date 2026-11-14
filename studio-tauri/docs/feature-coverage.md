@@ -81,17 +81,22 @@ sees. They are the reason the app feels loose.
    exported frames (meshes do not reach Rendered yet — the capability table
    says so). *Fix:* either ship meshes in Rendered (phase 15), or mark
    non-camera channels as preview-only in the timeline.
-2. **The Material preview is never shadowed in the still sense.** The
-   viewport renders with three.js lighting (a real directional light with a
-   full PCF shadow rig configured and then `castShadow = false` on the
-   directional light — see `src/viewport/Viewport3D.tsx`), so the preview
-   does not show the engine's ray-marched relief shading. Phase 16 has begun:
-   the terrain editor's Terrain section now offers a `Hillshade` raster, a
-   relief-ankle multiplier baked from the DEM (the same ESRI/QGIS formula),
-   toggling the viewport between an unlit shading and the classic
-   relief map. The shadow line itself is still open for Material, and the
-   shading-model match between preview and still is the next Phase-16 increment
-   to land.
+2. **The Material preview matches the still's shadow rig and its diffuse-only
+   terrain light.** The terrain's Material material is now
+   `MeshPhysicalMaterial` with `specularIntensity = 0` — the engine's
+   `lambert_physical` branch (an albedo/π direct term × nDotL × PCF visibility,
+   plus the environment irradiance term) has no specular lobe, dielectric or
+   otherwise, and neither does the preview anymore. The project's shadow
+   settings now reach the preview's shadow rig too: `shadowResolution` sets
+   the map size, and `shadowTechnique` maps to `PCFShadowMap` /
+   `PCFSoftShadowMap` for `pcf` / `pcss` (three has no blocker search — the
+   pcss case is the softer PCF variant, documented, not a real PCSS). The
+   slope-scale bias maps to a −1e-04 depth bias; a small world-space normal
+   bias keeps grazing light acne-free at viewer scale. The engine's
+   ray-marched **sun visibility** (a ridge shadowing the ground behind it)
+   still has no three.js counterpart and is a documented gap, like the
+   terrain-occluded labels. The terrain editor's Terrain section also offers a
+   `Hillshade` raster (same ESRI/QGIS formula, preview aid only).
 3. **The preview and the still are two renderers.** They agree on the lighting
    rig, the exposure and the tone-map by construction, but the engine's terrain
    shading (triplanar layers, AO, sun visibility, shadows) only exists in the
@@ -184,11 +189,13 @@ ramp rides the engine's own colormap overlay (the recipe builds a
 gone (the native UV drape now composites in row bands under the host
 budget).
 
-**Phase 16 — the preview matches the still.** The preview's hillshade raster,
-the map overlay (vector lines, feature labels and the graticule, draped on the
-terrain and read through the still's own reader) and the plate's crop frame in
-the viewport landed, so authoring shows the output. The Material preview's
-lighting and shadow match remain open.
+**Phase 16 — the preview matches the still.** Done: the preview's hillshade
+raster, the map overlay (vector lines, feature labels and the graticule,
+draped on the terrain and read through the still's own reader), the plate's
+crop frame, and the Material preview's lighting/shadow match landed, so
+authoring shows the output. The one unmatched term is the engine's
+ray-marched sun visibility (a ridge shadowing the ground behind it) — no
+three.js equivalent, documented.
 
 **Phase 17 — the engine's inputs.** Dataset fetching, the engine's presets,
 COG streaming: Studio opens what the engine can fetch.

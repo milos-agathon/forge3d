@@ -198,7 +198,7 @@ export function ViewportToolbar({ onRender }: { onRender: () => void }) {
         <button
           type="button"
           className={`segment-button ${mode === "material" ? "is-active" : ""}`}
-          title="Material preview — studio HDRI and soft shadows, free orbit"
+          title="Material preview — studio HDRI, the project's shadows, free orbit"
           onClick={() => void actions.setViewportMode("material")}
         >
           Material
