@@ -118,7 +118,8 @@ impl CsmRenderer {
         let inv_view_proj = (camera_projection * camera_view).inverse();
 
         for i in 0..self.config.cascade_count as usize {
-            let cascade = self.compute_cascade(i, &splits, far_plane, inv_view_proj, light_view);
+            let cascade =
+                self.compute_cascade(i, &splits, camera_projection, inv_view_proj, light_view);
             self.uniforms.cascades[i] = cascade;
         }
     }
@@ -144,26 +145,22 @@ impl CsmRenderer {
         &self,
         idx: usize,
         splits: &[f32],
-        far_plane: f32,
+        camera_projection: Mat4,
         inv_view_proj: Mat4,
         light_view: Mat4,
     ) -> ShadowCascade {
         let near_dist = splits[idx];
         let far_dist = splits[idx + 1];
 
-        // Convert view distances to NDC depth for WGPU's [0,1] depth range
-        // For perspective projection: ndc_z = (far * (z - near)) / (z * (far - near))
-        // Using near=1.0 (matches render_shadow_passes) and far=far_plane
-        let proj_near = 1.0_f32;
-        let proj_far = far_plane;
-        let near_ndc = (proj_far * (near_dist - proj_near)) / (near_dist * (proj_far - proj_near));
-        let far_ndc = (proj_far * (far_dist - proj_near)) / (far_dist * (proj_far - proj_near));
+        // Cascade distances are in view space. Project them with the same
+        // camera matrix whose inverse will reconstruct the frustum corners.
+        let ndc_depth = |distance: f32| {
+            let clip = camera_projection * Vec4::new(0.0, 0.0, -distance, 1.0);
+            (clip.z / clip.w).clamp(0.0, 1.0)
+        };
 
-        let frustum_corners = calculate_frustum_corners(
-            inv_view_proj,
-            near_ndc.clamp(0.0, 1.0),
-            far_ndc.clamp(0.0, 1.0),
-        );
+        let frustum_corners =
+            calculate_frustum_corners(inv_view_proj, ndc_depth(near_dist), ndc_depth(far_dist));
 
         let (mut min_bounds, mut max_bounds) =
             calculate_light_space_bounds(&frustum_corners, light_view);

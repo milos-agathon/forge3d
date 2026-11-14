@@ -6,6 +6,7 @@ impl ViewerTerrainScene {
         encoder: &mut wgpu::CommandEncoder,
         camera_view: glam::Mat4,
         camera_proj: glam::Mat4,
+        camera_depth_range: (f32, f32),
         sun_direction: glam::Vec3,
         render_origin_span: [f32; 4],
     ) {
@@ -24,6 +25,13 @@ impl ViewerTerrainScene {
             return;
         }
 
+        let (near_plane, far_plane) = camera_depth_range;
+        if near_plane >= csm.config.max_shadow_distance {
+            csm.uniforms.cascade_count = 0;
+            csm.uniforms.technique_reserved[0] = 0.0;
+            return;
+        }
+
         let cascade_count = csm.config.cascade_count;
         let shadow_map_size = csm.config.shadow_map_size;
 
@@ -31,8 +39,6 @@ impl ViewerTerrainScene {
         csm.uniforms.technique_reserved[0] = 1.0; // Flag: shadow passes executed
 
         // Update CSM cascade matrices based on camera and light
-        let near_plane = 1.0;
-        let far_plane = csm.config.max_shadow_distance;
         csm.update_cascades(
             camera_view,
             camera_proj,
