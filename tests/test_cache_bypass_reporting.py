@@ -78,6 +78,7 @@ _CACHE_DELEGATES = {
     ("publication.py", "render_subjects", "recipe.render_series"),
     ("sdf.py", "render_simple_scene", "renderer.render_sdf_scene"),
     ("smoke.py", "render_rgba", "self.render_projection_rgba"),
+    ("subject_story.py", "render", "render_flythrough"),
     ("terrain_demo.py", "render_sunrise_to_noon_sequence", "renderer_native.render_terrain_pbr_pom"),
 }
 

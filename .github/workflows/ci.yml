@@ -3080,6 +3080,8 @@ jobs:
           exit $LASTEXITCODE
       - name: Run installed-wheel fast validation without skips
         shell: pwsh
+        env:
+          FORGE3D_RUN_GPU_ANAMNESIS: '1'
         run: |
           $junit = Join-Path $env:FORGE3D_NEPHELE_ARTIFACT_DIR "fast-junit.xml"
           python scripts/ci_pytest_lane.py --profile fast --basetemp="$env:FORGE3D_NEPHELE_ARTIFACT_DIR/pytest-fast" --junitxml="$junit" *>&1 | Tee-Object "$env:FORGE3D_NEPHELE_ARTIFACT_DIR/fast.log"

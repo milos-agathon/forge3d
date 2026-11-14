@@ -6,6 +6,20 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.49.0]
+
+### Added
+- An opt-in per-axis terrain mesh grid cap for the interactive viewer. Set `FORGE3D_VIEWER_MAX_TERRAIN_GRID` to preserve more detail from rectangular DEMs (#299).
+- Subject-led terrain flyovers with feature-ID binding, clearance and framing checks, and a reproducible Unreal Sequencer and Movie Render Queue handoff (#300).
+- `ValueFaithfulRasterBinding` for prepared count rasters. A single declaration controls statistical relief, fixed colours, coverage, and a linked top-down inset. The corrected CBS Amsterdam example includes a plate and flyover (#302).
+- An offline semantic-scale workflow for routes, landmarks, and a north-up locator. It freezes scale decisions before CHRONOS renders and preserves orientation when detail is unavailable (#301).
+
+### Fixed
+- A terrain-aware near plane reduces depth fighting in long-lens viewer shots and is shared by onscreen and offscreen terrain effects (#299).
+- Viewer shadow cascades use the frame projection when fitting cast shadows, preserving PCF and EVSM with the terrain-aware near plane.
+
+## [1.48.0] - 2026-11-09
+
 ### Added
 - Linked plan-view PNG publications from `PublicationRecipe` (#285), with native map frames, classification-derived legends, viewport locators, qualified geographic scale, cache-aware extent series and a real CBS population example.
 - Reusable publication layouts with linked inset maps, subject and declared-time series, and flat-terrain perspective views with camera-ground-footprint locators. Explicit CHRONOS camera sequences retain matching title/end PNGs and moving furniture; perspective scale bars are omitted. Output support and unsupported PDF, SVG, editable-text and print-colour routes are declared per route.
