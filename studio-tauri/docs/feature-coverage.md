@@ -208,7 +208,9 @@ ray-marched sun visibility (a ridge shadowing the ground behind it) — no
 three.js equivalent, documented.
 
 **Phase 17 — the engine's inputs.** Dataset fetching, the engine's presets,
-COG streaming: Studio opens what the engine can fetch.
+COG streaming: Studio opens what the engine can fetch. Triggers unmet; the
+scoped plan is `docs/phase-17-plan.md` — increments 2.1/2.2 only, with
+presets and COG held behind their own triggers.
 
 **Not planned:** path tracing, splats, inverse rendering, point clouds,
 volumetrics, the globe. Different product tiers, and the roadmap's §8 already
