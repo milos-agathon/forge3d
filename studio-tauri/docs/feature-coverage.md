@@ -239,9 +239,11 @@ toon BRDF has no terrain-pipeline equivalent and applies the closest honest
 PCF. Measured deltas against the starter look, Mount Fuji at 512²
 (|Δ|>8 changed samples): outdoor_sun 159,556; rainier_showcase 206,585;
 rainier_relief 66,613; studio_pbr 158,376; toon_viz 159,585 — pinned by the
-recipe conformance tests. The still now honours the project zScale (render
-session keyed on (dem, zScale), heights multiplied at construction), so the
-relief recipes are real in the Rendered path too.
+recipe conformance tests; the command payloads each recipe emits are
+asserted by `src/state/recipes.test.ts` (node lane), and the command-level
+`SetSunAngles` round-trip is unit-tested in Rust. The still now honours the
+project zScale (render session keyed on (dem, zScale), heights multiplied
+at construction), so the relief recipes are real in the Rendered path too.
 
 **Phase 18 — the stranger-installable deb, with honest engine discovery.**
 The deb never requires the engine at install time: the postinst names the

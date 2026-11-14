@@ -52,7 +52,10 @@ presets are named recipes under Render → "Look presets"; one undoable `Batch`
 per recipe; tooltip names the engine preset and deviations; conformance tests
 with measured deltas (outdoor_sun 159,556, rainier_showcase 206,585,
 rainier_relief 66,613, studio_pbr 158,376, toon_viz 159,585 changed samples at
-512², Fuji). The still honours `zScale` (render session keyed on
+512², Fuji), plus a node-lane payload test (`src/state/recipes.test.ts`)
+that applies each recipe to a starter-like project and asserts the exact
+command batch (render settings, sun specs, angles, terrain exaggeration) —
+the goal doc's "apply, assert resulting request payload" clause. The still honours `zScale` (render session keyed on
 `(dem, zScale)`) so the relief recipes are real in the Rendered path, not
 just the viewport. Deviation notes shipped in the recipes and in the roadmap
 §5.33: toon BRDF → closest-honest PCF; engine-frame sun vectors not ported;
