@@ -212,7 +212,12 @@ the intended honest behaviour, not a bug.
 `--engine-check` exits 0 on success, 1 on failure (with
 the exact remedies it tried). Discovery order: `FORGE3D_STUDIO_PYTHON`
 (validated, never trusted blind) → ancestors' `.venv` → `PATH python3`.
-No auto-install, no `sudo pip`, no bare-python fallback.
+No auto-install, no `sudo pip`, no bare-python fallback. One nuance: when the
+shell runs inside a repo checkout, the probe imports the checkout's
+`python/forge3d` (a dev convenience), with your own `PYTHONPATH` kept as the
+tail; the installed bundle has no checkout above it, so a stranger probes
+the interpreter alone. The probe is also what `dpkg -i` expects you to run
+next — the postinst names it.
 
 Troubleshooting:
 

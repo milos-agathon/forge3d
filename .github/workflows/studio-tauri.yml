@@ -102,7 +102,7 @@ jobs:
           # ubuntu-latest runner already trusts.
           sudo dpkg -i target/release/bundle/deb/*.deb
           command -v forge3d-studio-shell
-          forge3d-studio-shell --version || true
+          dpkg -L forge3-d-studio
 
       - name: --engine-check fails on a clean machine, naming the remedy
         run: |

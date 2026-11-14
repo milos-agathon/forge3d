@@ -72,15 +72,35 @@ entry → `--engine-check` in both scenarios. **The gate is the probe, not a
 GPU render** — the hosted runner has no terrain-safe GPU, so GPU-side visual
 verification on a fresh stranger machine remains unverified by design.
 
-**Honest residuals:**
+**Verification log (amended after execution):**
 
-- `dpkg -i` itself was not run on this machine (no sudo password); the control
-  checks were done by extracting the deb with `ar` and reading its members.
-  CI runs the real `dpkg -i`.
-- On this machine, a bare `PATH python3` resolved `python3` successfully but
-  the probe reports the truth about a broken interpreter — e.g. a system
-  `python3` with `forge3d` but no `numpy` fails with
-  `import forge3d failed: No module named 'numpy'`. That is the probe
-  working as designed, and it is in the troubleshooting table.
+- `dpkg -i` **was executed** (no sudo password): a user-namespace + private
+  mount-namespace root (`unshare -rm`) with the Debian `dpkg_1.23.12`
+  build fetched from deb.debian.org and a minimal stranger root (declared
+  Depends seeded in `var/lib/dpkg/status`, `/bin/sh` + libs for the
+  maintainer script, SELinux hidden in the namespace since the policy does
+  not know the scratch path). Clean single-pass run: unpack → configure →
+  the real postinst printed the remedy and exited 0. The installed bundle
+  then passed `--engine-check` from a repo-less cwd against a fresh
+  `uv` venv with PyPI forge3d 1.48.0 (exit 0), the desktop entry validated,
+  and `dpkg -l` recorded `ii`. CI's `deb-audit` job runs the same flow on
+  ubuntu-latest with the system package manager.
+- A bare `PATH python3` probe is honest about half-installed interpreters:
+  a system `python3` with `forge3d` but no `numpy` fails with
+  `import forge3d failed: No module named 'numpy'`. Working as designed;
+  in the troubleshooting table.
+- When the shell runs inside a repo checkout, the probe imports the
+  checkout's `python/forge3d` (dev convenience) with the caller's
+  `PYTHONPATH` kept as the tail (extracted into `merge_python_path`,
+  unit-tested); in the installed bundle there is no checkout above
+  `/usr/bin`, so a stranger probes the interpreter alone.
 - `rpm` and `appimage` remain unaudited (documented in the README; not
   promised).
+- GUI launch not run here (no display, no Xvfb on this machine); the probe
+  is the CI gate, as designed.
+- Line-by-line read of `forge3d/presets.py` against the recipes closed two
+  gaps: `studio_pbr`'s disabled atmosphere now maps to the flat backdrop
+  (`sky: false`, measured: 102,960 samples for the sky term alone; the full
+  recipe measures 257,284) and `rainier_showcase`'s AO term is named in the
+  tooltip (both tooltips also name the clear_sky → built-in-sky IBL
+  substitution).

@@ -1180,8 +1180,16 @@ webkit/gtk defaults; the `.desktop` `Comment` no longer duplicates
 dpkg -i`, pre-installing the declared `Depends` so a wrong dependency
 fails strictly, validates the desktop entry, and runs `--engine-check`
 in both interpreter scenarios — **the gate is the probe, not a GPU
-render**; the hosted runner has no terrain-safe GPU. `rpm`/`appimage`
-remain built but unaudited, documented as such in the README.
+render**; the hosted runner has no terrain-safe GPU. On this machine a
+real `dpkg -i` was executed inside a user-namespace stranger root (Debian
+`dpkg_1.23.12`; declared Depends seeded in `var/lib/dpkg/status`; the
+maintainer script ran for real; `ii` recorded; the installed bundle probed
+the fresh `uv` venv's forge3d 1.48.0 from a repo-less cwd, exit 0). `rpm`/`appimage`
+remain built but unaudited, documented as such in the README. When the
+shell runs inside a repo checkout, the probe imports the checkout's
+`python/forge3d` with the caller's `PYTHONPATH` kept as the tail
+(unit-tested); in the installed bundle there is no checkout above
+`/usr/bin`, so a stranger probes the interpreter alone.
 
 ## 6. Increment 10.0 — High-quality stills: AOV + denoise (1 day) — **done**
 

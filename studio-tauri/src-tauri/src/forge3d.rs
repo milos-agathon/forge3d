@@ -1602,7 +1602,11 @@ fn probe_interpreter(python: &str) -> Result<EngineStatus, String> {
     let mut command = Command::new(python);
     command.arg("-c").arg(PROBE_SCRIPT);
     if let Some(path) = python_path_entries() {
-        command.env("PYTHONPATH", path);
+        // Inside a repo checkout the probe tests the checkout's engine; the
+        // caller's own PYTHONPATH entries keep the tail so a plain interpreter
+        // with forge3d only on the user's path still probes correctly.
+        let merged = merge_python_path(path, std::env::var("PYTHONPATH").ok());
+        command.env("PYTHONPATH", merged);
     }
     let mut child = command
         .stdin(Stdio::null())
@@ -1708,6 +1712,16 @@ fn print_engine_check_remedies() {
     println!("  FORGE3D_STUDIO_PYTHON=/path/to/python forge3d-studio-shell --engine-check");
 }
 
+/// The PYTHONPATH value the probe hands to the interpreter: the checkout's
+/// `python/` goes first (dev convenience), the caller's entries keep the tail.
+/// An empty user value is treated as unset.
+fn merge_python_path(path: String, existing: Option<String>) -> String {
+    match existing {
+        Some(existing) if !existing.trim().is_empty() => format!("{path}:{existing}"),
+        _ => path,
+    }
+}
+
 /// Map one probe JSON object onto [`EngineStatus`].
 ///
 /// Split out from the process plumbing so the wire shape (including a missing
@@ -1757,7 +1771,27 @@ fn first_line(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_solar_reply;
+    use super::{merge_python_path, parse_solar_reply};
+
+    #[test]
+    fn merge_python_path_keeps_the_repo_first_and_the_user_tail() {
+        assert_eq!(
+            merge_python_path("/repo/python".to_owned(), Some("/user/libs".to_owned())),
+            "/repo/python:/user/libs"
+        );
+    }
+
+    #[test]
+    fn merge_python_path_treats_empty_user_value_as_unset() {
+        assert_eq!(
+            merge_python_path("/repo/python".to_owned(), Some("   ".to_owned())),
+            "/repo/python"
+        );
+        assert_eq!(
+            merge_python_path("/repo/python".to_owned(), None),
+            "/repo/python"
+        );
+    }
 
     #[test]
     fn solar_reply_parses_and_reports_engine_errors() {

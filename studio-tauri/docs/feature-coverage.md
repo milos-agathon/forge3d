@@ -255,7 +255,11 @@ interpreter candidate by importing forge3d, in a fixed order:
 line each, the verdict, and exits 0/1 — it starts no GUI and it is what the
 stranger and CI read. Verified in four scenarios (env var, repo-cwd
 `.venv`, fresh `uv` venv with PyPI forge3d 1.48.0, bare `PATH python3` —
-exit 1 with the remedy printed). Desktop entry validates with
+exit 1 with the remedy printed) **and with a real `dpkg -i` executed in a
+user-namespace stranger root** (Debian `dpkg_1.23.12`, declared Depends
+seeded, the maintainer script ran for real; `ii` recorded; the installed
+bundle's probe found the fresh venv's forge3d 1.48.0 from a repo-less cwd,
+exit 0). Desktop entry validates with
 `desktop-file-validate`; the deb's declared `Depends` are libgbm1 and
 mesa-vulkan-drivers (merged with the bundler's webkit/gtk defaults). CI
 gains a `deb-audit` job (PR + main): builds the deb, `dpkg -i`, validates
