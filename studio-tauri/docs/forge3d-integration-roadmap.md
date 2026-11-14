@@ -700,11 +700,13 @@ work in both states (reach 0.5 → 0.15 changed 92,457 samples).
   2)`), and the shell's reader now logs the warning events the protocol
   already had — a skipped overlay or water layer was being dropped on the
   floor before.
-- **Still lacking**: the labels are not occluded by the terrain's ridges (the
-  engine's MapScene has a depth occlusion sampler; the studio's vector layer
-  has the sky test), the engine's solver runs with a zero margin, so dense
-  labels may touch, and the packaged atlas is Latin only — a CJK place name
-  needs a baked atlas.
+- **Labels are now occluded by the terrain's ridges** (the studio's own
+  depth test, the same rule the lines use): an anchor is dropped where the
+  ground's depth is in front of it, with the local depth gradient as the
+  bias so an on-surface anchor does not flicker. The sky test is unchanged
+  and the annotation placements use the same rule. Still lacking: the
+  engine's solver runs with a zero margin, so dense labels may touch, and
+  the packaged atlas is Latin only — a CJK place name needs a baked atlas.
 - Check: the reader (the named points, a missing field), the engine's plan
   (the accepted label, its bounds, a rejected name), the model's label
   defaults and refusals, the payload, and an end-to-end engine test that the

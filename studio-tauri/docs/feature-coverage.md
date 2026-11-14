@@ -162,7 +162,7 @@ the plate's scale bar and north arrow are the engine's own (`ScaleBar`,
 `NorthArrow`), and the graticule is the engine's grid
 (`forge3d.graticule.generate_graticule`) with its annotations placed by the
 engine's label plan. Still open in the tier: polygons, a legend for the
-vector attributes, and labels occluded by the terrain's ridges.
+vector attributes and terrain-occluded labels.
 
 **Phase 15 (MapScene — the still *is* the recipe now).** Every still — and
 every viewport frame — goes through the engine's `MapScene` recipe: the studio

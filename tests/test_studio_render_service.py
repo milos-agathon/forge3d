@@ -804,7 +804,7 @@ def test_the_cartography_is_prepared_for_the_engine_own_pass():
             return [[100.0 + index, 100.0 + index, 0.5] for index, _point in enumerate(batch)]
 
         def project_terrain_depth(self, heights, size_px, a, b, c):
-            return np.zeros((size_px[1], size_px[0]), dtype=np.float32)
+            return np.full((size_px[1], size_px[0]), 0.99, dtype=np.float32)
 
     class _Renderer:
         pass
@@ -854,6 +854,90 @@ def test_a_line_behind_the_ground_is_hidden_by_it():
     assert batch["rgba"][3, 3, 3] == 0, "the hidden pixel must be empty"
     assert batch["rgba"][3, 5, 3] == 255, "the visible pixel must stay"
     assert batch["depth_test"] is True
+
+
+def test_a_label_behind_the_ridge_is_not_placed():
+    """The same occlusion rule the lines use: a ridge in front of the
+    feature's anchor hides the label; the sky test still drops anchors in
+    the air."""
+    service = load_service()
+    bounds = (138.6, 35.2, 138.9, 35.5)
+    points = [
+        ("peak-1", 138.7, 35.35, "Arakura"),   # in front of the near ridge
+        ("peak-2", 138.75, 35.4, "Ridge Kome"), # behind it
+    ]
+    # Anchor pixels: peak-1 at (60, 60), peak-2 at (180, 60).
+    class _Params:
+        def project_terrain_points(self, batch, shared_frame=False):
+            return [[60.0, 60.0, 0.9], [180.0, 60.0, 0.9]]
+
+        def project_terrain_depth(self, heights, size_px, a, b, c):
+            depth = np.full((size_px[1], size_px[0]), 0.95, dtype=np.float32)
+            # The near ridge: close depth in the right half of the frame.
+            depth[:, 160:] = 0.5
+            return depth
+
+    anchors = service.vector_label_anchors(
+        _Params(), np.zeros((64, 64), dtype=np.float32), bounds, points, 320, 240
+    )
+    texts = [anchor["text"] for anchor in anchors]
+    assert "Arakura" in texts, "the anchor in front of the ridge must survive"
+    assert "Ridge Kome" not in texts, "the anchor behind the ridge must be dropped"
+
+
+def test_a_sky_anchor_is_still_dropped_with_occlusion_on():
+    """Occlusion must not mask the pre-existing sky rule."""
+    service = load_service()
+    bounds = (138.6, 35.2, 138.9, 35.5)
+    points = [("peak-1", 138.7, 35.35, "Arakura")]
+
+    class _Params:
+        def project_terrain_points(self, batch, shared_frame=False):
+            return [[60.0, 60.0, 0.5]]
+
+        def project_terrain_depth(self, heights, size_px, a, b, c):
+            return np.full((size_px[1], size_px[0]), 1.0, dtype=np.float32)  # all sky
+
+    anchors = service.vector_label_anchors(
+        _Params(), np.zeros((64, 64), dtype=np.float32), bounds, points, 320, 240
+    )
+    assert anchors == []
+
+
+def test_a_graticule_annotation_is_hidden_by_the_ridge():
+    """The annotation rides the line rule: hidden where the ground stands in
+    front of the exit point."""
+    service = load_service()
+    bounds = (0.0, 0.0, 10.0, 10.0)
+    lines = [[(2.0, 0.0), (2.0, 10.0)], [(7.0, 0.0), (7.0, 10.0)]]
+    annotations = [
+        {"kind": "meridian", "text": "2 degE"},
+        {"kind": "meridian", "text": "7 degE"},
+    ]
+
+    class _Params:
+        def __init__(self):
+            self.calls = 0
+
+        def project_terrain_points(self, batch, shared_frame=False):
+            # Each line is projected once per line; the point that leaves the
+            # frame is below the frame, the exit point is inside it.
+            self.calls += 1
+            if self.calls == 1:
+                return [[60.0, 400.0, 0.9], [60.0, 200.0, 0.9]]
+            return [[180.0, 400.0, 0.9], [180.0, 200.0, 0.9]]
+
+        def project_terrain_depth(self, heights, size_px, a, b, c):
+            depth = np.full((size_px[1], size_px[0]), 0.95, dtype=np.float32)
+            depth[:, 160:] = 0.5  # near ridge across the right half
+            return depth
+
+    anchors = service.graticule_label_anchors(
+        _Params(), np.zeros((64, 64), dtype=np.float32), bounds, lines, annotations, 320, 240
+    )
+    texts = [anchor["text"] for anchor in anchors]
+    assert "2 degE" in texts
+    assert "7 degE" not in texts
 
 
 def test_the_graticule_is_the_engine_own_grid():

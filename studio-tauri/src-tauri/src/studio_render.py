@@ -1833,6 +1833,18 @@ def vector_label_anchors(params, heights, bounds, points, width: int, height: in
     except Exception:  # noqa: BLE001 - the depth test is optional
         terrain_depth = None
 
+    # Ground-vs-anchor depth test, same rule the lines use (hidden_by_ground):
+    # an anchor is hidden where the ground's depth is closer than the
+    # anchor's, with the local depth gradient as the bias so an anchor on the
+    # surface does not flicker against it.
+    gradients = None
+    if terrain_depth is not None:
+        dx = np.abs(np.diff(terrain_depth, axis=1))
+        dy = np.abs(np.diff(terrain_depth, axis=0))
+        dx = np.maximum(np.pad(dx, ((0, 0), (0, 1))), np.pad(dx, ((0, 0), (1, 0))))
+        dy = np.maximum(np.pad(dy, ((0, 1), (0, 0))), np.pad(dy, ((1, 0), (0, 0))))
+        gradients = dx + dy + 4 * np.finfo(np.float32).eps
+
     anchors = []
     for (identifier, _u, _v, text), value in zip(placed, projected):
         if value is None:
@@ -1845,7 +1857,12 @@ def vector_label_anchors(params, heights, bounds, points, width: int, height: in
                 # The raster's background is exactly 1.0 (the far plane); the
                 # terrain's depth is just below it, so the test is "is this
                 # pixel the background", not "is it far away".
-                if float(terrain_depth[row, column]) >= 1.0 - 1e-6:
+                pixel = float(terrain_depth[row, column])
+                if pixel >= 1.0 - 1e-6:
+                    continue
+                if gradients is not None and depth > pixel + float(gradients[row, column]):
+                    # A ridge stands in front of the feature: the label
+                    # belongs behind the ridge, not on top of it.
                     continue
         anchors.append({"id": identifier, "text": text, "x": px, "y": py, "depth": depth})
     return anchors
@@ -2245,6 +2262,21 @@ def graticule_label_anchors(params, heights, bounds, lines, annotations, width, 
     prints its grid annotations. The anchor is a little inside the frame, so
     the text is never cut off.
     """
+    terrain_depth = None
+    try:
+        terrain_depth = terrain_depth_raster(params, heights, width, height)
+    except Exception:  # noqa: BLE001 - the depth test is optional
+        terrain_depth = None
+    gradients = None
+    if terrain_depth is not None:
+        import numpy as np
+
+        dx = np.abs(np.diff(terrain_depth, axis=1))
+        dy = np.abs(np.diff(terrain_depth, axis=0))
+        dx = np.maximum(np.pad(dx, ((0, 0), (0, 1))), np.pad(dx, ((0, 0), (1, 0))))
+        dy = np.maximum(np.pad(dy, ((0, 1), (0, 0))), np.pad(dy, ((1, 0), (0, 0))))
+        gradients = dx + dy + 4 * np.finfo(np.float32).eps
+
     west, south, east, north = (float(value) for value in bounds)
     margin = 24.0
     anchors = []
@@ -2273,6 +2305,15 @@ def graticule_label_anchors(params, heights, bounds, lines, annotations, width, 
                 best = (score, px, py, depth)
         if best is None:
             continue
+        _score, best_px, best_py, best_depth = best
+        if terrain_depth is not None and gradients is not None:
+            row, column = int(best_py), int(best_px)
+            if 0 <= row < terrain_depth.shape[0] and 0 <= column < terrain_depth.shape[1]:
+                pixel = float(terrain_depth[row, column])
+                if pixel < 1.0 - 1e-6 and best_depth > pixel + float(gradients[row, column]):
+                    # The ridge stands in front of the line's exit point:
+                    # the annotation belongs behind the ridge.
+                    continue
         anchors.append(
             {
                 "id": "graticule-%d" % index,
