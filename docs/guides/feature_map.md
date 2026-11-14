@@ -39,6 +39,7 @@ TAA depth reads do not require optional float32 texture filtering.
 | --- | --- | --- |
 | Map plates and cartographic furniture | `MapPlate`, `Legend`, `ScaleBar`, `NorthArrow` | `map_plate.ipynb`, GIS tutorial 03 |
 | Linked PNG publications | `PublicationRecipe`, reusable layouts with linked insets, extent/subject/C04-selected time series, camera-linked flyover frames and endpoint PNGs, style-derived legend and actual plan/flat-terrain perspective locator; perspective scale omitted | [C06 guide](linked_publication.md), `examples/c06_population_publication.py`, `examples/c06_time_publication.py`, `examples/c06_oblique_publication.py`, `examples/c06_flyover_publication.py`; per-route output limits declared, C04/C06 remain partial pending their acceptance |
+| Measured terrain transects | `measured_sections.sample_transect` and `render_section` produce audited WGS 84 samples and a linked map/profile still | [C08 first delivery](measured_sections.md) |
 | Vector export | `export_svg`, `export_pdf`, `VectorScene` | gallery vector-export workflow |
 | Buildings | `add_buildings`, `add_buildings_cityjson`, `add_buildings_3dtiles` | `buildings_viewer_interactive.py`, GIS tutorial 04 |
 | Mapbox-style import | `style.load_style`, `style.apply_style` | `style_viewer_interactive.py` |
