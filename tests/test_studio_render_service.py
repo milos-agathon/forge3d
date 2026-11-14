@@ -19,8 +19,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+REPO = Path(__file__).resolve().parents[1]
 SERVICE = (
-    Path(__file__).resolve().parents[1]
+    REPO
     / "studio-tauri"
     / "src-tauri"
     / "src"
@@ -1268,3 +1269,166 @@ def test_the_still_compiles_a_recipe_before_rendering():
     recipe_at = source.index("f3d.MapScene(")
     assert source.index("f3d.TerrainSource") < recipe_at
     assert "TerrainRenderParams(" not in source
+
+
+# -------------------------------- engine-backed conformance (GPU, skip-if-absent)
+
+def _terrain_gpu_available() -> bool:
+    from _terrain_runtime import terrain_rendering_available
+
+    try:
+        return terrain_rendering_available()
+    except Exception:  # noqa: BLE001 - absence must read as a skip, never a failure
+        return False
+
+
+engine_required = pytest.mark.skipif(
+    not _terrain_gpu_available(),
+    reason="no terrain-safe GPU for the engine's render path",
+)
+
+
+def _render_reply(service, renderer, request):
+    """One still through the service; returns the reply and decoded frame."""
+    import base64
+    import io
+
+    from PIL import Image
+
+    reply = renderer.render(request)
+    image = np.asarray(
+        Image.open(io.BytesIO(base64.b64decode(reply["png"]))).convert("RGB"), dtype=np.int32
+    )
+    return reply, image
+
+
+@engine_required
+def test_the_polygon_layer_reaches_the_pixels(tmp_path):
+    """The polygon layer is not cosmetic: it moves real samples through the
+    recipe, on the real DEM, with the real AOV composite."""
+    service = load_service()
+    dem = REPO / "assets" / "tif" / "Mount_Fuji_30m.tif"
+    polygon = tmp_path / "caldera.geojson"
+    polygon.write_text(
+        """{
+          "type": "FeatureCollection",
+          "features": [
+            {
+              "type": "Feature",
+              "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                  [[138.68, 35.30], [138.75, 35.30], [138.75, 35.40], [138.68, 35.40], [138.68, 35.30]],
+                  [[138.705, 35.325], [138.725, 35.325], [138.725, 35.375], [138.705, 35.375], [138.705, 35.325]]
+                ]
+              },
+              "properties": {"name": "caldera"}
+            }
+          ]
+        }""",
+        encoding="utf-8",
+    )
+    camera = {"phiDeg": 37.0, "thetaDeg": 42.0, "radius": 24000.0,
+              "target": [0.0, 0.0, 0.0], "fovDeg": 45.0}
+    sun = {"azimuthDeg": 315.0, "elevationDeg": 30.0,
+           "intensity": 3.0, "color": [1.0, 0.97, 0.92]}
+    base_request = {
+        "width": 512, "height": 512,
+        "camera": camera, "sun": sun,
+        "exposure": 1.35,
+        "cartography": [{"id": "relief", "name": "Terrain relief", "visible": True, "type": "relief"}],
+        "quality": {"shadows": True},
+    }
+    with_polygon_request = dict(base_request)
+    with_polygon_request = {
+        **base_request,
+        "cartography": [
+            *base_request["cartography"],
+            {"id": "caldera", "name": "Caldera", "visible": True, "type": "polygon",
+             "path": str(polygon), "colour": [0.2, 0.6, 0.85, 0.75]},
+        ],
+    }
+    renderer = service.StudioRenderer(str(dem))
+    reply_base, base = _render_reply(service, renderer, base_request)
+    assert reply_base.get("renderPath") == "mapscene", reply_base
+    reply_poly, pol = _render_reply(service, renderer, with_polygon_request)
+    assert reply_poly.get("renderPath") == "mapscene", reply_poly
+
+    diff = np.abs(base.astype(np.int64) - pol.astype(np.int64)).sum(axis=2)
+    changed = int((diff > 8).sum())
+    # The fill covers roughly four percent of the frame; the hole stays open.
+    # Loose bounds on purpose; this pins "the layer does something measurable"
+    # without freezing the exact pixel count.
+    assert changed >= 500, "polygon layer changed almost nothing"
+    assert changed <= 60_000, "polygon layer changed implausibly much"
+
+
+@engine_required
+def test_the_vector_attribute_legend_reaches_the_plate(tmp_path):
+    """Category colours reach pixels, and the plate crops them into swatches."""
+    service = load_service()
+    dem = REPO / "assets" / "tif" / "luxembourg_dem.tif"
+    rail = REPO / "assets" / "gpkg" / "luxembourg_rail.gpkg"
+    camera = {"phiDeg": 270.0, "thetaDeg": 42.0, "radius": 30000.0,
+              "target": [0.0, 0.0, 0.0], "fovDeg": 45.0}
+    sun = {"azimuthDeg": 270.0, "elevationDeg": 32.0,
+           "intensity": 3.0, "color": [1.0, 0.97, 0.92]}
+    plain = {
+        "width": 512, "height": 512,
+        "camera": camera, "sun": sun,
+        "exposure": 1.35,
+        "cartography": [
+            {"id": "relief", "name": "Terrain relief", "visible": True, "type": "relief"},
+            {"id": "rail", "name": "Rail", "visible": True, "type": "vector",
+             "path": str(rail), "colour": [0.9, 0.29, 0.1, 1.0], "widthPx": 2.0,
+             "legendField": ""},
+        ],
+        "quality": {"shadows": True},
+    }
+    typed = {
+        **plain,
+        "output": str(tmp_path / "typed.png"),
+        "cartography": [
+            *plain["cartography"][:1],
+            {"id": "rail", "name": "Rail", "visible": True, "type": "vector",
+             "path": str(rail), "colour": [0.9, 0.29, 0.1, 1.0], "widthPx": 2.0,
+             "legendField": "usage"},
+            {"id": "plate", "name": "Map plate", "visible": True, "type": "plate",
+             "title": "Luxembourg rail network", "caption": "Usage classes",
+             "northArrow": True, "scaleBar": True, "legend": True},
+        ],
+    }
+    renderer = service.StudioRenderer(str(dem))
+    reply_plain, plain_img = _render_reply(service, renderer, plain)
+    assert reply_plain.get("renderPath") == "mapscene", reply_plain
+
+    reply_typed, typed_img = _render_reply(service, renderer, typed)
+    assert reply_typed.get("renderPath") == "mapscene", reply_typed
+    # The six swatches rode the plate composite: plate produced, nothing skipped.
+    assert reply_typed["plate"] is True
+    assert reply_typed["plateSkippedFor"] is None
+
+    # The one-colour frame and the categorised frame must differ in the
+    # rail pixels themselves.
+    diff = np.abs(plain_img.astype(np.int64) - typed_img.astype(np.int64)).sum(axis=2)
+    assert int((diff > 8).sum()) >= 500, "category colouring changed almost nothing"
+
+    # Every usage class swatch made it into the plate's legend area.
+    from PIL import Image
+
+    plate = np.asarray(
+        Image.open(tmp_path / "typed_plate.png").convert("RGB"), dtype=np.int32
+    )
+    palette = {
+        "main": (230, 159, 0),
+        "industrial": (86, 180, 233),
+        "branch": (0, 158, 115),
+        "tourism": (0, 114, 178),
+        "test": (213, 94, 0),
+        "siding": (240, 228, 66),
+    }
+    for name, (r, g, b) in palette.items():
+        distance = np.abs(plate - np.array([r, g, b])).sum(axis=2)
+        assert int((distance < 40).sum()) >= 30, (
+            "%s swatch missing from the plate legend" % name
+        )

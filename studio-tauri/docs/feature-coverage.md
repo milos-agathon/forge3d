@@ -207,6 +207,12 @@ authoring shows the output. The one unmatched term is the engine's
 ray-marched sun visibility (a ridge shadowing the ground behind it) — no
 three.js equivalent, documented.
 
+**Conformance gate added.** The polygon layer, the vector-attribute legend
+and the plate-with-category-legend are now pinned by engine-backed
+assertions (changed-sample ranges on the real DEMs, `plate: true`,
+skip-if-no-GPU) — a render regression from any of that work fails loudly
+rather than silently.
+
 **Phase 17 — the engine's inputs, core landed.** The New Project dialog
 has an "Engine datasets" section — the registry DEMs with thumbnails
 rendered from their own heightfields, one click to seed a project,
