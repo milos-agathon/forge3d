@@ -22,6 +22,12 @@ pub fn run() {
     let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .try_init();
 
+    // `--engine-check` answers the one question a headless stranger has:
+    // can this machine run Forge3D Studio? Probe without starting the GUI.
+    if std::env::args().any(|arg| arg == "--engine-check") {
+        std::process::exit(forge3d::engine_check());
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {

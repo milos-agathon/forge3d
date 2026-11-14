@@ -52,6 +52,75 @@ jobs:
       - name: Shell unit tests (render payload, view override)
         run: cargo test -p forge3d-studio-shell --lib
 
+  deb-audit:
+    name: deb audit — engine probe in both interpreter scenarios
+    # Gate on PRs and main pushes: the deb's stranger-readable discovery path
+    # is a contract, not a hope. The GPU is not required for this job — the
+    # gate is the probe, never a render.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: studio-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the forge3d engine in a fresh venv (reused as the success case)
+        run: |
+          python -m venv "$HOME/stranger-venv"
+          "$HOME/stranger-venv/bin/python" -m pip install --upgrade pip
+          "$HOME/stranger-venv/bin/python" -m pip install forge3d
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf desktop-file-utils
+          # dpkg -i does not fetch dependencies: carry the deb's declared
+          # Depends (libgbm1, mesa-vulkan-drivers; the webkit/gtk libs come with
+          # the -dev packages) so a wrong Depends fails the audit strictly.
+          sudo apt-get install -y libgbm1 mesa-vulkan-drivers
+
+      - name: Build the deb
+        run: |
+          npm ci
+          npm run tauri build -- --bundles deb
+
+      - name: Install the deb as a stranger would
+        run: |
+          # Needs sudo (system apt), no network beyond the apt mirrors the
+          # ubuntu-latest runner already trusts.
+          sudo dpkg -i target/release/bundle/deb/*.deb
+          command -v forge3d-studio-shell
+          forge3d-studio-shell --version || true
+
+      - name: --engine-check fails on a clean machine, naming the remedy
+        run: |
+          # No .venv anywhere above the checkout root and no engine in
+          # ubuntu-latest's stock python3: this is the stranger's case.
+          ! forge3d-studio-shell --engine-check > out.txt
+          cat out.txt
+          EXPECTED="pip install --user forge3d"
+          grep -q "$EXPECTED" out.txt || (echo "missing remedy line in --engine-check output"; exit 1)
+
+      - name: --engine-check succeeds with the engine in a fresh venv
+        run: |
+          FORGE3D_STUDIO_PYTHON="$HOME/stranger-venv/bin/python" forge3d-studio-shell --engine-check
+
+      - name: Validate the desktop entry
+        run: |
+          desktop-file-validate /usr/share/applications/*.desktop
+
   bundle:
     name: Linux bundle (deb)
     # Packaging is a release gate, not a pull-request gate: the test job above

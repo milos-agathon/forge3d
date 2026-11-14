@@ -40,7 +40,16 @@
       "icons/icon.ico"
     ],
     "category": "Graphics and Design",
-    "shortDescription": "Forge3D Studio",
-    "longDescription": "Desktop scene authoring for Forge3D: one project, two workspaces."
+    "shortDescription": "Desktop scene authoring for Forge3D",
+    "longDescription": "Desktop scene authoring for Forge3D: one project, two workspaces.",
+    "linux": {
+      "deb": {
+        "postInstallScript": "./postinst.sh",
+        "depends": [
+          "libgbm1",
+          "mesa-vulkan-drivers"
+        ]
+      }
+    }
   }
 }

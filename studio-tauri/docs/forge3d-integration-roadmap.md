@@ -1134,6 +1134,55 @@ march of the **grid**, not per-fragment, so a sub-triangle ridge still
 shows as a smooth transition rather than a hard edge; the toggle deletes
 it entirely when off (no texture, no program patch).
 
+### 5.33 The renderer presets as named Studio recipes (0.5 day) — **done**
+
+The engine's five `forge3d.presets` lighting packages are one-click recipes
+under Render → **Look presets** — `outdoor_sun`, `rainier_showcase`,
+`rainier_relief`, `studio_pbr`, `toon_viz`. Each recipe emits one
+`Batch` of commands (`SetRenderSettings` ± `SetLight`/`SetSunAngles` ±
+`SetTerrainZScale`), so the whole look lands or reverts atomically in one
+undo step; camera, DEM, layers and selection are untouched. Sun azimuth
+and elevation use the engine's azimuth convention (east → south,
+`atan2(z, x)`); `SetSunAngles` round-trips through the engine's own
+`sun_angles` in both directions, unit-tested. The still honours the
+project's zScale now — the render session keys on `(dem, zScale)` and the
+service multiplies heights by it at construction — so the relief recipes
+are real in the Rendered path, not only in the viewport. Honest deviations,
+named in each recipe's tooltip: engine-frame sun direction vectors are
+not ported; toon_viz's toon BRDF and hard shadows have no terrain-pipeline
+equivalent (closest-honest PCF at the preset's map size instead); rainier's
+camera moves and cascade/light-size/ambient-occlusion are not ported
+(cascades and light size are not available on the terrain pipe). Measured
+deltas on Mount Fuji at 512² against the starter look (|Δ|>8, changed
+samples): **outdoor_sun 159,556** (exposure 1.0), **rainier_showcase
+206,585** (sun 135°/25°, 4.0), **rainier_relief 66,613** (zScale 1.5),
+**studio_pbr 158,376** (sun 6.0), **toon_viz 159,585** (IBL 0) — pinned by
+the recipe conformance tests in `tests/test_studio_render_service.py`.
+
+### 5.34 The stranger-installable deb, with honest engine discovery (0.5 day) — **done**
+
+The deb never requires the engine at install time: the postinst names the
+remedy in one breath (`pip install --user forge3d`, or set
+`FORGE3D_STUDIO_PYTHON`) — no pip, no sudo, no engine bundled, no bare
+python fallback. The shell discovers and *validates* its interpreter in a
+fixed order: `FORGE3D_STUDIO_PYTHON` (import-checked, never trusted
+blind) → ancestors' `.venv/bin/python` (repo checkouts) → `PATH python3`,
+each probe overriding none of the others. `--engine-check` prints every
+candidate tried, one line each with its result, the verdict, and exits 0/1
+— stranger- and CI-verifiable, starts no GUI. Verified on this machine in
+four scenarios: env var set (exit 0), repo-cwd `.venv` fallback (exit 0),
+a fresh `uv` venv with `pip install forge3d` (1.48.0 → exit 0), a bare
+`PATH python3` without forge3d (exit 1 with the remedy printed). The
+desktop entry validates with `desktop-file-validate`; the deb's
+`Depends` are `libgbm1, mesa-vulkan-drivers` merged with the bundler's
+webkit/gtk defaults; the `.desktop` `Comment` no longer duplicates
+`Name`. CI gains a `deb-audit` job (PR + main): builds the deb, `sudo
+dpkg -i`, pre-installing the declared `Depends` so a wrong dependency
+fails strictly, validates the desktop entry, and runs `--engine-check`
+in both interpreter scenarios — **the gate is the probe, not a GPU
+render**; the hosted runner has no terrain-safe GPU. `rpm`/`appimage`
+remain built but unaudited, documented as such in the README.
+
 ## 6. Increment 10.0 — High-quality stills: AOV + denoise (1 day) — **done**
 
 **Trigger:** a user asks for AOVs or cleaner stills.

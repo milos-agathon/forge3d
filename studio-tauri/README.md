@@ -172,10 +172,66 @@ npm run dev          # UI only; the browser shows a "start the shell" notice
 npm run build        # typecheck + production bundle of the UI
 ```
 
+## Installing the deb (the stranger's path)
+
+The CI `bundle` job on `main` ships a `deb` artifact. Locally:
+
+```bash
+npm run tauri:build -- --bundles deb
+sudo dpkg -i "src-tauri/target/release/bundle/deb/Forge3D Studio_0.1.0_amd64.deb"
+python3 -m pip install --user forge3d   # the engine — PyPI, 1.48.0 (verified)
+```
+
+Only the `deb` is built in CI and audited (`deb-audit` job: builds the deb,
+installs it with `dpkg -i`, validates the desktop entry, then runs
+`--engine-check` in both interpreter scenarios — the gate is the probe, not a
+GPU render, because the runner has no terrain-safe GPU). The `rpm` and
+`appimage` targets remain unverified: build them with
+`npm run tauri:build -- --bundles rpm` / `--bundles appimage` and treat them
+as unvetted until they get the same audit.
+
+The package deliberately *never* requires the engine at install time; the
+postinst only names the remedy. Verify what the shell will see:
+
+Real output, run from a repo checkout with `FORGE3D_STUDIO_PYTHON` set:
+
+```bash
+forge3d-studio-shell --engine-check
+# candidate               interpreter  result
+# FORGE3D_STUDIO_PYTHON   /path/to/venv/bin/python  ok (forge3d 1.48.0)
+# repo .venv              /path/to/repo/.venv/bin/python  ok (forge3d 1.47.1)
+# PATH python3            python3  fail: import forge3d failed: No module named 'forge3d'
+# engine: found via FORGE3D_STUDIO_PYTHON (forge3d 1.48.0)
+```
+
+The `repo .venv` line appears only when the shell is launched with a repo
+checkout as an ancestor (the `.venv` next to the project). On a stranger's
+machine only `FORGE3D_STUDIO_PYTHON` and `PATH python3` can match — that is
+the intended honest behaviour, not a bug.
+
+`--engine-check` exits 0 on success, 1 on failure (with
+the exact remedies it tried). Discovery order: `FORGE3D_STUDIO_PYTHON`
+(validated, never trusted blind) → ancestors' `.venv` → `PATH python3`.
+No auto-install, no `sudo pip`, no bare-python fallback.
+
+Troubleshooting:
+
+| `--engine-check` says | Fix |
+|---|---|
+| `fail: import forge3d failed: No module named 'forge3d'` | `pip install --user forge3d` |
+| `fail: import forge3d failed: No module named 'numpy'` | `pip install --user forge3d` (PyPI wheel brings numpy) |
+| `fail: could not run python3: No such file or directory` | `apt-get install python3` |
+| `fail: <path> did not answer the engine probe within 20s` | interpreter hangs on import — try a plain venv; the probe times out by design |
+
+If the app opens with **"the engine is unavailable"** in the status bar, run
+`forge3d-studio-shell --engine-check` — the shell is telling the truth about
+what it sees; the remedy is one `pip install` away.
+
 ### Tests
 
 ```bash
-cargo test -p studio-core      # 93 tests: model, commands, migration, workspace
+cargo test -p studio-core      # 76 tests: model, commands, migration, workspace
+cargo test -p forge3d-studio-shell --lib   # 23 shell tests: engine probe, candidates
 npx tsc --noEmit               # UI types
 ```
 

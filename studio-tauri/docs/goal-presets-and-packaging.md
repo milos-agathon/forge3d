@@ -44,3 +44,40 @@ New `forge3d` wheel; tile-laddered streaming preview; meshes in the still; anyth
 ## Definition of done
 
 Presets ship as named recipes (UI + tests + measured deltas) and the deb passes `dpkg -i` on a repo-less machine, reports engine status honestly with the documented remedy. This document is the checklist; amend it in the same commits.
+
+## Status (amended with the work)
+
+**Track A — shipped in `ab14551f`, pushed to `fork/studio-tauri`.** All five
+presets are named recipes under Render → "Look presets"; one undoable `Batch`
+per recipe; tooltip names the engine preset and deviations; conformance tests
+with measured deltas (outdoor_sun 159,556, rainier_showcase 206,585,
+rainier_relief 66,613, studio_pbr 158,376, toon_viz 159,585 changed samples at
+512², Fuji). The still honours `zScale` (render session keyed on
+`(dem, zScale)`) so the relief recipes are real in the Rendered path, not
+just the viewport. Deviation notes shipped in the recipes and in the roadmap
+§5.33: toon BRDF → closest-honest PCF; engine-frame sun vectors not ported;
+cascades/light-size/AO not ported.
+
+**Track B — shipped with this amendment.** `--engine-check` flag on the
+binary; labeled, import-validated candidates (env → repo `.venv` → PATH
+python3); postinst names the remedy and nothing else; deb `Depends` merged
+(libgbm1, mesa-vulkan-drivers) with a strict dpkg audit in CI; desktop entry
+validates; README gains the stranger install path, the real `--engine-check`
+output, a troubleshooting table, and the rpm/appimage caveat (built,
+unaudited). CI `deb-audit` job: build deb → `dpkg -i` → validate desktop
+entry → `--engine-check` in both scenarios. **The gate is the probe, not a
+GPU render** — the hosted runner has no terrain-safe GPU, so GPU-side visual
+verification on a fresh stranger machine remains unverified by design.
+
+**Honest residuals:**
+
+- `dpkg -i` itself was not run on this machine (no sudo password); the control
+  checks were done by extracting the deb with `ar` and reading its members.
+  CI runs the real `dpkg -i`.
+- On this machine, a bare `PATH python3` resolved `python3` successfully but
+  the probe reports the truth about a broken interpreter — e.g. a system
+  `python3` with `forge3d` but no `numpy` fails with
+  `import forge3d failed: No module named 'numpy'`. That is the probe
+  working as designed, and it is in the troubleshooting table.
+- `rpm` and `appimage` remain unaudited (documented in the README; not
+  promised).

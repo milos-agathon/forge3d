@@ -227,6 +227,40 @@ download once into a hash-keyed cache and open as a normal DEM. Renderer
 presets and the tile-laddered progressive preview stay gated behind their
 own triggers (`docs/phase-17-plan.md`).
 
+**Phase 17b — the renderer presets as named look recipes.** The engine's five
+`forge3d.presets` lighting packages are one-click recipes under Render → "Look
+presets" — `outdoor_sun`, `rainier_showcase`, `rainier_relief`, `studio_pbr`,
+`toon_viz`. Each is one undoable `Batch` (exposure, PCF/PCSS filter and map
+size, IBL intensity, sun intensity/colour and aim, terrain exaggeration);
+camera, DEM, layers and selection are untouched, and engine-frame sun
+direction vectors are never ported (rainier's camera moves, cascades,
+light-size and AO are not ported either — the tooltips say so). toon_viz's
+toon BRDF has no terrain-pipeline equivalent and applies the closest honest
+PCF. Measured deltas against the starter look, Mount Fuji at 512²
+(|Δ|>8 changed samples): outdoor_sun 159,556; rainier_showcase 206,585;
+rainier_relief 66,613; studio_pbr 158,376; toon_viz 159,585 — pinned by the
+recipe conformance tests. The still now honours the project zScale (render
+session keyed on (dem, zScale), heights multiplied at construction), so the
+relief recipes are real in the Rendered path too.
+
+**Phase 18 — the stranger-installable deb, with honest engine discovery.**
+The deb never requires the engine at install time: the postinst names the
+remedy (`pip install --user forge3d`, or set `FORGE3D_STUDIO_PYTHON`) — no
+pip, no sudo, nothing engine-side bundled. The shell validates each
+interpreter candidate by importing forge3d, in a fixed order:
+`FORGE3D_STUDIO_PYTHON` → ancestors' `.venv` → `PATH python3`.
+`forge3d-studio-shell --engine-check` prints every candidate tried, one
+line each, the verdict, and exits 0/1 — it starts no GUI and it is what the
+stranger and CI read. Verified in four scenarios (env var, repo-cwd
+`.venv`, fresh `uv` venv with PyPI forge3d 1.48.0, bare `PATH python3` —
+exit 1 with the remedy printed). Desktop entry validates with
+`desktop-file-validate`; the deb's declared `Depends` are libgbm1 and
+mesa-vulkan-drivers (merged with the bundler's webkit/gtk defaults). CI
+gains a `deb-audit` job (PR + main): builds the deb, `dpkg -i`, validates
+the desktop entry, runs `--engine-check` in both interpreter scenarios —
+the gate is the probe, not a GPU render. `rpm`/`appimage` remain built but
+unaudited, documented in the README.
+
 **Not planned:** path tracing, splats, inverse rendering, point clouds,
 volumetrics, the globe. Different product tiers, and the roadmap's §8 already
 says so.

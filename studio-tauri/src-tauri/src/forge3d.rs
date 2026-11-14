@@ -1535,16 +1535,18 @@ pub fn url_fetch(python: &str, url: &str, cache_dir: &str) -> Result<(String, u6
     Ok((path, bytes, cached))
 }
 
-/// Interpreter candidates, most specific first.
+/// Labelled interpreter candidates, most specific first.
 ///
-/// The app is launched by `tauri dev` (cwd = the crate or the project) or as a
-/// bundle (cwd = wherever the launcher put it), so both the executable's and the
-/// working directory's ancestors are searched for the repo's `.venv`.
-fn interpreter_candidates() -> Vec<String> {
-    let mut candidates: Vec<String> = Vec::new();
+/// The label is what `--engine-check` prints, so both the stranger and the CI
+/// read the same deterministic shape.
+fn labeled_interpreter_candidates() -> Vec<(String, String)> {
+    let mut candidates: Vec<(String, String)> = Vec::new();
 
     if let Some(python) = std::env::var_os("FORGE3D_STUDIO_PYTHON") {
-        candidates.push(python.to_string_lossy().into_owned());
+        candidates.push((
+            "FORGE3D_STUDIO_PYTHON".to_owned(),
+            python.to_string_lossy().into_owned(),
+        ));
     }
 
     let mut roots: Vec<PathBuf> = Vec::new();
@@ -1558,16 +1560,23 @@ fn interpreter_candidates() -> Vec<String> {
         let venv = root.join(".venv").join("bin").join("python");
         if venv.is_file() {
             let candidate = venv.to_string_lossy().into_owned();
-            if !candidates.contains(&candidate) {
-                candidates.push(candidate);
-            }
+            candidates.push(("repo .venv".to_owned(), candidate));
             break;
         }
     }
 
-    candidates.push("python3".to_owned());
-    candidates.dedup();
+    candidates.push(("PATH python3".to_owned(), "python3".to_owned()));
+    let mut seen = std::collections::HashSet::new();
+    candidates.retain(|(_, path)| seen.insert(path.clone()));
     candidates
+}
+
+/// Interpreter candidates, most specific first.
+fn interpreter_candidates() -> Vec<String> {
+    labeled_interpreter_candidates()
+        .into_iter()
+        .map(|(_, path)| path)
+        .collect()
 }
 
 /// Directories to add to `PYTHONPATH` so a bare interpreter can import the
@@ -1646,6 +1655,57 @@ fn probe_interpreter(python: &str) -> Result<EngineStatus, String> {
         .map_err(|error| format!("the engine probe returned invalid JSON: {error}"))?;
 
     Ok(engine_status_from_probe(python, &value))
+}
+
+/// A stranger-readable probe result for `--engine-check`.
+///
+/// One line per candidate, then a one-line verdict. Exit codes: 0 found,
+/// 1 not found. Deliberately no auto-install, no sudo, and no bare-python
+/// fallback that cannot see forge3d.
+pub fn engine_check() -> i32 {
+    // The candidates list is never empty: `PATH python3` is always the last
+    // entry. (Duplicates, e.g. an env var pointing at `python3` itself, are
+    // dropped by the retain in `labeled_interpreter_candidates`.)
+    let candidates = labeled_interpreter_candidates();
+    println!("{:<24}interpreter  result", "candidate");
+    let mut found: Option<(String, String)> = None;
+    for (label, candidate) in &candidates {
+        match probe_interpreter(candidate) {
+            Ok(status) if status.available => {
+                let version = status.package_version.as_deref().unwrap_or("unversioned");
+                println!("{:<24}{}  ok (forge3d {version})", label, candidate);
+                if found.is_none() {
+                    found = Some((label.clone(), version.to_owned()));
+                }
+            }
+            Ok(status) => {
+                let detail = status.detail.lines().next().unwrap_or("unavailable");
+                println!("{:<24}{}  fail: {}", label, candidate, detail);
+            }
+            Err(error) => {
+                let detail = error.lines().next().unwrap_or("probe failed");
+                println!("{:<24}{}  fail: {}", label, candidate, detail);
+            }
+        }
+    }
+    match found {
+        Some((label, version)) => {
+            println!("\nengine: found via {label} (forge3d {version})");
+            0
+        }
+        None => {
+            println!("\nengine: not found");
+            print_engine_check_remedies();
+            1
+        }
+    }
+}
+
+fn print_engine_check_remedies() {
+    println!("remedies:");
+    println!("  pip install --user forge3d");
+    println!("  or point the shell at a working interpreter:");
+    println!("  FORGE3D_STUDIO_PYTHON=/path/to/python forge3d-studio-shell --engine-check");
 }
 
 /// Map one probe JSON object onto [`EngineStatus`].
