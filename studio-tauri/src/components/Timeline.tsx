@@ -14,6 +14,7 @@ import { useSession } from "../state/session-context";
 import { viewStore } from "../viewport/viewStore";
 import { NumberField } from "./fields";
 import { frameStepMs, nextPlayheadFrame, tickClock } from "../state/playback";
+import { reachHint } from "../state/animationReach";
 
 /** Channels the Key button writes for the selected object. */
 function keyableChannels(object: SceneObject): Channel[] {
@@ -440,12 +441,8 @@ export function Timeline() {
           </button>
         )}
       </div>
-      {selected && selected.kind.type !== "camera" && (
-        <p className="hint hint--warn">
-          Only the camera&apos;s keys reach the exported frames: a keyed
-          {selected.kind.type === "terrain" ? " terrain's" : " object&apos;s"} motion
-          is preview-only until meshes reach Rendered.
-        </p>
+      {selected && selected.kind.type !== "terrain" && (
+        <p className="hint hint--warn">{reachHint(selected)}</p>
       )}
 
       {!camera && (

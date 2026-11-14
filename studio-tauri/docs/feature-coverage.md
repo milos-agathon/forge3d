@@ -75,12 +75,17 @@ needs from those.
 Each of these is a place where the Studio shows something the engine never
 sees. They are the reason the app feels loose.
 
-1. **Object animation does not reach the render.** The timeline can key any
-   object's nine transform channels, but only the camera path and the camera's
-   field of view are sent to the engine; a keyed mesh never appears in the
-   exported frames (meshes do not reach Rendered yet — the capability table
-   says so). *Fix:* either ship meshes in Rendered (phase 15), or mark
-   non-camera channels as preview-only in the timeline.
+1. **Timeline channels that do not reach the render are now marked.** The
+   matrix is derived from the handoff (`workspace::handoff`), not assumed:
+   the camera's translation, rotation and FOV reach the export via
+   `camera_render_view`; the directional light's rotation reaches it via
+   `sun_angles` (azimuth/elevation); everything else — meshes, camera scale,
+   light translation/scale, point lights — is preview-only. The Timeline
+   shows a precise per-object hint instead of a blanket claim;
+   `src/state/animationReach.ts` (pinned by `animationReach.test.ts` and by a
+   studio-core test proving the evaluate → handoff sun path) is the one
+   source for it. Meshes still cannot reach Rendered (the capability table
+   says so); this closes the honesty gap, not the capability gap.
 2. **The Material preview matches the still's shadow rig and its diffuse-only
    terrain light.** The terrain's Material material is now
    `MeshPhysicalMaterial` with `specularIntensity = 0` — the engine's

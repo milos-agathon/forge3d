@@ -1228,6 +1228,56 @@ mod tests {
     }
 
     #[test]
+    fn evaluate_applies_keyed_light_rotation_to_the_handoff_sun() {
+        // Pins the timeline -> handoff contract the preview-only markers in
+        // the Timeline rely on: a keyed light rotation must reach the still.
+        use crate::timeline::{
+            evaluate, Channel, ChannelKeys, Interpolation, Keyframe, ObjectTrack,
+        };
+
+        let before = handoff(&Project::new("Keyed sun"), 1, Workspace::Forge3d)
+            .sun
+            .expect("starter scene has a sun");
+
+        let mut project = Project::new("Keyed sun");
+        let sun_id = sun_object_id(&project);
+        let base_y = project
+            .scene
+            .object(sun_id)
+            .unwrap()
+            .transform
+            .rotation_deg
+            .y;
+        project.timeline.tracks.push(ObjectTrack {
+            object_id: sun_id,
+            channels: vec![ChannelKeys {
+                channel: Channel::RotationY,
+                keys: vec![
+                    Keyframe {
+                        frame: 0,
+                        value: base_y,
+                        interpolation: Interpolation::Linear,
+                    },
+                    Keyframe {
+                        frame: 30,
+                        value: base_y + 90.0,
+                        interpolation: Interpolation::Linear,
+                    },
+                ],
+            }],
+        });
+        evaluate(&mut project, 30.0);
+
+        let after = handoff(&project, 2, Workspace::Forge3d)
+            .sun
+            .expect("starter scene has a sun");
+        assert!(
+            (after.azimuth_deg - before.azimuth_deg).abs() > 1.0,
+            "keyed light rotation must reach the still: {before:?} -> {after:?}"
+        );
+    }
+
+    #[test]
     fn handoff_is_idempotent_for_a_revision() {
         let project = Project::new("Handoff");
         let first = handoff(&project, 7, Workspace::Forge3d);
