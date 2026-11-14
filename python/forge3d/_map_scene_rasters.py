@@ -1,5 +1,6 @@
 """Raster source identity and terrain-UV preparation for MapScene."""
 from __future__ import annotations
+import contextlib
 import hashlib
 import io
 import json
@@ -36,6 +37,9 @@ def raster_content_hashes(recipe):
                         while chunk := source.read(io.DEFAULT_BUFFER_SIZE):
                             digest.update(chunk)
                 identity = {"layer_id": layer.layer_id, "sha256": digest.hexdigest()}
+                expected = (layer.metadata or {}).get("observation_snapshot_sha256")
+                if expected is not None and identity["sha256"] != expected:
+                    raise ValueError("compiled observation raster snapshot was modified")
                 if layer.style is not None:
                     identity["source"] = role
                 identities.append(identity)
@@ -79,7 +83,18 @@ def _overlay_in_terrain_uv(layer, recipe, shape):
         from .alignment import _require_rasterio, _affine_from_metadata, _resampling_method
         rasterio = _require_rasterio()
         from rasterio.warp import reproject
-        with rasterio.open(path) as source:
+        expected = metadata.get("observation_snapshot_sha256")
+        with contextlib.ExitStack() as stack:
+            if expected is None:
+                source = stack.enter_context(rasterio.open(path))
+            else:
+                # The compiler's single-file snapshot excludes external masks
+                # and PAM overrides. Verify the exact bytes being decoded.
+                payload = path.read_bytes()
+                if hashlib.sha256(payload).hexdigest() != expected:
+                    raise ValueError("compiled observation raster snapshot was modified")
+                memory = stack.enter_context(rasterio.MemoryFile(payload))
+                source = stack.enter_context(memory.open())
             if source.crs is None:
                 raise ValueError('GeoTIFF draping requires source CRS metadata')
             raw = source.read()

@@ -30,6 +30,7 @@ class FlythroughManifest:
     def replay_frame(
         self, scene: MapScene, frame_index: int, out_path: str | Path
     ) -> Mapping[str, Any]: ...
+    def replay_observation_frame(self, frame_index: int, out_path: str | Path) -> Mapping[str, Any]: ...
 
 def render_flythrough(
     camera_path: Sequence[MapScene] | Mapping[int, MapScene],
