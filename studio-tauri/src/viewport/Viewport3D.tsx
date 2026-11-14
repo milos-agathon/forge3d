@@ -30,6 +30,7 @@ import { viewStore } from "./viewStore";
 import {
   graticuleLayers,
   labelLayers,
+  plateLayer,
   polygonLayers,
   topImagery,
   topRamp,
@@ -2491,9 +2492,7 @@ export function Viewport3D() {
   // settings, so the viewport shows that aspect as a dashed letterbox while
   // the Plate layer is visible — the plate's crop shape, at the still's
   // aspect, centred on the canvas.
-  const plateVisible = (state?.project.cartography ?? []).some(
-    (layer) => layer.type === "plate" && layer.visible,
-  );
+  const plateVisible = plateLayer(state?.project ?? null) !== null;
   const plateSettings = state?.project.render;
   const plateAspect =
     plateSettings && plateSettings.width > 0 && plateSettings.height > 0
