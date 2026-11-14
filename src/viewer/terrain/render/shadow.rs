@@ -38,14 +38,10 @@ impl ViewerTerrainScene {
         // Mark that shadow passes are running (will be copied to csm_uniforms later)
         csm.uniforms.technique_reserved[0] = 1.0; // Flag: shadow passes executed
 
-        // Update CSM cascade matrices based on camera and light
-        csm.update_cascades(
-            camera_view,
-            camera_proj,
-            sun_direction,
-            near_plane,
-            far_plane,
-        );
+        // Keep the viewer's one-metre cascade split origin. The adaptive
+        // camera near plane is for depth precision and should not redistribute
+        // shadow resolution. Frustum fitting clips each split to the camera.
+        csm.update_cascades(camera_view, camera_proj, sun_direction, 1.0, far_plane);
 
         // Get terrain parameters for shadow pass uniforms
         let (min_h, max_h) = terrain.domain;

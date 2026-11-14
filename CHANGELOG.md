@@ -16,6 +16,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ### Fixed
 - A terrain-aware near plane reduces depth fighting in long-lens viewer shots and is shared by onscreen and offscreen terrain effects (#299).
+- Viewer shadow cascades use the frame projection when fitting cast shadows, preserving PCF and EVSM with the terrain-aware near plane.
 
 ## [1.48.0] - 2026-11-09
 
