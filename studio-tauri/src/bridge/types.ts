@@ -118,6 +118,8 @@ export interface CartographyLayer {
   /** vector */
   colour?: [number, number, number, number];
   widthPx?: number;
+  /** vector: attribute to colour features by, one swatch per class on the plate. */
+  legendField?: string;
   /** labels */
   source?: string;
   field?: string;
@@ -499,6 +501,10 @@ export interface PolygonGeometry {
 export interface VectorGeometry {
   lines: PreviewLine[];
   points: PreviewPoint[];
+  /** The legend attribute's value per line (aligned with `lines`); empty without one. */
+  categories?: string[];
+  /** value -> RGB; absent categories fall back to the layer colour. */
+  palette?: Record<string, [number, number, number]>;
 }
 
 /** The graticule for one grid layer: the grid and its coordinate annotations. */

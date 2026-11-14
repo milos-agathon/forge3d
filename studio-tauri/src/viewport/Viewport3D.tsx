@@ -1924,6 +1924,7 @@ export function Viewport3D() {
             layer.labels === false ? "0" : "1",
             layer.source ?? "",
             layer.field ?? "",
+            layer.legendField ?? "",
             layer.sizePx ?? 0,
           ]),
       )
@@ -1978,13 +1979,17 @@ export function Viewport3D() {
       const lift = drapeLift(spanXz, [preview.minElevation, preview.maxElevation], zScale);
       const lineMaterials: LineMaterial[] = [];
       const anchors: CartographyAnchor[] = [];
-      const addDraped = (lines: [number, number][][], layer: CartographyLayer) => {
+      const addDraped = (
+        lines: [number, number][][],
+        layer: CartographyLayer,
+        colourOverride?: [number, number, number, number],
+      ) => {
         if (lines.length === 0) return;
         const { positions, pairs } = drapePolylines(lines, preview, spanXz, zScale, lift);
         if (pairs.length === 0) return;
         const geometry = new LineSegmentsGeometry();
         geometry.setPositions(expandPairs(positions, pairs));
-        const rgba = layer.colour ?? [1, 0.62, 0.2, 1];
+        const rgba = colourOverride ?? layer.colour ?? [1, 0.62, 0.2, 1];
         const material = new LineMaterial({
           color: new THREE.Color(rgba[0], rgba[1], rgba[2]),
           linewidth: Math.max(1, layer.widthPx ?? 2),
@@ -2010,9 +2015,36 @@ export function Viewport3D() {
           : undefined;
         if (!file) continue;
         try {
-          const result = await bridge.vectorGeometry(terrainAsset.path, file.path, "");
+          const legend = (layer.legendField ?? "").trim();
+          const result = await bridge.vectorGeometry(
+            terrainAsset.path,
+            file.path,
+            "",
+            legend,
+          );
           if (cancelled) return;
-          addDraped(result.lines, layer);
+          if (legend && result.categories && result.palette) {
+            const groups = new Map<string, [number, number][][]>();
+            for (const [index, line] of result.lines.entries()) {
+              const category = result.categories[index] ?? "";
+              const bucket = groups.get(category) ?? [];
+              bucket.push(line);
+              groups.set(category, bucket);
+            }
+            const alpha = layer.colour?.[3] ?? 1;
+            for (const [value, subLines] of groups) {
+              const rgb = result.palette[value];
+              // A category absent from the palette (uncategorised) keeps the
+              // layer colour — the same rule the still applies.
+              addDraped(
+                subLines,
+                layer,
+                rgb ? [rgb[0], rgb[1], rgb[2], alpha] : layer.colour,
+              );
+            }
+          } else {
+            addDraped(result.lines, layer);
+          }
         } catch (cause) {
           if (!cancelled) {
             setProblem(

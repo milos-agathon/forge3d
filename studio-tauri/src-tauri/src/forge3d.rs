@@ -874,7 +874,10 @@ def normalize(line):
 if kind == "vector":
     vector_path = sys.argv[4]
     label_field = sys.argv[5]
-    lines, points, vector_crs = sr.read_vector_features(vector_path, label_field)
+    legend_field = sys.argv[6] if len(sys.argv) > 6 else ""
+    lines, points, vector_crs, categories = sr.read_vector_features(
+        vector_path, label_field, legend_field
+    )
     file_code = sr.crs_code(vector_crs)
     dem_code = sr.crs_code(crs)
     if dem_code and file_code and dem_code != file_code:
@@ -883,14 +886,22 @@ if kind == "vector":
             "detail": "the vector file is in EPSG:%s and the DEM in EPSG:%s; reproject the file onto the DEM's CRS first" % (file_code, dem_code),
         }))
         raise SystemExit(0)
-    out_lines = [normalize(line) for line in lines if len(line) >= 2]
+    kept = [(line, category) for line, category in zip(lines, categories) if len(line) >= 2]
+    out_lines = [normalize(line) for line, _ in kept]
+    out_categories = [category for _, category in kept]
+    assignments, ordered = sr.category_assignments(out_categories)
+    palette = {
+        value: [round(float(c), 6) for c in rgb]
+        for value, rgb, _count in ordered
+    }
     out_points = []
     for _identifier, x, y, text in points:
         u = (float(x) - west) / span_x
         v = (north - float(y)) / span_y
         if 0.0 <= u <= 1.0 and 0.0 <= v <= 1.0:
             out_points.append({"u": u, "v": v, "text": str(text)})
-    print(json.dumps({"ok": True, "kind": "vector", "lines": out_lines, "points": out_points}))
+    print(json.dumps({"ok": True, "kind": "vector", "lines": out_lines, "points": out_points,
+                      "categories": out_categories, "palette": palette}))
     raise SystemExit(0)
 
 if kind == "polygon":
@@ -1046,12 +1057,17 @@ pub fn vector_geometry(
     dem_path: &str,
     vector_path: &str,
     label_field: &str,
+    legend_field: &str,
 ) -> Result<serde_json::Value, String> {
     run_vector_preview(
         python,
         "vector",
         dem_path,
-        &[vector_path.to_owned(), label_field.to_owned()],
+        &[
+            vector_path.to_owned(),
+            label_field.to_owned(),
+            legend_field.to_owned(),
+        ],
     )
 }
 

@@ -336,6 +336,9 @@ pub enum CartographyLayerHandoffKind {
         path: String,
         colour: [f32; 4],
         width_px: f32,
+        /// The attribute to colour the features by; absent for one colour.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        legend_field: Option<String>,
     },
     Polygon {
         path: String,
@@ -639,6 +642,7 @@ pub fn cartography_handoff(project: &Project) -> Vec<CartographyLayerHandoff> {
                 asset,
                 colour,
                 width_px,
+                legend_field,
             } => {
                 let Some(asset) = project.asset(*asset) else {
                     continue;
@@ -647,6 +651,7 @@ pub fn cartography_handoff(project: &Project) -> Vec<CartographyLayerHandoff> {
                     path: asset.path.clone(),
                     colour: *colour,
                     width_px: *width_px,
+                    legend_field: legend_field.clone(),
                 }
             }
             crate::cartography::CartographyLayerKind::Polygon { asset, colour } => {

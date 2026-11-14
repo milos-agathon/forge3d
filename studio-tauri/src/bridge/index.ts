@@ -90,6 +90,7 @@ export interface StudioBridge {
     demPath: string,
     vectorPath: string,
     labelField?: string,
+    legendField?: string,
   ): Promise<VectorGeometry & { ok: boolean }>;
   /** The polygon layer's rings (exteriors and holes), in the DEM's frame,
    *  normalised to the preview's 0..1 lattice — shares the still's reader. */

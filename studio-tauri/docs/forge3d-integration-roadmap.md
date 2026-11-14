@@ -1100,6 +1100,22 @@ normalised). The layer shows up in the stack, the Inspector and the
 `Add layer` menu like the rest. Still open in the tier: a legend for the
 vector attributes.
 
+### 5.31 The vector-attribute legend (0.5 day) — **done**
+
+A vector layer can now colour its features by one attribute
+(`legendField`, e.g. `usage`): categories are ranked by frequency
+(desc, name asc), mapped to the Okabe–Ito colour-blind-safe palette
+(the engine ships no categorical LUT), with the tail beyond eight folding
+into a grey "other". Lines draw per category through the engine's OIT
+bridge — one pass per class — and the plate's legend prints one swatch per
+class instead of one swatch per file. The viewport draws the same classes
+with the same palette (the geometry IPC re-exports it), so authoring and
+print match. Measured on the Luxembourg DEM at 512² with the rail network
+drawn by `usage` (main/industrial/branch/tourism/test/siding + an
+uncategorised bucket): **3,959 samples change vs the one-colour frame
+(mean |Δ| 171.5)**; the plate composite carries the six swatches
+(`plate: true`, no skip reason).
+
 ## 6. Increment 10.0 — High-quality stills: AOV + denoise (1 day) — **done**
 
 **Trigger:** a user asks for AOVs or cleaner stills.

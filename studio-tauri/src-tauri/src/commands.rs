@@ -192,6 +192,7 @@ fn recipe_commands(
                     asset: asset_id,
                     colour: *colour,
                     width_px: *width_px,
+                    legend_field: None,
                 });
                 layer.id = id;
                 commands.push(Command::AddCartographyLayer { layer, index: None });
@@ -782,6 +783,7 @@ pub fn vector_geometry(
     dem_path: String,
     vector_path: String,
     label_field: Option<String>,
+    legend_field: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let python = forge.probe(false).python;
     crate::forge3d::vector_geometry(
@@ -789,6 +791,7 @@ pub fn vector_geometry(
         &dem_path,
         &vector_path,
         label_field.as_deref().unwrap_or(""),
+        legend_field.as_deref().unwrap_or(""),
     )
 }
 
@@ -1105,6 +1108,7 @@ pub fn add_vector_layer(
             asset: asset.id,
             colour,
             width_px: width_px.unwrap_or(2.0).clamp(1.0, 20.0),
+            legend_field: None,
         }),
         index: None,
     });

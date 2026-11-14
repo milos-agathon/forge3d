@@ -102,11 +102,12 @@ export const tauriBridge: StudioBridge = {
     invoke<TerrainPreview>("terrain_preview", { path, resolution: resolution ?? null }),
 
   colormapStops: (name) => invoke<number[][]>("colormap_stops", { name }),
-  vectorGeometry: (demPath, vectorPath, labelField) =>
+  vectorGeometry: (demPath, vectorPath, labelField, legendField) =>
     invoke<VectorGeometry & { ok: boolean }>("vector_geometry", {
       demPath,
       vectorPath,
       labelField,
+      legendField,
     }),
   polygonGeometry: (demPath, vectorPath) =>
     invoke<PolygonGeometry & { ok: boolean }>("polygon_geometry", {

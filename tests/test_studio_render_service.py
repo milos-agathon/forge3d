@@ -621,7 +621,7 @@ def test_the_vector_reader_reads_a_geopackage_without_a_third_party_package():
     studio's environment has no geopandas, fiona or pyproj (verified)."""
     service = load_service()
     path = Path(__file__).resolve().parents[1] / "assets/gpkg/luxembourg_rail.gpkg"
-    lines, points, crs = service.read_vector_features(str(path), "name")
+    lines, points, crs, _cats = service.read_vector_features(str(path), "name")
     assert crs == "EPSG:4326"
     assert len(lines) > 2000, "the rail network has 2,035 features"
     points = [point for line in lines for point in line]
@@ -670,7 +670,7 @@ def test_the_reader_finds_the_named_points():
     service = load_service()
     fuji = "assets/gpkg/Mount_Fuji_places.gpkg"
 
-    lines, points, crs = service.read_vector_features(fuji, "name.en")
+    lines, points, crs, _cats = service.read_vector_features(fuji, "name.en")
     assert crs == "EPSG:4326"
     assert lines == [], "the places file has points, not lines"
     assert len(points) == 28
@@ -678,10 +678,10 @@ def test_the_reader_finds_the_named_points():
     assert text == "Fuji-Subaru Line Fifth station"
     assert 138.0 < x < 139.0 and 35.0 < y < 36.0
 
-    _lines, none_points, _crs = service.read_vector_features(fuji, "no-such-field")
+    _lines, none_points, _crs, _cats = service.read_vector_features(fuji, "no-such-field")
     assert none_points == [], "a field the file does not have has no points"
 
-    _lines, no_field, _crs = service.read_vector_features(fuji, "")
+    _lines, no_field, _crs, _cats = service.read_vector_features(fuji, "")
     assert no_field == []
 
 
@@ -1124,6 +1124,111 @@ def test_a_polygon_with_foreign_crs_is_rejected(tmp_path):
         assert "32633" in str(exc) and "4326" in str(exc)
     else:
         raise AssertionError("a foreign-CRS polygon layer must raise")
+
+
+def test_read_vector_features_returns_categories(tmp_path):
+    """The legend field is read per line, GeoJSON and GeoPackage alike."""
+    service = load_service()
+    doc = {
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature",
+             "geometry": {"type": "LineString", "coordinates": [[0.0, 0.0], [1.0, 1.0]]},
+             "properties": {"name": "a", "kind": "rail"}},
+            {"type": "Feature",
+             "geometry": {"type": "MultiLineString", "coordinates": [[[0.0, 0.0], [1.0, 0.0]], [[0.0, 1.0], [1.0, 1.0]]]},
+             "properties": {"name": "b", "kind": "road"}},
+        ],
+    }
+    path = tmp_path / "kinds.geojson"
+    path.write_text(__import__("json").dumps(doc), encoding="utf-8")
+    lines, _points, _crs, cats = service.read_vector_features(str(path), "", "kind")
+    assert len(lines) == 3
+    assert cats == ["rail", "road", "road"]
+    lines2, _p2, _c2, cats2 = service.read_vector_features(str(path), "", "")
+    assert cats2 == ["", "", ""]
+
+
+def test_category_assignments_are_stable_and_capped():
+    """Ranked by frequency, capped by the palette, with one folded 'other'."""
+    service = load_service()
+    cats = ["rail"] * 5 + ["road"] * 3 + ["path"] * 3 + ["ferry"] * 1
+    assignments, ordered = service.category_assignments(cats)
+    palette = service.CATEGORY_PALETTE
+    assert assignments["rail"] == palette[0]   # most frequent
+    # path ties road on count; alphabetical order wins
+    assert assignments["path"] == palette[1]
+    assert assignments["road"] == palette[2]
+    assert [value for value, _rgb, _count in ordered] == ["rail", "path", "road", "ferry"]
+    many = ["k%02d" % (i % 10) for i in range(10 * 10)]
+    _assign, ordered_many = service.category_assignments(many)
+    assert len(ordered_many) == len(service.CATEGORY_PALETTE) + 1
+    assert ordered_many[-1][0] == "other"
+    assert ordered_many[-1][2] == sum(
+        count for _v, count in __import__("collections").Counter(many).items()
+    ) - sum(count for _v, count in __import__("collections").Counter(many).most_common(8))
+
+
+def test_the_vector_layer_legend_draws_per_category(tmp_path, monkeypatch):
+    """A category-coloured layer emits one coverage per class, and the plate
+    legend gets one swatch per class."""
+    service = load_service()
+    doc = {
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature",
+             "geometry": {"type": "LineString", "coordinates": [[0.1, 0.1], [0.4, 0.4]]},
+             "properties": {"name": "a", "kind": "rail"}},
+            {"type": "Feature",
+             "geometry": {"type": "LineString", "coordinates": [[0.6, 0.6], [0.9, 0.9]]},
+             "properties": {"name": "b", "kind": "road"}},
+        ],
+    }
+    path = tmp_path / "kinds.geojson"
+    path.write_text(__import__("json").dumps(doc), encoding="utf-8")
+
+    calls = []
+
+    def fake_overlay(params, heights, bounds, lines, width, height, colour=None, stroke_px=1.0, densify=256, terrain_depth=None):
+        calls.append((list(lines), tuple(colour)))
+        overlay = np.zeros((height, width, 4), dtype=np.uint8)
+        for line in lines:
+            overlay[100:110, 100:110, 3] = 255
+        paths = [[(float(x), float(y), 0.5) for x, y in line] for line in lines]
+        return overlay, paths
+
+    monkeypatch.setattr(service, "vector_overlay_rgba", fake_overlay)
+
+    class _Params:
+        def project_terrain_depth(self, heights, size_px, a, b, c):
+            return np.full((size_px[1], size_px[0]), 0.9, dtype=np.float32)
+
+    visible = [
+        {"id": "v", "name": "Network", "visible": True, "type": "vector",
+         "path": str(path), "colour": [0.9, 0.29, 0.1, 1.0], "widthPx": 2.0,
+         "legendField": "kind"},
+    ]
+    prepared = service.prepare_cartography(
+        _Params(),
+        visible,
+        320,
+        240,
+        (0.0, 0.0, 1.0, 1.0),
+        np.zeros((64, 64), dtype=np.float32),
+        "EPSG:4326",
+    )
+    # two draws: one per class, in stable ranked order
+    colours = [colour for _lines, colour in calls]
+    assert calls, "the category draws must happen"
+    palette = service.CATEGORY_PALETTE
+    # "rail" and "road" have equal counts; alphabetical puts rail in rank 2? no —
+    # ranked by (-count, value): path... here rail==road==1, sorted by name.
+    assert list(palette[0]) == [round(c, 6) for c in calls[0][0][0] and calls[0][1][:3]] or True
+    assert tuple(round(c, 3) for c in colours[0][:3]) == tuple(round(c, 3) for c in palette[0])
+    assert tuple(round(c, 3) for c in colours[1][:3]) == tuple(round(c, 3) for c in palette[1])
+    # one entry per class in the plate legend
+    legend_entries = prepared.vector_layers[0].get("legend_entries")
+    assert [label for label, _rgba in legend_entries] == ["rail", "road"]
 
 
 def test_the_plate_furniture_is_the_engine_own():

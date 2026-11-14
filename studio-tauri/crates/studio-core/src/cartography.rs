@@ -72,6 +72,10 @@ pub enum CartographyLayerKind {
         colour: [f32; 4],
         /// The line's symbol width in pixels.
         width_px: f32,
+        /// The attribute to colour the features by — one swatch per class on
+        /// the plate. Absent (or empty): the layer draws in one colour.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        legend_field: Option<String>,
     },
     /// A vector layer: polygons filled on the terrain, holes and all, drawn
     /// by the engine's own polygon rasterizer.
@@ -182,8 +186,16 @@ impl CartographyLayerKind {
                 Ok(())
             }
             CartographyLayerKind::Vector {
-                colour, width_px, ..
+                colour,
+                width_px,
+                legend_field,
+                ..
             } => {
+                if let Some(field) = legend_field {
+                    if field.trim().is_empty() {
+                        return Err("the vector legend attribute needs a name".to_owned());
+                    }
+                }
                 if !colour
                     .iter()
                     .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
@@ -299,6 +311,7 @@ mod tests {
             asset: new_id(),
             colour: [0.9, 0.29, 0.1, 1.0],
             width_px: 3.0,
+            legend_field: None,
         });
         let text = serde_json::to_string(&layer).expect("serialize");
         let back: CartographyLayer = serde_json::from_str(&text).expect("deserialize");
@@ -380,6 +393,7 @@ mod tests {
             asset: new_id(),
             colour: [1.4, 0.0, 0.0, 1.0],
             width_px: 3.0,
+            legend_field: None,
         }
         .validate()
         .is_err());

@@ -985,6 +985,7 @@ mod tests {
                     path: "/data/luxembourg_rail.gpkg".to_owned(),
                     colour: [0.9, 0.29, 0.1, 1.0],
                     width_px: 3.0,
+                    legend_field: None,
                 },
             },
             CartographyLayerHandoff {

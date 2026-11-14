@@ -121,6 +121,17 @@ export function CartographyProperties() {
         )}
         {layer.type === "vector" && (
           <>
+            <TextField
+              label="Legend of (attribute)"
+              value={layer.legendField ?? ""}
+              onCommit={(legendField) =>
+                update({ legendField: legendField.trim() || undefined })
+              }
+            />
+            <p className="hint">
+              One swatch per class on the plate, and the lines take the same
+              colours. Empty = one colour for the whole layer.
+            </p>
             <NumberField
               label="Width (px)"
               value={layer.widthPx ?? 2}

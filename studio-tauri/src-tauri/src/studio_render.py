@@ -1042,7 +1042,12 @@ class StudioRenderer:
                 except Exception:  # noqa: BLE001 - the plate still has its title
                     pass
             for vector in cartography.vector_layers:
-                # The vector layer gets its own entry: its swatch and its file.
+                # A category-coloured vector layer: one swatch per class.
+                for label, rgba in vector.get("legend_entries", ()) or ():
+                    legends.append(plate_vector_legend(rgba, str(label)))
+                if vector.get("legend_entries"):
+                    continue
+                # Otherwise the layer gets its own entry: swatch and file.
                 legends.append(
                     plate_vector_legend(
                         vector.get("colour", (0.9, 0.29, 0.1, 1.0)),
@@ -1758,10 +1763,58 @@ def _gpkg_geometry_lines(blob: bytes) -> list[list[tuple[float, float]]]:
     return _wkb_line_strings(blob[offset:])
 
 
-def read_vector_features(path: str, label_field: str = ""):
+#: Okabe–Ito categorical palette (colour-blind safe), up to eight classes.
+#: The engine ships no categorical LUT — this is the studio's answer to
+#: "one swatch per feature class", and the still and the viewport share it
+#: (the geometry IPC re-exports it through this module).
+CATEGORY_PALETTE = [
+    (0.902, 0.624, 0.000),  # orange
+    (0.337, 0.706, 0.914),  # sky blue
+    (0.000, 0.620, 0.451),  # bluish green
+    (0.000, 0.447, 0.698),  # blue
+    (0.835, 0.369, 0.000),  # vermillion
+    (0.941, 0.894, 0.259),  # yellow
+    (0.800, 0.475, 0.655),  # reddish purple
+    (0.000, 0.000, 0.000),  # black
+]
+OTHER_CATEGORY_COLOUR = (0.698, 0.698, 0.698)
+
+
+def category_assignments(categories, palette_size: int = None):
+    """Category values -> the colour each value takes, stably.
+
+    Categories are ranked by frequency (desc, then value) so the assignment
+    is stable across renders of the same file; values beyond the palette fold
+    into a shared grey. Uncategorised lines (empty string) are not in the
+    mapping — the caller draws those with the layer colour.
+
+    Returns `(assignments, ordered)`:
+
+    * `assignments` — category value -> `(r, g, b)` in 0..=1;
+    * `ordered` — `[(value, (r, g, b), count)]`, legend order.
+    """
+    from collections import Counter
+
+    palette_size = palette_size or len(CATEGORY_PALETTE)
+    counts = Counter(category for category in categories if category)
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], str(item[0])))
+    assignments = {}
+    for index, (value, count) in enumerate(ranked):
+        assignments[value] = CATEGORY_PALETTE[index] if index < palette_size else OTHER_CATEGORY_COLOUR
+    if len(ranked) <= palette_size:
+        ordered = [(value, assignments[value], count) for value, count in ranked]
+    else:
+        head = ranked[:palette_size]
+        rest = ranked[palette_size:]
+        ordered = [(value, assignments[value], count) for value, count in head]
+        ordered.append(("other", OTHER_CATEGORY_COLOUR, sum(count for _v, count in rest)))
+    return assignments, ordered
+
+
+def read_vector_features(path: str, label_field: str = "", category_field: str = ""):
     """The features of a vector file, in the file's own coordinates.
 
-    Returns `(lines, points, crs)`:
+    Returns `(lines, points, crs, categories)`:
 
     * `lines` — the polylines, in the file's own coordinates;
     * `points` — `(id, x, y, text)` for the point features that carry a
@@ -1770,7 +1823,10 @@ def read_vector_features(path: str, label_field: str = ""):
     * `crs` — the file's CRS (an EPSG string for a GeoPackage, whatever the
       GeoJSON says) or `None` when the file declares none. A GeoPackage's CRS
       comes from `gpkg_geometry_columns`; a GeoJSON's is only trusted when it
-      names one.
+      names one;
+    * `categories` — the `category_field` value per line (empty string when
+      the field is unset or a feature has none); ignored by callers that do
+      not pass `category_field`.
     """
     import json
     import os
@@ -1783,16 +1839,22 @@ def read_vector_features(path: str, label_field: str = ""):
             document = json.load(handle)
         lines: list[list[tuple[float, float]]] = []
         points: list[tuple[str, float, float, str]] = []
+        categories: list[str] = []
         crs = geojson_crs(document)
         for index, feature in enumerate(document.get("features", []) or []):
             geometry = feature.get("geometry") or {}
             kind = str(geometry.get("type", "")).lower()
             coordinates = geometry.get("coordinates") or []
+            category = (
+                _feature_text(feature, category_field) if category_field else ""
+            )
             if kind == "linestring":
                 lines.append([(float(x), float(y)) for x, y in coordinates])
+                categories.append(category)
             elif kind == "multilinestring":
                 for part in coordinates:
                     lines.append([(float(x), float(y)) for x, y in part])
+                    categories.append(category)
             elif kind == "point":
                 text = _feature_text(feature, field)
                 if text:
@@ -1804,7 +1866,7 @@ def read_vector_features(path: str, label_field: str = ""):
                             text,
                         )
                     )
-        return lines, points, crs
+        return lines, points, crs, categories
 
     if not lowered.endswith((".gpkg", ".sqlite", ".db")):
         raise RuntimeError(
@@ -1847,22 +1909,32 @@ def read_vector_features(path: str, label_field: str = ""):
         selected = [quoted_geometry]
         if field and field in columns:
             selected.append('"%s"' % field.replace('"', '""'))
+        category_index = None
+        if category_field and category_field in columns:
+            category_index = len(selected)
+            selected.append('"%s"' % category_field.replace('"', '""'))
         lines = []
         points = []
+        categories: list[str] = []
         for row in cursor.execute(
             'SELECT %s FROM "%s"' % (", ".join(selected), quoted_table)
         ):
             blob = row[0]
             if not isinstance(blob, (bytes, bytearray)):
                 continue
-            lines.extend(_gpkg_geometry_lines(bytes(blob)))
+            row_lines = _gpkg_geometry_lines(bytes(blob))
+            lines.extend(row_lines)
+            category = (
+                str(row[category_index] or "").strip() if category_index is not None else ""
+            )
+            categories.extend([category] * len(row_lines))
             if len(row) > 1 and field:
                 text = str(row[1] or "").strip()
                 if text:
                     for x, y in _gpkg_geometry_points(bytes(blob)):
                         points.append(("feature-%s" % len(points), x, y, text))
         crs = "EPSG:%d" % int(srs_id) if srs_id is not None else None
-        return lines, points, crs
+        return lines, points, crs, categories
     finally:
         connection.close()
 
@@ -2219,7 +2291,10 @@ def prepare_cartography(
         )
 
     for vector in vector_layers:
-        lines, _points, vector_crs = read_vector_features(str(vector["path"]), "")
+        legend_field = str(vector.get("legendField", "") or "").strip()
+        lines, _points, vector_crs, line_categories = read_vector_features(
+            str(vector["path"]), "", legend_field
+        )
         file_code = crs_code(vector_crs)
         if dem_code and file_code and dem_code != file_code:
             raise RuntimeError(
@@ -2232,29 +2307,66 @@ def prepare_cartography(
         # The rasterizer's own floor is one pixel: 0.5 and 1.0 px render
         # identically (0 changed samples, measured).
         stroke_px = max(1.0, float(vector.get("widthPx", 2.0) or 2.0))
-        overlay, paths = vector_overlay_rgba(
-            params,
-            heights,
-            bounds,
-            lines,
-            width,
-            height,
-            colour=tuple(
-                float(c) for c in vector.get("colour", (1.0, 0.29, 0.1, 1.0))
-            ),
-            stroke_px=stroke_px,
-            terrain_depth=depth,
-        )
-        if overlay is None:
+        base_colour = tuple(float(c) for c in vector.get("colour", (1.0, 0.29, 0.1, 1.0)))
+
+        def draw(sub_lines, sub_colour, name):
+            overlay, paths = vector_overlay_rgba(
+                params,
+                heights,
+                bounds,
+                sub_lines,
+                width,
+                height,
+                colour=sub_colour,
+                stroke_px=stroke_px,
+                terrain_depth=depth,
+            )
+            if overlay is None:
+                return False
+            batch = vector_batch(overlay, paths, depth, name)
+            prepared.vector_overlays.append(batch["rgba"])
+            prepared.vector_batches.append(batch)
+            return True
+
+        if legend_field:
+            assignments, ordered = category_assignments(line_categories)
+            if not ordered:
+                warn(
+                    "the legend attribute %r is missing in the vector file; "
+                    "drawing with the layer colour" % legend_field
+                )
+                draw(lines, base_colour, str(vector.get("name", "vector")))
+                prepared.vector_layers.append(vector)
+                continue
+            # One draw per category, drawn on the layer's terrain depth.
+            drew_any = False
+            for value, (r, g, b), count in ordered:
+                if value == "other":
+                    subset = [
+                        (line, category)
+                        for line, category in zip(lines, line_categories)
+                        if category not in assignments or assignments[category] == OTHER_CATEGORY_COLOUR
+                    ]
+                    name = "%s — other" % vector.get("name", "vector")
+                else:
+                    subset = [
+                        line for line, category in zip(lines, line_categories) if category == value
+                    ]
+                    name = "%s — %s" % (vector.get("name", "vector"), value)
+                rgba = (r, g, b, float(base_colour[3] if len(base_colour) > 3 else 1.0))
+                if subset and draw(subset, rgba, name):
+                    drew_any = True
+            # The plate's legend: one swatch per category, labelled.
+            vector = dict(vector)
+            vector["legend_entries"] = [
+                (value, (r, g, b, 1.0)) for value, (r, g, b), _count in ordered
+            ]
+            if drew_any:
+                prepared.vector_layers.append(vector)
             continue
-        # The engine's GPU batch, and the plain path's overlay: one coverage,
-        # so both paths draw the same line.
-        batch = vector_batch(
-            overlay, paths, depth, str(vector.get("name", "vector"))
-        )
-        prepared.vector_overlays.append(batch["rgba"])
-        prepared.vector_layers.append(vector)
-        prepared.vector_batches.append(batch)
+
+        if draw(lines, base_colour, str(vector.get("name", "vector"))):
+            prepared.vector_layers.append(vector)
 
     for grid in graticule_layers:
         # The engine's own graticule: the meridians and parallels of the
@@ -2318,7 +2430,7 @@ def prepare_cartography(
 
     for label_layer in label_layers:
         field = str(label_layer.get("field", "") or "")
-        _lines, points, label_crs = read_vector_features(
+        _lines, points, label_crs, _cats = read_vector_features(
             str(label_layer["path"]), field
         )
         file_code = crs_code(label_crs)

@@ -40,6 +40,7 @@ fn vector_layer(asset: AssetId) -> CartographyLayer {
         asset,
         colour: [0.9, 0.29, 0.1, 1.0],
         width_px: 3.0,
+        legend_field: None,
     })
 }
 
