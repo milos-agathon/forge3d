@@ -26,6 +26,7 @@ import type {
   AnimationFrameRequest,
   WrittenFrame,
   GraticuleGeometry,
+  PolygonGeometry,
   VectorGeometry,
 } from "./types";
 
@@ -90,6 +91,12 @@ export interface StudioBridge {
     vectorPath: string,
     labelField?: string,
   ): Promise<VectorGeometry & { ok: boolean }>;
+  /** The polygon layer's rings (exteriors and holes), in the DEM's frame,
+   *  normalised to the preview's 0..1 lattice — shares the still's reader. */
+  polygonGeometry(
+    demPath: string,
+    vectorPath: string,
+  ): Promise<PolygonGeometry & { ok: boolean; detail?: string }>;
   /** The graticule for the DEM's CRS and bounds (the engine's own grid),
    *  with its coordinate annotations. */
   graticuleGeometry(
@@ -100,6 +107,11 @@ export interface StudioBridge {
   /** Replace the scene terrain's DEM with a raster the user picked — or add
    *  the terrain when the scene has none yet. */
   importTerrainDem(path: string): Promise<SessionState>;
+  /** Add a polygon layer from a GPKG/GeoJSON feature collection. */
+  addPolygonLayer(
+    path: string,
+    colour?: [number, number, number, number],
+  ): Promise<SessionState>;
   /** Add an imagery layer to the map's stack. */
   addImageryLayer(path: string, opacity?: number): Promise<SessionState>;
   /** Add a vector layer to the map's stack. The colour is RGBA 0..=1 and the

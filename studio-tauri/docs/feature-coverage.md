@@ -158,11 +158,16 @@ rasterizer, and the place names draw through the engine's label plan and its
 text compositor (`forge3d.composite_label_layers`, made public for callers
 that own their pixels). The lines carry their own depth (the engine's public
 `forge3d.vector.projected_depth`), so a ridge in front of a line hides it;
-the plate's scale bar and north arrow are the engine's own (`ScaleBar`,
-`NorthArrow`), and the graticule is the engine's grid
+the studio's own label anchors use the same rule (a ridge hides a label),
+and the plate's scale bar and north arrow are the engine's own
+(`ScaleBar`, `NorthArrow`), and the graticule is the engine's grid
 (`forge3d.graticule.generate_graticule`) with its annotations placed by the
-engine's label plan. Still open in the tier: polygons, a legend for the
-vector attributes and terrain-occluded labels.
+engine's label plan. Polygons land as a layer kind of their own
+(`CartographyLayerKind::Polygon`): draped on the terrain through the
+engine's polygon rasterizer, hidden by ridges and the sky like lines and
+labels — measured on the Fuji DEM at 512²: **11,100 of 262,144 samples
+change (4.23%)** against the same frame without the layer, the hole stays
+open. Still open in the tier: a legend for the vector attributes.
 
 **Phase 15 (MapScene — the still *is* the recipe now).** Every still — and
 every viewport frame — goes through the engine's `MapScene` recipe: the studio

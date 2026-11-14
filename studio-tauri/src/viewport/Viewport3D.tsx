@@ -27,7 +27,14 @@ import {
   loadAssetScene,
 } from "./assets";
 import { viewStore } from "./viewStore";
-import { graticuleLayers, labelLayers, topImagery, topRamp, vectorLayers } from "../state/cartography";
+import {
+  graticuleLayers,
+  labelLayers,
+  polygonLayers,
+  topImagery,
+  topRamp,
+  vectorLayers,
+} from "../state/cartography";
 import { lightingRig, type LightingRig } from "./lighting";
 import { rampColor } from "./colormap";
 import { TERRAIN_VIEW_SIZE, computeRenderView } from "./viewMath";
@@ -37,6 +44,7 @@ import {
   drapePolylines,
   expandPairs,
 } from "./cartography";
+import { buildPolygonMesh } from "./polygonMesh";
 
 const DEG = Math.PI / 180;
 /** Fly-camera keys: WASD in the view plane, Q/E down and up, Shift to sprint. */
@@ -709,8 +717,8 @@ function labelInk(rgba: [number, number, number, number] | undefined): {
   };
 }
 
-/** Remove the draped lines and their GPU buffers. */
-function disposeOverlayLines(group: THREE.Group): void {
+/** Remove every overlay child (draped lines and filled polygon meshes) and its GPU buffers. */
+function disposeOverlayObjects(group: THREE.Group): void {
   for (const child of [...group.children]) {
     group.remove(child);
     const line = child as LineSegments2;
@@ -1546,7 +1554,7 @@ export function Viewport3D() {
       environmentRef.current?.background.dispose();
       environmentRef.current?.target.dispose();
       runtime.pmrem?.dispose();
-      disposeOverlayLines(overlay);
+      disposeOverlayObjects(overlay);
       scene.remove(overlay);
       overlay.clear();
       labelLayer.remove();
@@ -1902,6 +1910,7 @@ export function Viewport3D() {
             (layer) =>
               layer.visible &&
               (layer.type === "vector" ||
+                layer.type === "polygon" ||
                 layer.type === "labels" ||
                 layer.type === "graticule"),
           )
@@ -1929,7 +1938,7 @@ export function Viewport3D() {
     let cancelled = false;
 
     // The overlay always mirrors the stack: whatever it had, it drops.
-    disposeOverlayLines(runtime.overlay);
+    disposeOverlayObjects(runtime.overlay);
     runtime.overlay.visible = viewportModeRef.current !== "rendered";
     if (runtime.labelLayer) {
       runtime.labelLayer.style.display = runtime.overlay.visible ? "" : "none";
@@ -2074,6 +2083,33 @@ export function Viewport3D() {
               occluded: false,
             });
           }
+        } catch (cause) {
+          if (!cancelled) {
+            setProblem(
+              `"${layer.name}" could not be drawn: ${cause instanceof Error ? cause.message : String(cause)}`,
+            );
+          }
+        }
+      }
+      for (const layer of polygonLayers(project)) {
+        const assetId = layer.asset;
+        const file = assetId
+          ? project.assets.find((entry) => entry.id === assetId)
+          : undefined;
+        if (!file) continue;
+        try {
+          const result = await bridge.polygonGeometry(terrainAsset.path, file.path);
+          if (cancelled) return;
+          const mesh = buildPolygonMesh(
+            result.exteriors,
+            result.holes,
+            preview,
+            spanXz,
+            zScale,
+            lift,
+            layer.colour ?? [0.2, 0.55, 0.75, 0.7],
+          );
+          if (mesh) runtime.overlay.add(mesh);
         } catch (cause) {
           if (!cancelled) {
             setProblem(

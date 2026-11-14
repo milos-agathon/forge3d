@@ -19,6 +19,7 @@ import type {
   TerrainPreview,
   WrittenFrame,
   GraticuleGeometry,
+  PolygonGeometry,
   VectorGeometry,
 } from "./types";
 
@@ -107,6 +108,11 @@ export const tauriBridge: StudioBridge = {
       vectorPath,
       labelField,
     }),
+  polygonGeometry: (demPath, vectorPath) =>
+    invoke<PolygonGeometry & { ok: boolean }>("polygon_geometry", {
+      demPath,
+      vectorPath,
+    }),
   graticuleGeometry: (demPath, intervalDeg, labels) =>
     invoke<GraticuleGeometry & { ok: boolean }>("graticule_geometry", {
       demPath,
@@ -125,6 +131,9 @@ export const tauriBridge: StudioBridge = {
       colour: colour ?? null,
       widthPx: widthPx ?? null,
     }),
+
+  addPolygonLayer: (path, colour) =>
+    invoke<SessionState>("add_polygon_layer", { path, colour: colour ?? null }),
 
   forge3dProbe: (force) => invoke<EngineStatus>("forge3d_probe", { force: force ?? false }),
 

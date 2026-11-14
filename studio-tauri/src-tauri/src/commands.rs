@@ -713,6 +713,66 @@ pub fn terrain_preview(
     crate::forge3d::sample_terrain(&python, &path, resolution.unwrap_or(96))
 }
 
+/// A polygon layer: filled areas draped on the terrain, holes and all.
+#[tauri::command(async)]
+pub fn add_polygon_layer(
+    state: State<'_, AppState>,
+    path: Option<String>,
+    colour: Option<Vec<f32>>,
+) -> Result<SessionState, String> {
+    let mut session = lock(&state)?;
+    let snapshot = session
+        .state()
+        .ok_or_else(|| "no project is open".to_owned())?;
+    let path = path.ok_or_else(|| "no file was chosen".to_owned())?;
+    let metadata = std::fs::metadata(&path).map_err(|error| format!("{path}: {error}"))?;
+    let existing = snapshot
+        .project
+        .assets
+        .iter()
+        .find(|asset| asset.path == path)
+        .cloned();
+    let asset = existing.unwrap_or_else(|| studio_core::Asset {
+        id: studio_core::ids::new_id(),
+        name: std::path::Path::new(&path)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "polygons.gpkg".to_owned()),
+        path: path.clone(),
+        kind: studio_core::AssetKind::Vector,
+        byte_size: metadata.len(),
+    });
+    let mut commands = Vec::new();
+    if !snapshot
+        .project
+        .assets
+        .iter()
+        .any(|entry| entry.id == asset.id)
+    {
+        commands.push(Command::AddAsset {
+            asset: asset.clone(),
+        });
+    }
+    let colour = colour
+        .filter(|channels| channels.len() == 4)
+        .map(|channels| [channels[0], channels[1], channels[2], channels[3]])
+        .unwrap_or([0.2, 0.55, 0.75, 0.7]);
+    commands.push(Command::AddCartographyLayer {
+        layer: studio_core::CartographyLayer::new(studio_core::CartographyLayerKind::Polygon {
+            asset: asset.id,
+            colour,
+        }),
+        index: None,
+    });
+
+    session
+        .apply(Command::Batch { commands })
+        .map_err(|error| error.to_string())?;
+    session
+        .state()
+        .ok_or_else(|| "no project is open".to_owned())
+}
+
 /// The vector layer's feature lines (and, with a label field, its labelled
 /// points), in the DEM's own frame, normalised to the preview's 0..1 lattice.
 /// The still and the preview read the same file through the same reader.
@@ -730,6 +790,19 @@ pub fn vector_geometry(
         &vector_path,
         label_field.as_deref().unwrap_or(""),
     )
+}
+
+/// The polygon layer's rings (exteriors and holes), in the DEM's own frame,
+/// normalised to the preview's 0..1 lattice. Shares the vector reader with
+/// the still.
+#[tauri::command(async)]
+pub fn polygon_geometry(
+    forge: State<'_, Forge3dState>,
+    dem_path: String,
+    vector_path: String,
+) -> Result<serde_json::Value, String> {
+    let python = forge.probe(false).python;
+    crate::forge3d::polygon_geometry(&python, &dem_path, &vector_path)
 }
 
 /// The graticule for the DEM's CRS and bounds, from the engine's own

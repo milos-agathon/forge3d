@@ -106,6 +106,7 @@ export interface SessionApi {
     selectCartographyLayer(id: string | null): void;
     addVectorLayer(): Promise<void>;
     addImageryLayer(): Promise<void>;
+    addPolygonLayer(path?: string, colour?: [number, number, number, number]): Promise<void>;
     addCartographyLayer(layer: CartographyLayer, index?: number): Promise<void>;
     addRampLayer(colormap: string): Promise<void>;
     addPlateLayer(title: string): Promise<void>;

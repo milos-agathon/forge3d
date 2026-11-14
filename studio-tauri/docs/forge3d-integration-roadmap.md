@@ -1076,6 +1076,30 @@ work in both states (reach 0.5 → 0.15 changed 92,457 samples).
   documented in `feature-coverage.md`.
 
 
+### 5.30 The Phase 14 remainder: polygons, and labels occluded by ridges (2 days) — **done**
+
+The cartographic tier's last two open items. **Labels behind ridges are
+hidden**: the studio's own label anchors apply the lines' rule — an anchor
+falls where the ground's depth is in front of it (`hidden_by_ground`-style,
+with the local depth gradient as the bias), so a point on a back-facing
+slope no longer draws its label on the ridge. The sky test is unchanged.
+
+**Polygons are in as their own layer kind.** `CartographyLayerKind::Polygon`
+(draped on the terrain through the engine's own polygon rasterizer,
+`forge3d.vector_render_polygons_fill_py`, at the frame's size): the rings come
+through the still's reader (GeoPackage binary or GeoJSON, with holes), the
+same CRS contract as the vector layers (an EPSG mismatch fails the frame
+with both codes named), the same sky and ridge rules (`forge3d.vector.
+projected_depth` per-pixel depth from the boundary rings), and the same
+numpy composite rule as the lines — drawn below the lines, above the
+imagery/ramp. Measured on the Fuji DEM at 512² against the same frame
+without the layer: **11,100 of 262,144 samples changed (4.23%), mean
+|Δ| ≈ 110, hole open**. In the viewport they are a draped triangle mesh built from
+the same rings (`polygonMesh.ts`, earcut via THREE.ShapeUtils, windings
+normalised). The layer shows up in the stack, the Inspector and the
+`Add layer` menu like the rest. Still open in the tier: a legend for the
+vector attributes.
+
 ## 6. Increment 10.0 — High-quality stills: AOV + denoise (1 day) — **done**
 
 **Trigger:** a user asks for AOVs or cleaner stills.

@@ -1529,6 +1529,158 @@ def _wkb_line_strings(data: bytes) -> list[list[tuple[float, float]]]:
     return lines
 
 
+def _wkb_polygons(data: bytes) -> list[tuple[list[tuple[float, float]], list[list[tuple[float, float]]]]]:
+    """The polygons inside a WKB geometry (Polygon/MultiPolygon).
+
+    Returns a list of `(exterior, holes)`: `exterior` is the outer ring and
+    `holes` the inner rings, each in file coordinates.
+    """
+    import struct
+
+    polygons: list = []
+
+    def parse(offset: int, depth: int = 0) -> int:
+        if offset + 5 > len(data) or depth > 6:
+            return offset
+        order = data[offset]
+        prefix = "<" if order == 1 else ">"
+        (geometry_type,) = struct.unpack_from(prefix + "I", data, offset + 1)
+        offset += 5
+        base = geometry_type % 1000
+        if base == 3:  # Polygon
+            (rings,) = struct.unpack_from(prefix + "I", data, offset)
+            offset += 4
+            ring_coords: list[list[tuple[float, float]]] = []
+            for _ in range(rings):
+                (count,) = struct.unpack_from(prefix + "I", data, offset)
+                offset += 4
+                points = []
+                for _ in range(count):
+                    x, y = struct.unpack_from(prefix + "dd", data, offset)
+                    points.append((x, y))
+                    offset += 16
+                ring_coords.append(points)
+            if ring_coords:
+                polygons.append((ring_coords[0], ring_coords[1:]))
+        elif base == 6:  # MultiPolygon
+            (parts,) = struct.unpack_from(prefix + "I", data, offset)
+            offset += 4
+            for _ in range(parts):
+                offset = parse(offset, depth + 1)
+        elif base in (4, 5, 7):  # Multi* / GeometryCollection
+            (parts,) = struct.unpack_from(prefix + "I", data, offset)
+            offset += 4
+            for _ in range(parts):
+                offset = parse(offset, depth + 1)
+        return offset
+
+    parse(0)
+    return polygons
+
+
+def read_polygon_features(path: str):
+    """The polygons of a vector file, in the file's own coordinates.
+
+    Returns `(polygons, crs)`: `polygons` is a list of `(exterior, holes)` and
+    `crs` is the file's CRS (like `read_vector_features`) or `None`.
+    """
+    import json
+    import sqlite3
+
+    lowered = path.lower()
+    if lowered.endswith((".json", ".geojson")):
+        with open(path, "r", encoding="utf-8") as handle:
+            document = json.load(handle)
+        polygons: list = []
+        crs = geojson_crs(document)
+        for feature in document.get("features", []) or []:
+            geometry = feature.get("geometry") or {}
+            kind = str(geometry.get("type", "")).lower()
+            coordinates = geometry.get("coordinates") or []
+            if kind == "polygon":
+                rings = [list(ring) for ring in coordinates]
+                if rings:
+                    polygons.append(
+                        (
+                            [(float(x), float(y)) for x, y in rings[0]],
+                            [
+                                [(float(x), float(y)) for x, y in ring]
+                                for ring in rings[1:]
+                            ],
+                        )
+                    )
+            elif kind == "multipolygon":
+                for polygon in coordinates:
+                    rings = [list(ring) for ring in polygon]
+                    if rings:
+                        polygons.append(
+                            (
+                                [(float(x), float(y)) for x, y in rings[0]],
+                                [
+                                    [(float(x), float(y)) for x, y in ring]
+                                    for ring in rings[1:]
+                                ],
+                            )
+                        )
+        return polygons, crs
+
+    if not lowered.endswith((".gpkg", ".sqlite", ".db")):
+        raise RuntimeError(
+            "unsupported vector file %r: expected GeoPackage (.gpkg) or GeoJSON" % (path,)
+        )
+    connection = sqlite3.connect("file:%s?mode=ro" % path, uri=True)
+    try:
+        cursor = connection.cursor()
+        table = None
+        try:
+            row = cursor.execute(
+                "SELECT table_name FROM gpkg_contents WHERE data_type = 'features' LIMIT 1"
+            ).fetchone()
+            table = row[0] if row else None
+        except sqlite3.Error:
+            table = None
+        if table is None:
+            raise RuntimeError("the GeoPackage has no feature table")
+        geometry_column = "geom"
+        srs_id = None
+        try:
+            row = cursor.execute(
+                "SELECT column_name, srs_id FROM gpkg_geometry_columns WHERE table_name = ?",
+                (table,),
+            ).fetchone()
+            if row is not None:
+                geometry_column, srs_id = row[0], row[1]
+        except sqlite3.Error:
+            pass
+        quoted_table = table.replace('"', '""')
+        quoted_geometry = geometry_column.replace('"', '""')
+        polygons = []
+        for row in cursor.execute('SELECT "%s" FROM "%s"' % (quoted_geometry, quoted_table)):
+            blob = row[0]
+            if not isinstance(blob, (bytes, bytearray)):
+                continue
+            polygons.extend(_gpkg_polygons(bytes(blob)))
+        crs = "EPSG:%d" % int(srs_id) if srs_id is not None else None
+        return polygons, crs
+    finally:
+        connection.close()
+
+
+def _gpkg_polygons(blob: bytes):
+    """The polygons inside a GeoPackage binary geometry blob."""
+    if len(blob) < 8 or blob[:2] != _GPKG_MAGIC:
+        return []
+    flags = blob[3]
+    offset = 8
+    if flags & 0x20:  # the srs id is present
+        offset += 4
+    envelope = (flags >> 1) & 0x07
+    offset += {0: 0, 1: 32, 2: 48, 3: 48, 4: 64}.get(envelope, 0)
+    if offset >= len(blob):
+        return []
+    return _wkb_polygons(blob[offset:])
+
+
 def _wkb_points(data: bytes) -> list[tuple[float, float]]:
     """The points inside a WKB geometry (Point/MultiPoint/Polygon/LineString)."""
     import struct
@@ -2035,6 +2187,36 @@ def prepare_cartography(
     ]
     dem_code = crs_code(dem_crs)
     depth = terrain_depth_raster(params, heights, width, height)
+
+    polygon_layers = [
+        layer for layer in visible if str(layer.get("type", "")) == "polygon"
+    ]
+    for polygon in polygon_layers:
+        polygons, file_crs = read_polygon_features(str(polygon["path"]))
+        file_code = crs_code(file_crs)
+        if dem_code and file_code and dem_code != file_code:
+            raise RuntimeError(
+                "the polygon file is in EPSG:%s and the DEM in EPSG:%s; "
+                "reproject the file onto the DEM's CRS first" % (file_code, dem_code)
+            )
+        result = polygon_overlay_rgba(
+            params,
+            heights,
+            bounds,
+            polygons,
+            width,
+            height,
+            colour=tuple(float(c) for c in polygon.get("colour", (0.2, 0.55, 0.75, 0.7))),
+            terrain_depth=depth,
+        )
+        if result is None:
+            continue
+        coverage, line_depth = result
+        prepared.vector_overlays.append(coverage)
+        prepared.vector_layers.append(polygon)
+        prepared.vector_batches.append(
+            polygon_batch(coverage, depth, str(polygon.get("name", "polygons")), line_depth)
+        )
 
     for vector in vector_layers:
         lines, _points, vector_crs = read_vector_features(str(vector["path"]), "")
@@ -2548,6 +2730,137 @@ def vector_overlay_rgba(
     # The projected paths the coverage was drawn from, so the caller can ask
     # the engine for the depth that matches those pixels.
     return np.asarray(overlay, dtype=np.uint8), pixel_paths
+
+
+def polygon_overlay_rgba(
+    params,
+    heights,
+    bounds,
+    polygons,
+    width: int,
+    height: int,
+    colour=(0.2, 0.55, 0.75, 0.7),
+    terrain_depth=None,
+):
+    """The engine's projection and the engine's own polygon rasterizer.
+
+    The exterior ring and every hole are projected through the same camera as
+    the frame (`TerrainRenderParams.project_terrain_points`), rasterized by
+    `forge3d.vector_render_polygons_fill_py` at the frame's size, and cut by
+    the terrain's depth: no fill over the sky, no fill where a ridge stands
+    in front of the polygon.
+    """
+    import numpy as np
+
+    if not polygons or bounds is None:
+        return None
+    west, south, east, north = (float(value) for value in bounds)
+    if not east > west or not north > south:
+        raise RuntimeError("the terrain has no measurable bounds to place polygons on")
+
+    def project_ring(ring):
+        batch = []
+        for index, (x, y) in enumerate(ring):
+            u = (float(x) - west) / (east - west)
+            v = (north - float(y)) / (north - south)
+            batch.append([u, v, _sample_height(heights, u, v), 0.0])
+        return params.project_terrain_points(batch, shared_frame=True)
+
+    exteriors = []
+    exterior_paths = []
+    hole_rings = []
+    for exterior, holes in polygons:
+        projected = project_ring(exterior)
+        ndc = []
+        path = []
+        for value in projected or ():
+            if value is None:
+                continue
+            px, py, depth = float(value[0]), float(value[1]), float(value[2])
+            ndc.append((2.0 * px / max(width, 1) - 1.0, 1.0 - 2.0 * py / max(height, 1)))
+            path.append((px, py, depth))
+        if len(ndc) < 3:
+            continue
+        exteriors.append(ndc)
+        exterior_paths.append(path)
+        ring_set = []
+        for hole in holes:
+            projected_hole = project_ring(hole)
+            hole_ndc = []
+            for value in projected_hole or ():
+                if value is None:
+                    continue
+                px, py, _depth = float(value[0]), float(value[1]), float(value[2])
+                hole_ndc.append((2.0 * px / max(width, 1) - 1.0, 1.0 - 2.0 * py / max(height, 1)))
+            if len(hole_ndc) >= 3:
+                ring_set.append(hole_ndc)
+        hole_rings.append(ring_set)
+    if not exteriors:
+        return None
+
+    import forge3d as f3d
+
+    overlay = f3d.vector_render_polygons_fill_py(
+        int(width),
+        int(height),
+        exteriors=[np.asarray(ring, dtype=np.float64) for ring in exteriors],
+        holes=(
+            [[np.asarray(ring, dtype=np.float64) for ring in ring_set] for ring_set in hole_rings]
+            if any(hole_rings)
+            else None
+        ),
+        fill_rgba=tuple(float(c) for c in colour),
+        coordinates_are_ndc=True,
+    )
+    coverage = np.asarray(overlay, dtype=np.uint8)
+    if terrain_depth is None:
+        return coverage, None
+    coverage, line_depth = polygon_apply_depth_rules(
+        coverage, exterior_paths, width, height, terrain_depth
+    )
+    return coverage, line_depth
+
+
+def polygon_apply_depth_rules(coverage, paths, width, height, terrain_depth):
+    """No fill over the sky, no fill where a ridge stands in front.
+
+    The polygon's per-pixel depth is the interpolated depth of its
+    boundaries' projected points (`forge3d.vector.projected_depth`, the
+    engine's rule), so a polygon on the far slope behind a ridge is behind
+    the ridge at those pixels — same as the lines' test.
+    """
+    import numpy as np
+    from forge3d.vector import projected_depth
+
+    if terrain_depth is None:
+        return coverage, None
+    guarded = np.array(coverage, copy=True)
+    guarded[np.asarray(terrain_depth) >= 1.0 - 1e-6] = 0
+    if paths is None:
+        return guarded, None
+    line_depth, offsets = projected_depth(guarded, paths, int(width), int(height))
+    hidden = hidden_by_ground(guarded, line_depth, terrain_depth, offsets)
+    guarded[hidden] = 0
+    return guarded, line_depth
+
+
+def polygon_batch(coverage, terrain_depth, layer_name: str, line_depth=None):
+    """The polygon coverage as the GPU batch the renderer consumes."""
+    import numpy as np
+
+    height, width = np.asarray(coverage).shape[:2]
+    batch = {
+        "rgba": np.ascontiguousarray(np.asarray(coverage, dtype=np.uint8), dtype=np.uint8),
+        "depth_test": terrain_depth is not None,
+        "layer": str(layer_name),
+        "terrain_draped": True,
+    }
+    if line_depth is not None:
+        depth = np.ones((height, width), dtype=np.float32)
+        covered = np.asarray(coverage)[..., 3] > 0
+        depth[covered] = np.asarray(line_depth, dtype=np.float32)[covered]
+        batch["depth"] = np.ascontiguousarray(depth, dtype=np.float32)
+    return batch
 
 
 def composite_overlay(rgb: np.ndarray, overlay) -> np.ndarray:

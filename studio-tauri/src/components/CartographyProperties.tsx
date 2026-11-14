@@ -76,6 +76,49 @@ export function CartographyProperties() {
             <dd>{asset.name}</dd>
           </div>
         )}
+        {layer.type === "polygon" && (
+          <>
+            <div className="pair">
+              {(["R", "G", "B"] as const).map((channel, index) => (
+                <NumberField
+                  key={channel}
+                  label={channel}
+                  value={layer.colour?.[index] ?? 0}
+                  step={0.05}
+                  min={0}
+                  max={1}
+                  onCommit={(value) => {
+                    const colour = [...(layer.colour ?? [0.2, 0.55, 0.75, 1])] as [
+                      number,
+                      number,
+                      number,
+                      number,
+                    ];
+                    colour[index] = value;
+                    update({ colour });
+                  }}
+                />
+              ))}
+            </div>
+            <NumberField
+              label="Opacity"
+              value={layer.colour?.[3] ?? 1}
+              step={0.05}
+              min={0}
+              max={1}
+              onCommit={(value) => {
+                const colour = [...(layer.colour ?? [0.2, 0.55, 0.75, 1])] as [
+                  number,
+                  number,
+                  number,
+                  number,
+                ];
+                colour[3] = value;
+                update({ colour });
+              }}
+            />
+          </>
+        )}
         {layer.type === "vector" && (
           <>
             <NumberField

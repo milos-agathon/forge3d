@@ -579,6 +579,33 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, [fail, flash]);
 
+  const addPolygonLayer = useCallback(
+    async (
+      path?: string,
+      colour: [number, number, number, number] = [0.2, 0.55, 0.75, 0.7],
+    ) => {
+      try {
+        let target = path;
+        if (!target) {
+          const picked = await openDialog({
+            multiple: false,
+            filters: [{ name: "Polygon layer", extensions: ["gpkg", "geojson", "json"] }],
+          });
+          target = typeof picked === "string" ? picked : undefined;
+        }
+        if (!target) return;
+        setBusy(true);
+        setState(await bridge.addPolygonLayer(target, colour));
+        flash("Polygon layer added");
+      } catch (cause) {
+        fail(cause);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [fail, flash],
+  );
+
   const addImageryLayer = useCallback(async () => {
     try {
       const picked = await openDialog({
@@ -1095,6 +1122,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       refreshAssetIntegrity,
       importTerrainDem,
       addVectorLayer,
+      addPolygonLayer,
       addImageryLayer,
       addCartographyLayer,
       addRampLayer,
@@ -1159,6 +1187,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       refreshAssetIntegrity,
       importTerrainDem,
       addVectorLayer,
+      addPolygonLayer,
       addImageryLayer,
       addCartographyLayer,
       addRampLayer,

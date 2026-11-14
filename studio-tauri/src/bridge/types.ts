@@ -102,6 +102,7 @@ export interface CartographyLayer {
     | "elevationRamp"
     | "imagery"
     | "vector"
+    | "polygon"
     | "labels"
     | "graticule"
     | "plate";
@@ -485,6 +486,13 @@ export interface PreviewAnnotation {
   text: string;
   u: number;
   v: number;
+}
+
+/** A polygon feature's rings, normalised to the preview lattice. */
+export interface PolygonGeometry {
+  /** One entry per polygon: the exterior ring, then the holes. */
+  exteriors: [number, number][][];
+  holes: [number, number][][][];
 }
 
 /** The geometry a visible vector layer draws, normalised to the preview lattice. */

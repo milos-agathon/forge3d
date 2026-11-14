@@ -16,6 +16,7 @@ const KIND_LABEL: Record<CartographyLayer["type"], string> = {
   elevationRamp: "ramp",
   imagery: "imagery",
   vector: "vector",
+  polygon: "polygon",
   labels: "labels",
   graticule: "grid",
   plate: "plate",
@@ -32,6 +33,10 @@ function swatch(layer: CartographyLayer): string {
       return `rgba(${Math.round((layer.colour?.[0] ?? 0.9) * 255)}, ${Math.round(
         (layer.colour?.[1] ?? 0.29) * 255,
       )}, ${Math.round((layer.colour?.[2] ?? 0.1) * 255)}, 1)`;
+    case "polygon":
+      return `rgba(${Math.round((layer.colour?.[0] ?? 0.2) * 255)}, ${Math.round(
+        (layer.colour?.[1] ?? 0.55) * 255,
+      )}, ${Math.round((layer.colour?.[2] ?? 0.75) * 255)}, 1)`;
     case "labels":
       return "#1c1f26";
     case "graticule":
@@ -145,6 +150,9 @@ function AddLayer() {
           </button>
           <button type="button" onClick={() => void actions.addVectorLayer()}>
             Vector layer…
+          </button>
+          <button type="button" onClick={() => void actions.addPolygonLayer()}>
+            Polygon layer…
           </button>
           {vectors.length > 0 && (
             <button

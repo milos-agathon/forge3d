@@ -73,6 +73,13 @@ pub enum CartographyLayerKind {
         /// The line's symbol width in pixels.
         width_px: f32,
     },
+    /// A vector layer: polygons filled on the terrain, holes and all, drawn
+    /// by the engine's own polygon rasterizer.
+    Polygon {
+        asset: AssetId,
+        /// The fill colour, RGBA in 0..=1.
+        colour: [f32; 4],
+    },
     /// The labels of a vector layer: its named features, drawn by the engine's
     /// own label plan and text compositor.
     Labels {
@@ -124,6 +131,7 @@ impl CartographyLayerKind {
             CartographyLayerKind::ElevationRamp { .. } => "Elevation ramp".to_owned(),
             CartographyLayerKind::Imagery { .. } => "Imagery".to_owned(),
             CartographyLayerKind::Vector { .. } => "Vector layer".to_owned(),
+            CartographyLayerKind::Polygon { .. } => "Polygon layer".to_owned(),
             CartographyLayerKind::Labels { .. } => "Labels".to_owned(),
             CartographyLayerKind::Graticule { .. } => "Graticule".to_owned(),
             CartographyLayerKind::Plate { .. } => "Map plate".to_owned(),
@@ -134,7 +142,8 @@ impl CartographyLayerKind {
     pub fn asset(&self) -> Option<AssetId> {
         match self {
             CartographyLayerKind::Imagery { asset, .. }
-            | CartographyLayerKind::Vector { asset, .. } => Some(*asset),
+            | CartographyLayerKind::Vector { asset, .. }
+            | CartographyLayerKind::Polygon { asset, .. } => Some(*asset),
             _ => None,
         }
     }
@@ -160,6 +169,15 @@ impl CartographyLayerKind {
                 }
                 if !opacity.is_finite() || !(0.0..=1.0).contains(opacity) {
                     return Err("the imagery's opacity must be between 0 and 1".to_owned());
+                }
+                Ok(())
+            }
+            CartographyLayerKind::Polygon { colour, .. } => {
+                if !colour
+                    .iter()
+                    .all(|value| value.is_finite() && (0.0..=1.0).contains(value))
+                {
+                    return Err("the polygon colour channels must be between 0 and 1".to_owned());
                 }
                 Ok(())
             }
@@ -286,6 +304,19 @@ mod tests {
         let back: CartographyLayer = serde_json::from_str(&text).expect("deserialize");
         assert_eq!(layer, back);
         assert!(text.contains("\"type\":\"vector\""), "{text}");
+    }
+
+    #[test]
+    fn the_polygon_layer_round_trips_through_json() {
+        let layer = CartographyLayer::new(CartographyLayerKind::Polygon {
+            asset: new_id(),
+            colour: [0.2, 0.5, 0.7, 0.6],
+        });
+        let text = serde_json::to_string(&layer).expect("serialize");
+        let back: CartographyLayer = serde_json::from_str(&text).expect("deserialize");
+        assert_eq!(layer, back);
+        assert!(text.contains("\"type\":\"polygon\""), "{text}");
+        assert!(layer.validate().is_ok());
     }
 
     #[test]

@@ -982,6 +982,150 @@ def test_the_annotations_sit_on_their_line_at_the_frames_edge():
     assert 0 < anchors[0]["y"] < 240
 
 
+def _write_polygon_geojson(tmp_path, doc):
+    path = tmp_path / "polygons.geojson"
+    path.write_text(__import__("json").dumps(doc), encoding="utf-8")
+    return str(path)
+
+
+def _square_polygon_doc():
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "id": "area-1",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[138.6, 35.2], [138.9, 35.2], [138.9, 35.5], [138.6, 35.5], [138.6, 35.2]],
+                        [[138.72, 35.32], [138.78, 35.32], [138.78, 35.38], [138.72, 35.38], [138.72, 35.32]],
+                    ],
+                },
+                "properties": {"name": "sink"},
+            },
+            {
+                "type": "Feature",
+                "id": "area-2",
+                "geometry": {
+                    "type": "MultiPolygon",
+                    "coordinates": [
+                        [[[138.62, 35.24], [138.68, 35.24], [138.68, 35.28], [138.62, 35.28], [138.62, 35.24]]],
+                    ],
+                },
+                "properties": {"name": "pond"},
+            },
+        ],
+    }
+
+
+def test_read_polygon_features_parses_polygons_and_multipolygons(tmp_path):
+    """The reader understands Polygon and MultiPolygon, with holes."""
+    service = load_service()
+    path = _write_polygon_geojson(tmp_path, _square_polygon_doc())
+    polygons, crs = service.read_polygon_features(path)
+    assert "4326" in str(crs)
+    assert len(polygons) == 2
+    exterior, holes = polygons[0]
+    assert len(exterior) == 5
+    assert holes and len(holes[0]) == 5
+    exterior2, holes2 = polygons[1]
+    assert len(exterior2) == 5 and holes2 == []
+
+
+def test_a_polygon_over_the_sky_is_not_filled(tmp_path, monkeypatch):
+    """The sky rule: no fill where the terrain depth is background."""
+    service = load_service()
+    path = _write_polygon_geojson(tmp_path, _square_polygon_doc())
+
+    class _Params:
+        def project_terrain_points(self, batch, shared_frame=False):
+            # All anchors land in frame, at ground depth.
+            return [[100.0 + 10 * i, 100.0 + 10 * i, 0.5] for i in range(len(batch))]
+
+        def project_terrain_depth(self, heights, size_px, a, b, c):
+            return np.full((size_px[1], size_px[0]), 1.0, dtype=np.float32)  # all sky
+
+    # The engine's fill is replaced with a solid opaque frame: without the
+    # sky rule, every pixel would be painted.
+    def fake_fill(width, height, exteriors, **kwargs):
+        return np.full((height, width, 4), 200, dtype=np.uint8)
+
+    import forge3d as f3d
+    monkeypatch.setattr(f3d, "vector_render_polygons_fill_py", fake_fill)
+
+    coverage, _depth = service.polygon_overlay_rgba(
+        _Params(),
+        np.zeros((64, 64), dtype=np.float32),
+        (138.6, 35.2, 138.9, 35.5),
+        service.read_polygon_features(path)[0],
+        320,
+        240,
+        terrain_depth=service.terrain_depth_raster(_Params(), np.zeros((64, 64), np.float32), 320, 240),
+    )
+    assert coverage[..., 3].max() == 0, "the fill over the sky must be dropped"
+
+
+def test_a_polygon_behind_the_ridge_is_hidden(tmp_path, monkeypatch):
+    """The ridge rule: the fill behind a nearer ridge is dropped, the rest kept."""
+    service = load_service()
+    path = _write_polygon_geojson(tmp_path, _square_polygon_doc())
+
+    class _Params:
+        def project_terrain_points(self, batch, shared_frame=False):
+            return [[100.0 + 10 * i, 60.0, 0.9] for i in range(len(batch))]
+
+        def project_terrain_depth(self, heights, size_px, a, b, c):
+            depth = np.full((size_px[1], size_px[0]), 0.95, dtype=np.float32)
+            depth[:, 120:] = 0.4  # a near ridge across the right half
+            return depth
+
+    def fake_fill(width, height, exteriors, **kwargs):
+        return np.full((height, width, 4), 200, dtype=np.uint8)
+
+    import forge3d as f3d
+    monkeypatch.setattr(f3d, "vector_render_polygons_fill_py", fake_fill)
+
+    terrain_depth = service.terrain_depth_raster(_Params(), np.zeros((64, 64), np.float32), 320, 240)
+    coverage, _depth = service.polygon_overlay_rgba(
+        _Params(),
+        np.zeros((64, 64), dtype=np.float32),
+        (138.6, 35.2, 138.9, 35.5),
+        service.read_polygon_features(path)[0],
+        320,
+        240,
+        terrain_depth=terrain_depth,
+    )
+    assert coverage[100, 40, 3] > 0, "the fill in front of the ridge must survive"
+    assert coverage[100, 200, 3] == 0, "the fill behind the ridge must be dropped"
+
+
+def test_a_polygon_with_foreign_crs_is_rejected(tmp_path):
+    """The CRS contract: polygon files must already be on the DEM's CRS."""
+    service = load_service()
+    doc = _square_polygon_doc()
+    doc["crs"] = {"type": "name", "properties": {"name": "EPSG:32633"}}
+    path = _write_polygon_geojson(tmp_path, doc)
+
+    class _Params:
+        pass
+
+    try:
+        service.prepare_cartography(
+            _Params(),
+            [{"type": "polygon", "path": path, "colour": [0.2, 0.6, 0.8, 0.6]}],
+            320,
+            240,
+            (138.6, 35.2, 138.9, 35.5),
+            np.zeros((64, 64), dtype=np.float32),
+            "EPSG:4326",
+        )
+    except RuntimeError as exc:
+        assert "32633" in str(exc) and "4326" in str(exc)
+    else:
+        raise AssertionError("a foreign-CRS polygon layer must raise")
+
+
 def test_the_plate_furniture_is_the_engine_own():
     """The scale bar and the north arrow are the engine's, not the studio's
     rectangle and triangle."""

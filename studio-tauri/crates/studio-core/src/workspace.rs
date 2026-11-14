@@ -337,6 +337,10 @@ pub enum CartographyLayerHandoffKind {
         colour: [f32; 4],
         width_px: f32,
     },
+    Polygon {
+        path: String,
+        colour: [f32; 4],
+    },
     Labels {
         /// The vector layer whose features are named.
         source: crate::cartography::CartographyLayerId,
@@ -643,6 +647,15 @@ pub fn cartography_handoff(project: &Project) -> Vec<CartographyLayerHandoff> {
                     path: asset.path.clone(),
                     colour: *colour,
                     width_px: *width_px,
+                }
+            }
+            crate::cartography::CartographyLayerKind::Polygon { asset, colour } => {
+                let Some(asset) = project.asset(*asset) else {
+                    continue;
+                };
+                CartographyLayerHandoffKind::Polygon {
+                    path: asset.path.clone(),
+                    colour: *colour,
                 }
             }
             crate::cartography::CartographyLayerKind::Labels {

@@ -893,6 +893,34 @@ if kind == "vector":
     print(json.dumps({"ok": True, "kind": "vector", "lines": out_lines, "points": out_points}))
     raise SystemExit(0)
 
+if kind == "polygon":
+    polygon_path = sys.argv[4]
+    import studio_render as _sr  # the still's reader, never a second GPKG parser
+    polygons, file_crs = _sr.read_polygon_features(polygon_path)
+    dem_code = _sr.crs_code(crs)
+    file_code = _sr.crs_code(file_crs)
+    if dem_code and file_code and dem_code != file_code:
+        print(json.dumps({
+            "ok": False,
+            "detail": "the polygon file is in EPSG:%s and the DEM in EPSG:%s; reproject the file onto the DEM's CRS first" % (file_code, dem_code),
+        }))
+        raise SystemExit(0)
+    exteriors = []
+    holes = []
+    for exterior, ring_holes in polygons:
+        exteriors.append([[(float(x) - west) / span_x, (north - float(y)) / span_y] for x, y in exterior])
+        holes.append([
+            [[(float(x) - west) / span_x, (north - float(y)) / span_y] for x, y in ring]
+            for ring in ring_holes
+        ])
+    print(json.dumps({
+        "ok": True,
+        "kind": "polygon",
+        "exteriors": exteriors,
+        "holes": holes,
+    }))
+    raise SystemExit(0)
+
 if kind == "graticule":
     interval = float(sys.argv[4])
     with_labels = sys.argv[5] == "1"
@@ -1025,6 +1053,17 @@ pub fn vector_geometry(
         dem_path,
         &[vector_path.to_owned(), label_field.to_owned()],
     )
+}
+
+/// Read a polygon layer's rings (exteriors and holes) in the DEM's own
+/// frame, normalised to the preview's 0..1 lattice — the still's reader,
+/// never a second GeoPackage parser.
+pub fn polygon_geometry(
+    python: &str,
+    dem_path: &str,
+    vector_path: &str,
+) -> Result<serde_json::Value, String> {
+    run_vector_preview(python, "polygon", dem_path, &[vector_path.to_owned()])
 }
 
 /// Read the graticule's grid (and, when asked, its coordinate annotations)

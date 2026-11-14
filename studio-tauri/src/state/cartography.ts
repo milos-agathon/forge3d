@@ -46,3 +46,8 @@ export function plateLayer(project: Project | null | undefined): CartographyLaye
   const plates = visibleLayers(project).filter((layer) => layer.type === "plate");
   return plates.length > 0 ? plates[plates.length - 1] : null;
 }
+
+/** The visible polygon layers, in draw order. */
+export function polygonLayers(project: Project | null | undefined): CartographyLayer[] {
+  return visibleLayers(project).filter((layer) => layer.type === "polygon");
+}
