@@ -1116,6 +1116,24 @@ uncategorised bucket): **3,959 samples change vs the one-colour frame
 (mean |Δ| 171.5)**; the plate composite carries the six swatches
 (`plate: true`, no skip reason).
 
+### 5.32 The preview's own sun-visibility bake (0.5 day) — **done**
+
+Phase 16's last unmatched term: a ridge shadowing the ground behind it. The
+still ray-marches every fragment; the preview cannot do that cheaply, so the
+viewport bakes the same march once per (DEM, zScale, sun) grid as a
+`DataTexture` and multiplies it into the terrain studio material's
+direct-light irradiance via `onBeforeCompile` — the exact
+`direct_radiance × terrain_visibility` term, no new UI. Opt-in via the
+project's `render.sunVisibility` toggle (off by default, like the still's
+bow of Occam), reuses `sunVisibilitySteps`, rebuilds on sun scrub via a
+rounded key. Baked at grid resolution (64–4096 points per pass, ~100–200 ms
+on the Swiss), so a sun scrub costs a few rebuilds per gesture, each a few
+hundred ms. Node-tested on synthetic walls and spikes (sunlit side lit,
+shadowed side dark, high sun lifting short shadows). Known limit: it is a
+march of the **grid**, not per-fragment, so a sub-triangle ridge still
+shows as a smooth transition rather than a hard edge; the toggle deletes
+it entirely when off (no texture, no program patch).
+
 ## 6. Increment 10.0 — High-quality stills: AOV + denoise (1 day) — **done**
 
 **Trigger:** a user asks for AOVs or cleaner stills.

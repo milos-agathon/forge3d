@@ -572,7 +572,7 @@ export function RenderSettingsEditor() {
               onChange={(value) =>
                 commit({ sunVisibilitySteps: Number(value) })
               }
-              hint="A ray march per pixel over the heightfield: the shadow map cannot resolve a ridge shadowing the ground behind it."
+              hint="A ray march per pixel over the heightfield: a ridge finally shadows the valley behind it. The preview bakes the same march once per DEM change; it rebuilds when you move the sun."
             />
           </>
         )}

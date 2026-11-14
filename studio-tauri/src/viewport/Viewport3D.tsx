@@ -19,7 +19,7 @@ import type {
 import { ViewportToolbar } from "../components/ViewportToolbar";
 import { useSession } from "../state/session-context";
 import { AxisGizmo, type Axis } from "./AxisGizmo";
-import type { CartographyLayer, Material, TerrainPreview } from "../bridge/types";
+import type { CartographyLayer, Material, Project, TerrainPreview } from "../bridge/types";
 import {
   base64ToArrayBuffer,
   clearAssetCaches,
@@ -44,6 +44,7 @@ import {
   drapePolylines,
   expandPairs,
 } from "./cartography";
+import { bakeSunVisibility, visibilityBytesToRgba } from "./sunVisibility";
 import { buildPolygonMesh } from "./polygonMesh";
 
 const DEG = Math.PI / 180;
@@ -616,6 +617,12 @@ function buildTerrainMesh(
   zScale: number,
   ramp: { stops: [number, number, number][]; strength: number } | null,
   hillshade: boolean,
+  sun: {
+    /** Baked ray-march matches the still's `sun_visibility` (its direction
+     *  toward the sun and the project's step count). */
+    toward: [number, number, number];
+    steps: number;
+  } | null,
 ): THREE.Mesh {
   const resolution = preview.resolution;
   const geometry = new THREE.PlaneGeometry(1, 1, resolution - 1, resolution - 1);
@@ -651,6 +658,7 @@ function buildTerrainMesh(
   }
 
   geometry.computeVertexNormals();
+  let meshSunVisibilityTexture: THREE.DataTexture | null = null;
   // The still lights terrain with lambert_physical: a Lambertian BRDF with
   // direct-sun visibility — no specular lobe, not even a dielectric one.
   // MeshPhysicalMaterial with specularIntensity 0 is exactly that, so the
@@ -662,6 +670,65 @@ function buildTerrainMesh(
     specularIntensity: 0.0,
     side: THREE.DoubleSide,
   });
+  if (sun) {
+    const bytes = bakeSunVisibility({
+      heights: preview.heights,
+      resolution: preview.resolution,
+      minElevation: preview.minElevation,
+      spanXz: preview.spanXz,
+      zScale,
+      toward: sun.toward,
+      steps: sun.steps,
+    });
+    const rgba = visibilityBytesToRgba(bytes);
+    const texture = new THREE.DataTexture(
+      rgba,
+      preview.resolution,
+      preview.resolution,
+      THREE.RGBAFormat,
+      THREE.UnsignedByteType,
+    );
+    texture.flipY = true;
+    texture.colorSpace = THREE.NoColorSpace;
+    texture.magFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+    texture.needsUpdate = true;
+    // Multiply the direct-light irradiance term, like the still's
+    // `direct_radiance * terrain_visibility`.
+    material.onBeforeCompile = (shader) => {
+      // Fail loudly if three's chunk ever stops matching this literal:
+      // a silent no-op patch would render a lit frame with no shadow at all.
+      const ORIGINAL_IRRADIANCE =
+        "vec3 irradiance = dotNL * directLight.color;";
+      if (!shader.fragmentShader.includes(ORIGINAL_IRRADIANCE)) {
+        throw new Error(
+          "the heightfield sun-visibility patch expected an irradiance line in the physical shader that is not there",
+        );
+      }
+      shader.uniforms.sunVisibility = { value: texture };
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          "void main() {",
+          "varying vec2 sunVisibilityUv;\nvoid main() {",
+        )
+        .replace(
+          "#include <begin_vertex>",
+          "#include <begin_vertex>\n  sunVisibilityUv = uv;",
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          "void main() {",
+          "varying vec2 sunVisibilityUv;\nuniform sampler2D sunVisibility;\nvoid main() {",
+        )
+        .replace(
+          ORIGINAL_IRRADIANCE,
+          "vec3 irradiance = dotNL * directLight.color * texture2D(sunVisibility, sunVisibilityUv).r;",
+        );
+    };
+    material.customProgramCacheKey = () => "sunVisibilityTerrain";
+    meshSunVisibilityTexture = texture;
+  }
   // Hillshade stays in the mesh so the workspace can flip it live; its
   // texture is baked once against the DEM.
   const hillshadeTexel = bakeHillshade(preview);
@@ -678,6 +745,7 @@ function buildTerrainMesh(
   mesh.userData.studioMaterial = mesh.material;
   mesh.userData.drape = null;
   mesh.userData.hillshade = hillshadeTexel;
+  mesh.userData.sunVisibility = meshSunVisibilityTexture;
   // Whether this mesh carries an elevation ramp at all (the attribute is fixed
   // once built; the mode decides if it is shown).
   mesh.userData.ramp = colours !== null;
@@ -748,11 +816,31 @@ function rebuildCartographyLabels(
   return divs;
 }
 
+/** The sun-visibility bake is per-mesh and expensive; key the mesh identity by
+ * the settings + the sun's own direction so it rebuilds when they change. */
+function sunVisionKey(project: Project | null | undefined): string | null {
+  if (!project?.render.sunVisibility) return null;
+  const sun = lightingRig(project).sun;
+  if (!sun) return null;
+  const [x, y, z] = sun.direction;
+  const q = (v: number) => Math.round(v * 20) / 20;
+  return `${q(x)}:${q(y)}:${q(z)}:${project.render.sunVisibilitySteps}`;
+}
+
+function sunVisionConfig(project: Project | null | undefined): { toward: [number, number, number]; steps: number } | null {
+  if (!project?.render.sunVisibility) return null;
+  const sun = lightingRig(project).sun;
+  if (!sun) return null;
+  const [dx, dy, dz] = sun.direction;
+  return { toward: [-dx, -dy, -dz], steps: project.render.sunVisibilitySteps };
+}
+
 function contentSignature(
   object: SceneObject,
   terrainResolution: number,
   ramp: string,
   imagery: { asset: string; opacity: number } | null,
+  sunVision: string | null,
 ): string {
   switch (object.kind.type) {
     case "mesh":
@@ -763,7 +851,7 @@ function contentSignature(
       // what used to be ignored.
       // The elevation ramp is baked into the mesh's vertex colours, so a
       // colormap change is a rebuild — not just a shading swap.
-      return `terrain:${object.kind.asset}:${object.kind.zScale}:${terrainResolution}:${imagery?.asset ?? "none"}:${imagery?.opacity ?? ""}:${ramp}`;
+      return `terrain:${object.kind.asset}:${object.kind.zScale}:${terrainResolution}:${imagery?.asset ?? "none"}:${imagery?.opacity ?? ""}:${ramp}:${sunVision ?? ""}`;
     case "camera":
       return `camera:${object.kind.fovDeg}`;
     case "light":
@@ -1627,10 +1715,11 @@ export function Viewport3D() {
       const rampName = ramp?.colormap ?? "";
       const rampStrength = ramp?.strength ?? 1;
       const rampKey = rampName ? `${rampName}:${rampStrength}` : "none";
+      const sunVision = sunVisionKey(project);
       const signature = contentSignature(object, terrainResolution, rampKey, {
         asset: topImagery(project)?.asset ?? "",
         opacity: topImagery(project)?.opacity ?? 0,
-      });
+      }, sunVision);
       if (group.userData.signature !== signature) {
         group.userData.signature = signature;
         disposeChildren(group);
@@ -1724,7 +1813,13 @@ export function Viewport3D() {
           .then(([preview, ramp]) => {
             if (group.userData.signature !== expected) return;
             disposeChildren(group);
-            const mesh = buildTerrainMesh(preview, zScale, ramp, hillshade);
+            const mesh = buildTerrainMesh(
+              preview,
+              zScale,
+              ramp,
+              hillshade,
+              sunVisionConfig(project),
+            );
             group.add(mesh);
             setProblem(null);
             applyTerrainShading(mesh, viewportModeRef.current === "solid", hillshade);

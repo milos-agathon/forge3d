@@ -99,8 +99,13 @@ sees. They are the reason the app feels loose.
    slope-scale bias maps to a −1e-04 depth bias; a small world-space normal
    bias keeps grazing light acne-free at viewer scale. The engine's
    ray-marched **sun visibility** (a ridge shadowing the ground behind it)
-   still has no three.js counterpart and is a documented gap, like the
-   terrain-occluded labels. The terrain editor's Terrain section also offers a
+   now has its preview counterpart: an opt-in (`render.sunVisibility`), a
+   CPU bake in grid space (`bakeSunVisibility`, tested on synthetic walls and
+   spikes) multiplied into the terrain studio material's direct-light
+   irradiance via an `onBeforeCompile` patch — the still's `direct_radiance ×
+   terrain_visibility` in the preview. Baked once per (DEM, zScale, sun), so a
+   sun scrub rebuilds at most a few times per gesture. The terrain editor's
+   Terrain section also offers a
    `Hillshade` raster (same ESRI/QGIS formula, preview aid only).
 3. **The preview and the still are two renderers.** They agree on the lighting
    rig, the exposure and the tone-map by construction, but the engine's terrain
