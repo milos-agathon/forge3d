@@ -1296,6 +1296,67 @@ mod tests {
     }
 
     #[test]
+    fn set_sun_angles_round_trips_through_the_command() {
+        use crate::command::Command;
+        use crate::scene::ObjectKind;
+
+        let mut project = Project::new("Sun");
+        let sun_id = sun_object_id(&project);
+        let before = project.scene.object(sun_id).unwrap().transform;
+
+        let inverse = Command::SetSunAngles {
+            id: sun_id,
+            azimuth_deg: 135.0,
+            elevation_deg: 25.0,
+        }
+        .apply(&mut project)
+        .expect("the starter scene has a directional sun");
+        let after_angles = sun_angles(&project).expect("sun still exists");
+        assert!(
+            (after_angles.azimuth_deg - 135.0).abs() < 0.5,
+            "{after_angles:?}"
+        );
+        assert!(
+            (after_angles.elevation_deg - 25.0).abs() < 0.5,
+            "{after_angles:?}"
+        );
+        assert_eq!(
+            inverse,
+            Command::SetTransform {
+                id: sun_id,
+                transform: before
+            }
+        );
+        // The label points at what the user did, not at the mechanism.
+        let label = Command::SetSunAngles {
+            id: sun_id,
+            azimuth_deg: 135.0,
+            elevation_deg: 25.0,
+        }
+        .label(&project);
+        assert_eq!(label, "Aim the sun");
+
+        let error = Command::SetSunAngles {
+            id: project
+                .scene
+                .objects
+                .iter()
+                .find(|object| !matches!(object.kind, ObjectKind::Light(_)))
+                .map(|object| object.id)
+                .unwrap(),
+            azimuth_deg: 0.0,
+            elevation_deg: 10.0,
+        }
+        .apply(&mut project)
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("not the directional") || message.contains("directional sun"),
+            "{message}"
+        );
+    }
+
+    #[test]
     fn handoff_is_idempotent_for_a_revision() {
         let project = Project::new("Handoff");
         let first = handoff(&project, 7, Workspace::Forge3d);

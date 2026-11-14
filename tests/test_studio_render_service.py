@@ -1363,6 +1363,110 @@ def test_the_polygon_layer_reaches_the_pixels(tmp_path):
     assert changed <= 60_000, "polygon layer changed implausibly much"
 
 
+
+STUDIO_DEM = REPO / "assets" / "tif" / "Mount_Fuji_30m.tif"
+STUDIO_CAMERA = {"phiDeg": 37.0, "thetaDeg": 42.0, "radius": 24000.0,
+                 "target": [0.0, 0.0, 0.0], "fovDeg": 45.0}
+STUDIO_SUN = {"azimuthDeg": 315.0, "elevationDeg": 30.0,
+              "intensity": 3.0, "color": [1.0, 0.97, 0.92]}
+
+
+def _base_request():
+    return {
+        "width": 512, "height": 512,
+        "camera": dict(STUDIO_CAMERA), "sun": dict(STUDIO_SUN),
+        "exposure": 1.35,
+        "cartography": [{"id": "relief", "name": "Terrain relief",
+                         "visible": True, "type": "relief"}],
+        "quality": {"shadows": True},
+    }
+
+
+@engine_required
+def test_the_outdoor_sun_recipe_knobs_reach_pixels(tmp_path):
+    """Exposure 1.0 (vs the 1.35 default) for outdoor_sun — measurable."""
+    service = load_service()
+    renderer = service.StudioRenderer(str(STUDIO_DEM))
+    default_req = _base_request()
+    reply, default_frame = _render_reply(service, renderer, default_req)
+    assert reply["renderPath"] == "mapscene"
+
+    recipe_req = {**default_req, "exposure": 1.0}
+    reply, recipe_frame = _render_reply(service, renderer, recipe_req)
+    assert reply["renderPath"] == "mapscene"
+
+    diff = np.abs(default_frame.astype(np.int64) - recipe_frame.astype(np.int64)).sum(axis=2)
+    changed = int((diff > 0).sum())
+    assert changed > 4000, f"exposure 1.0 moved only {changed} samples"
+
+
+@engine_required
+def test_the_rainier_showcase_sun_angles_reach_pixels(tmp_path):
+    """Sun 135°/25° (as in rainier_showcase) vs the starter 315°/30° — measurable."""
+    service = load_service()
+    renderer = service.StudioRenderer(str(STUDIO_DEM))
+    default_req = _base_request()
+    reply, default_frame = _render_reply(service, renderer, default_req)
+
+    showcase_req = {**default_req,
+                    "sun": {**STUDIO_SUN, "azimuthDeg": 135.0, "elevationDeg": 25.0,
+                            "intensity": 4.0, "color": [1.0, 0.95, 0.9]}}
+    reply, recipe_frame = _render_reply(service, renderer, showcase_req)
+    diff = np.abs(default_frame.astype(np.int64) - recipe_frame.astype(np.int64)).sum(axis=2)
+    changed = int((diff > 8).sum())
+    assert changed > 2000, f"showcase sun moved only {changed} samples"
+
+
+@engine_required
+def test_the_rainier_relief_relief_scale_reaches_pixels(tmp_path):
+    """Relief zScale 1.5 (as in rainier_relief) reaches the pixels: the still
+    rebuilds with exaggerated heights, which changes the silhouette."""
+    service = load_service()
+    # Two renderers, same DEM: one at exaggeration 1.0 (the starter look),
+    # one at 1.5 (the recipe's look). A shared renderer would cache the DEM.
+    renderer = service.StudioRenderer(str(STUDIO_DEM), z_scale=1.0)
+    default_req = _base_request()
+    reply, default_frame = _render_reply(service, renderer, default_req)
+
+    relief_renderer = service.StudioRenderer(str(STUDIO_DEM), z_scale=1.5)
+    sheet = dict(default_req)
+    reply2, recipe_frame = _render_reply(service, relief_renderer, sheet)
+    diff = np.abs(default_frame.astype(np.int64) - recipe_frame.astype(np.int64)).sum(axis=2)
+    changed = int((diff > 8).sum())
+    assert changed > 1000, f"relief x1.5 moved only {changed} samples"
+
+
+@engine_required
+def test_the_studio_pbr_sun_intensity_reaches_pixels(tmp_path):
+    """Sun intensity 6.0 (as in studio_pbr) vs the default 3.0."""
+    service = load_service()
+    renderer = service.StudioRenderer(str(STUDIO_DEM))
+    default_req = _base_request()
+    reply, default_frame = _render_reply(service, renderer, default_req)
+
+    pbr_req = {**default_req,
+               "sun": {**STUDIO_SUN, "intensity": 6.0, "color": [1.0, 0.98, 0.95]}}
+    reply, recipe_frame = _render_reply(service, renderer, pbr_req)
+    diff = np.abs(default_frame.astype(np.int64) - recipe_frame.astype(np.int64)).sum(axis=2)
+    changed = int((diff > 8).sum())
+    assert changed > 2000, f"pbr sun moved only {changed} samples"
+
+
+@engine_required
+def test_the_toon_viz_ibl_off_reaches_pixels(tmp_path):
+    """iblIntensity 0.0 (as in toon_viz with empty GI) vs the default 1.0."""
+    service = load_service()
+    renderer = service.StudioRenderer(str(STUDIO_DEM))
+    default_req = _base_request()
+    reply, default_frame = _render_reply(service, renderer, default_req)
+
+    toon_req = {**default_req, "iblIntensity": 0.0}
+    reply, recipe_frame = _render_reply(service, renderer, toon_req)
+    diff = np.abs(default_frame.astype(np.int64) - recipe_frame.astype(np.int64)).sum(axis=2)
+    changed = int((diff > 8).sum())
+    assert changed > 1000, f"IBL off moved only {changed} samples"
+
+
 @engine_required
 def test_the_vector_attribute_legend_reaches_the_plate(tmp_path):
     """Category colours reach pixels, and the plate crops them into swatches."""

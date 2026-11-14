@@ -15,6 +15,7 @@ import type {
   Transform,
 } from "../bridge/types";
 import { objectKindLabel } from "../bridge/types";
+import { RECIPES } from "../state/recipes";
 import { bridge } from "../bridge/env";
 import { base64ToArrayBuffer, listGltfNodes } from "../viewport/assets";
 import { useSession } from "../state/session-context";
@@ -501,13 +502,35 @@ function useRenderSettings() {
 
 /** Render tab: what the still and the Rendered frame are made of. */
 export function RenderSettingsEditor() {
-  const { engine } = useSession();
+  const { engine, actions } = useSession();
   const settings = useRenderSettings();
   if (!settings) return null;
   const { render, commit } = settings;
 
   return (
     <>
+      <Section title="Look presets" id="render-presets">
+        <p className="hint">
+          One click applies the whole lighting package in one undoable step;
+          camera, DEM and layers are untouched. Deviations from the engine's
+          own preset are on each button.
+        </p>
+        <div className="preset-grid">
+          {RECIPES.map((recipe) => (
+            <button
+              key={recipe.id}
+              type="button"
+              className="preset"
+              title={`${recipe.name} — from the engine's ${recipe.enginePreset} preset.\n${recipe.note}`}
+              onClick={() => void actions.applyRecipe(recipe.id)}
+            >
+              <span className="preset__name">{recipe.name}</span>
+              <span className="preset__desc">engine: {recipe.enginePreset}</span>
+            </button>
+          ))}
+        </div>
+      </Section>
+
       <Section title="Output" id="render-output">
         <div className="pair">
           {/* The render service caps a frame at 4096 px per side, so the

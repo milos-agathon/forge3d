@@ -179,7 +179,7 @@ def load_dem(path: str):
 
 
 class StudioRenderer:
-    def __init__(self, dem_path: str) -> None:
+    def __init__(self, dem_path: str, z_scale: float = 1.0) -> None:
         import forge3d as f3d
 
         self.f3d = f3d
@@ -197,7 +197,10 @@ class StudioRenderer:
         # radius is 1.5 x span by default and the view limit is 65,536, so the
         # scaled world must stay well below that (30,000 leaves headroom).
         self.scale = min(1.0, 30_000.0 / max(self.span_x, self.span_y))
-        self.heights = self.heights * self.scale
+        self.z_scale = z_scale
+        # The viewport multiplies elevation by the project's zScale for the
+        # whole mesh; do the same here so the still shows the same terrain.
+        self.heights = self.heights * self.scale * float(z_scale)
         # The engine's height domain has to describe the heights it is given:
         # the renderer clamps and normalizes them against the domain, so a
         # country-scale DEM (whose heights are scaled into the view budget)
@@ -3210,12 +3213,13 @@ def main() -> int:
     try:
         config = json.loads(sys.stdin.readline())
         dem = config["dem"]
+        z_scale = float(config.get("zScale", 1.0))
     except Exception as exc:  # noqa: BLE001
         fail(f"bad renderer configuration: {exc}")
         return 2
 
     try:
-        renderer = StudioRenderer(dem)
+        renderer = StudioRenderer(dem, z_scale=z_scale)
     except Exception as exc:  # noqa: BLE001
         emit({"event": "error", "message": f"the renderer did not start: {exc}", "trace": traceback.format_exc()})
         return 3

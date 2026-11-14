@@ -12,6 +12,7 @@ import { viewStore } from "../viewport/viewStore";
 import { bridge } from "../bridge/env";
 import { SessionContext, type SessionApi } from "./session-context";
 import { base64ToArrayBuffer, inspectGltf, putAssetBytes } from "../viewport/assets";
+import { findRecipe, type RecipeId } from "./recipes";
 import {
   canCancelJob,
   clearFinishedJobs as dropFinishedJobs,
@@ -717,6 +718,34 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [applyCommand],
   );
 
+  const applyRecipe = useCallback(
+    async (id: RecipeId) => {
+      const project = state?.project;
+      if (!project) {
+        flash("no project is open");
+        return;
+      }
+      const recipe = findRecipe(id);
+      if (!recipe) {
+        flash(`unknown look recipe: ${String(id)}`);
+        return;
+      }
+      try {
+        setBusy(true);
+        await applyCommand({
+          type: "batch",
+          commands: recipe.build(project, null),
+        });
+        flash(`Look applied: ${recipe.name}`);
+      } catch (cause) {
+        fail(cause);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyCommand, fail, flash, state],
+  );
+
   const applyMapLook = useCallback(async () => {
     const project = state?.project;
     const terrain = project?.scene.objects.find((object) => object.kind.type === "terrain");
@@ -1133,6 +1162,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       removeCartographyLayer,
       moveCartographyLayer,
       applyMapLook,
+      applyRecipe,
       setViewportMode,
       setHillshade,
       renderViewport,
@@ -1173,6 +1203,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       addPrimitive,
       applyCommand,
       applyMapLook,
+      applyRecipe,
       deleteSelection,
       duplicateSelection,
       fail,

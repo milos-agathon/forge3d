@@ -159,6 +159,16 @@ pub enum Command {
         z_scale: f32,
     },
 
+    /// Aim the scene's directional sun at a compass azimuth (0..=360, clockwise
+    /// from north) and an elevation in degrees. The Transform rotation is
+    /// derived here, not sent by the caller, so the engine keeps one source
+    /// of truth for the camera/sun mapping.
+    SetSunAngles {
+        id: ObjectId,
+        azimuth_deg: f32,
+        elevation_deg: f32,
+    },
+
     /// Replace a terrain's DEM (import/re-point), carrying its measured metadata.
     SetTerrainDem {
         id: ObjectId,
@@ -651,6 +661,65 @@ impl Command {
                     inverse: Command::SetTerrainZScale {
                         id: *id,
                         z_scale: previous,
+                    },
+                    affected: vec![*id],
+                })
+            }
+
+            Command::SetSunAngles {
+                id,
+                azimuth_deg,
+                elevation_deg,
+            } => {
+                let object = project
+                    .scene
+                    .object(*id)
+                    .ok_or(CommandError::ObjectNotFound { id: *id })?;
+                let previous = object.transform;
+                match &object.kind {
+                    crate::scene::ObjectKind::Light(light)
+                        if light.kind == crate::scene::LightKind::Directional => {}
+                    _ => {
+                        return Err(CommandError::invalid(
+                            "light",
+                            "object is not the directional sun",
+                        ))
+                    }
+                }
+                if !azimuth_deg.is_finite() || !(0.0..=360.0).contains(azimuth_deg) {
+                    return Err(CommandError::invalid(
+                        "sun azimuth",
+                        "must be between 0 and 360 degrees",
+                    ));
+                }
+                if !elevation_deg.is_finite() || !(-90.0..=90.0).contains(elevation_deg) {
+                    return Err(CommandError::invalid(
+                        "sun elevation",
+                        "must be between -90 and 90 degrees",
+                    ));
+                }
+                // The engine's own convention: azimuth east → south (atan2(z, x)),
+                // elevation above the horizon. `sun_rotation` round-trips through
+                // `sun_angles`, and the two must never disagree on which angle a
+                // fixture means — that is the one thing users will check.
+                let az = f64::from(*azimuth_deg).to_radians();
+                let el = f64::from(*elevation_deg).to_radians();
+                let toward = [
+                    (el.cos() * az.cos()) as f32,
+                    el.sin() as f32,
+                    (el.cos() * az.sin()) as f32,
+                ];
+                // The engine consumes its own scene frame (east, up, north):
+                // the viewer's +Z is south, so the north component flips.
+                let scene = [toward[0], toward[1], -toward[2]];
+                let rotation = crate::workspace::sun_rotation(scene);
+                if let Some(object) = project.scene.object_mut(*id) {
+                    object.transform.rotation_deg = rotation;
+                }
+                Ok(Outcome {
+                    inverse: Command::SetTransform {
+                        id: *id,
+                        transform: previous,
                     },
                     affected: vec![*id],
                 })
@@ -1323,6 +1392,7 @@ impl Command {
             | Command::SetLight { id, .. }
             | Command::SetPrimitive { id, .. }
             | Command::SetTerrainZScale { id, .. }
+            | Command::SetSunAngles { id, .. }
             | Command::FitTerrainRelief { id }
             | Command::ApplyMapLook { id }
             | Command::SetTerrainDem { id, .. }
@@ -1387,6 +1457,7 @@ impl Command {
             Command::SetTerrainZScale { id, .. } => {
                 format!("Terrain scale {}", name_of(id))
             }
+            Command::SetSunAngles { .. } => "Aim the sun".to_owned(),
             Command::FitTerrainRelief { id } => format!("Fit relief of {}", name_of(id)),
             Command::ApplyMapLook { id } => format!("Map look for {}", name_of(id)),
             Command::SetTerrainDem { id, .. } => format!("Change DEM of {}", name_of(id)),

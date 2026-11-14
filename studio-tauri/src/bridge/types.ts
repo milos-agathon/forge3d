@@ -658,6 +658,7 @@ export type Command =
   | { type: "setRenderSettings"; render: RenderSettings }
   | { type: "setAssetPath"; id: string; path: string; byteSize: number }
   | { type: "setTerrainZScale"; id: string; zScale: number }
+  | { type: "setSunAngles"; id: string; azimuthDeg: number; elevationDeg: number }
   /** Set the vertical scale to the DEM's own 6%-relief default. */
   | { type: "fitTerrainRelief"; id: string }
   /** Apply the map look: relief, map camera, north-west sun, hillshade. */

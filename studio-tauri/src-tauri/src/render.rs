@@ -56,6 +56,7 @@ struct Session {
     child: Child,
     stdin: ChildStdin,
     dem: String,
+    z_scale: f64,
 }
 
 /// State the reader thread and the waiting command share.
@@ -146,7 +147,14 @@ impl RenderState {
         // Serialise first, then start the clock: a viewport frame queued behind
         // a still must not spend the still's time against its own deadline.
         let _request = self.request.lock().map_err(lock_error)?;
-        self.ensure_session(python, dem)?;
+        // The service configures itself from its header line; the render key is
+        // (dem, zScale) and both can change without a session restart.
+        let z_scale = request
+            .get("zScale")
+            .and_then(|value| value.as_f64())
+            .unwrap_or(1.0)
+            .clamp(0.1, 50.0);
+        self.ensure_session(python, dem, z_scale)?;
         let generation = self.generation.load(Ordering::SeqCst);
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -230,11 +238,11 @@ impl RenderState {
         push_log(&self.shared, "renderer stopped".to_owned());
     }
 
-    fn ensure_session(&self, python: &str, dem: &str) -> Result<(), String> {
+    fn ensure_session(&self, python: &str, dem: &str, z_scale: f64) -> Result<(), String> {
         {
             let guard = self.session.lock().map_err(lock_error)?;
             if let Some(session) = guard.as_ref() {
-                if session.dem == dem {
+                if session.dem == dem && session.z_scale == z_scale {
                     return Ok(());
                 }
             }
@@ -274,7 +282,7 @@ impl RenderState {
             .take()
             .ok_or_else(|| "the renderer has no stderr".to_owned())?;
 
-        writeln!(stdin, "{}", json!({ "dem": dem, "zScale": 1.0 }))
+        writeln!(stdin, "{}", json!({ "dem": dem, "zScale": z_scale }))
             .and_then(|_| stdin.flush())
             .map_err(|error| format!("could not configure the renderer: {error}"))?;
 
@@ -284,6 +292,7 @@ impl RenderState {
                 child,
                 stdin,
                 dem: dem.to_owned(),
+                z_scale,
             });
         }
 

@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 
 import type { RenderJob } from "./renderQueue";
+import type { RecipeId } from "./recipes";
 import type {
   Applied,
   AssetIntegrity,
@@ -118,6 +119,8 @@ export interface SessionApi {
     /** The map look in one undoable step: relief, map camera, north-west sun,
      *  ray-marched hillshade — and the viewport switches to the camera. */
     applyMapLook(): Promise<void>;
+    /** Apply a named look recipe (one undoable batch). */
+    applyRecipe(id: RecipeId): Promise<void>;
     /** Pick an albedo texture (PNG/JPEG) for the selected mesh. */
     importMaterialTexture(): Promise<void>;
     /** Remove the selected mesh's texture. */
