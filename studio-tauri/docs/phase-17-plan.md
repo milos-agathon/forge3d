@@ -1,9 +1,13 @@
 # Phase 17 — the engine's inputs: plan (not code)
 
-**Status:** plan for review; nothing is built. The roadmap names this phase;
-its own triggers are unmet. This document exists so the trigger decision can
-be made on facts, and so the work — if greenlit — lands as contained
-increments, never a big-bang "fetch" button.
+**Status:** increments 2.1/2.2 landed (the New Project dialog gains an
+"Engine datasets" section — the four registry DEMs render elevation-ramp
+thumbnails from their own heightfields, and one click seeds a project from
+the repo checkout or, failing that, a hash-verified download); increments
+2.3/2.4 (renderer presets, COG streaming) remain gated behind their own
+triggers. The registry hands out only locally-resolvable paths, so nothing
+downloads at idle. The trigger decision ("build the low-risk pieces now,
+hold the rest") is recorded here as accepted.
 
 **Triggers (roadmap §8, verbatim):**
 | Trigger | State today |

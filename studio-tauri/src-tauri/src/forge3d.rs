@@ -431,8 +431,19 @@ impl Forge3dState {
         last
     }
 
-    /// A starter DEM by preset id ("bryce" | "swiss"), else the default.
+    /// A starter DEM by preset id ("bryce" | "swiss" | "dataset:<name>"),
+    /// else the default. Dataset names resolve (and download, if need be)
+    /// through the engine's own registry; the registry is the allow-list.
     pub fn terrain_seed(&self, preset: Option<&str>) -> Option<studio_core::TerrainSeed> {
+        if let Some(name) = preset.and_then(|id| id.strip_prefix("dataset:")) {
+            let python = self.probe(false).python;
+            let title = dataset_list(&python)
+                .ok()
+                .and_then(|rows| rows.into_iter().find(|row| row.name == name))
+                .and_then(|row| row.filename);
+            let path = dataset_fetch(&python, name).ok()?;
+            return self.seed_for_absolute(PathBuf::from(path), title);
+        }
         let relative = preset
             .and_then(|id| SCENE_PRESETS.iter().find(|recipe| recipe.id == id))
             .map(|recipe| recipe.dem.to_owned())
@@ -447,6 +458,14 @@ impl Forge3dState {
 
     fn seed_for_relative(&self, relative: &str) -> Option<studio_core::TerrainSeed> {
         let path = resolve_dem(relative)?;
+        self.seed_for_absolute(path, None)
+    }
+
+    fn seed_for_absolute(
+        &self,
+        path: PathBuf,
+        title: Option<String>,
+    ) -> Option<studio_core::TerrainSeed> {
         let path_text = path.to_string_lossy().into_owned();
 
         if let Ok(cache) = self.terrain_cache.lock() {
@@ -462,10 +481,12 @@ impl Forge3dState {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "terrain.tif".to_owned());
-        let title = SCENE_PRESETS
-            .iter()
-            .find(|recipe| recipe.dem == relative)
-            .map(|recipe| recipe.name.to_owned());
+        let title = title.or_else(|| {
+            SCENE_PRESETS
+                .iter()
+                .find(|recipe| recipe.dem == path_text)
+                .map(|recipe| recipe.name.to_owned())
+        });
         let mut seed = studio_core::TerrainSeed {
             title,
             name,
@@ -1131,6 +1152,146 @@ fn run_vector_preview(
             .to_owned());
     }
     Ok(value)
+}
+
+/// The engine's dataset registry, read once per probe — offline-safe: with
+/// the repo checkout present, every sample dataset resolves locally (nothing
+/// is downloaded until `dataset_fetch` is called and no local copy exists).
+const DATASET_LIST_SCRIPT: &str = r#"
+import json
+try:
+    import forge3d.datasets as datasets
+except Exception as exc:
+    print(json.dumps({"ok": False, "detail": "the engine's dataset registry is unavailable: %s" % (exc,)}))
+    raise SystemExit(0)
+try:
+    info = datasets.dataset_info()
+except Exception as exc:
+    print(json.dumps({"ok": False, "detail": "the dataset registry failed: %s" % (exc,)}))
+    raise SystemExit(0)
+rows = []
+for name, meta in sorted(info.items()):
+    rows.append({
+        "name": name,
+        "kind": meta.get("kind"),
+        "filename": meta.get("filename"),
+        "description": meta.get("description"),
+        "path": meta.get("path"),
+    })
+print(json.dumps({"ok": True, "datasets": rows}))
+"#;
+
+/// Resolve (and fetch, if need be) a dataset by registry name. The engine's
+/// own fetch path does the hash verification; a missing `pooch` fails here
+/// with the engine's install instructions.
+const DATASET_FETCH_SCRIPT: &str = r#"
+import json, sys
+name = sys.argv[1]
+try:
+    import forge3d.datasets as datasets
+except Exception as exc:
+    print(json.dumps({"ok": False, "detail": "the engine's dataset registry is unavailable: %s" % (exc,)}))
+    raise SystemExit(0)
+try:
+    path = str(datasets.fetch(name))
+except Exception as exc:
+    print(json.dumps({"ok": False, "detail": str(exc)}))
+    raise SystemExit(0)
+print(json.dumps({"ok": True, "path": path}))
+"#;
+
+/// One entry of the engine's dataset registry.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatasetInfo {
+    pub name: String,
+    pub kind: Option<String>,
+    pub filename: Option<String>,
+    pub description: Option<String>,
+    /// The local path when a file resolves — otherwise nothing would be
+    /// downloaded until the fetch is invoked.
+    pub path: Option<String>,
+}
+
+/// The registry, as the shell sees it. Errors here are non-fatal: the
+/// gallery just does not appear.
+pub fn dataset_list(python: &str) -> Result<Vec<DatasetInfo>, String> {
+    let (stdout, stderr) = run_script(python, DATASET_LIST_SCRIPT, &[], SCRIPT_TIMEOUT)?;
+    let line = stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with('{'))
+        .ok_or_else(|| format!("the dataset registry produced no output: {}", stderr.trim()))?;
+    let value: serde_json::Value = serde_json::from_str(line.trim())
+        .map_err(|error| format!("the dataset registry returned invalid JSON: {error}"))?;
+    if value.get("ok").and_then(|ok| ok.as_bool()) != Some(true) {
+        return Err(value
+            .get("detail")
+            .and_then(|detail| detail.as_str())
+            .unwrap_or("the dataset registry failed")
+            .to_owned());
+    }
+    let rows = value
+        .get("datasets")
+        .and_then(|rows| rows.as_array())
+        .ok_or_else(|| "the dataset registry returned no list".to_owned())?;
+    Ok(rows
+        .iter()
+        .filter_map(|row| {
+            Some(DatasetInfo {
+                name: row.get("name")?.as_str()?.to_owned(),
+                kind: row.get("kind").and_then(|v| v.as_str()).map(String::from),
+                filename: row
+                    .get("filename")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                description: row
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                path: row.get("path").and_then(|v| v.as_str()).map(String::from),
+            })
+        })
+        .collect())
+}
+
+/// Resolve a dataset to a local file, fetching it if need be. The name must
+/// come from the registry — no arbitrary engine calls.
+pub fn dataset_fetch(python: &str, name: &str) -> Result<String, String> {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+    {
+        return Err(format!("invalid dataset name {name:?}"));
+    }
+    let known = dataset_list(python)?;
+    if !known.iter().any(|entry| entry.name == name) {
+        return Err(format!("unknown dataset {name:?}"));
+    }
+    let (stdout, stderr) = run_script(
+        python,
+        DATASET_FETCH_SCRIPT,
+        &[name.to_owned()],
+        Duration::from_secs(300),
+    )?;
+    let line = stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with('{'))
+        .ok_or_else(|| format!("the dataset fetch produced no output: {}", stderr.trim()))?;
+    let value: serde_json::Value = serde_json::from_str(line.trim())
+        .map_err(|error| format!("the dataset fetch returned invalid JSON: {error}"))?;
+    if value.get("ok").and_then(|ok| ok.as_bool()) != Some(true) {
+        return Err(value
+            .get("detail")
+            .and_then(|detail| detail.as_str())
+            .unwrap_or("the dataset fetch failed")
+            .to_owned());
+    }
+    value
+        .get("path")
+        .and_then(|path| path.as_str())
+        .map(str::to_owned)
+        .ok_or_else(|| "the dataset fetch returned no path".to_owned())
 }
 
 /// Interpreter candidates, most specific first.

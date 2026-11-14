@@ -82,6 +82,7 @@ pub fn run() {
             commands::polygon_geometry,
             commands::graticule_geometry,
             commands::colormap_stops,
+            commands::dataset_list,
             commands::import_terrain_dem,
             commands::read_image_asset,
             commands::read_hdr,

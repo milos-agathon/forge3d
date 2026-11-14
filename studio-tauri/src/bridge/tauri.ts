@@ -18,6 +18,7 @@ import type {
   ShellInfo,
   TerrainPreview,
   WrittenFrame,
+  DatasetInfo,
   GraticuleGeometry,
   PolygonGeometry,
   VectorGeometry,
@@ -97,6 +98,8 @@ export const tauriBridge: StudioBridge = {
   fileSize: (path) => invoke<number>("file_size", { path }),
 
   checkAssets: () => invoke<AssetIntegrity[]>("check_assets"),
+
+  datasetList: () => invoke<DatasetInfo[]>("dataset_list"),
 
   terrainPreview: (path, resolution) =>
     invoke<TerrainPreview>("terrain_preview", { path, resolution: resolution ?? null }),

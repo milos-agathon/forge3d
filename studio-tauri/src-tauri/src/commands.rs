@@ -824,6 +824,16 @@ pub fn graticule_geometry(
     crate::forge3d::graticule_geometry(&python, &dem_path, interval_deg, labels.unwrap_or(true))
 }
 
+/// The engine's dataset registry (bundled + downloadable samples).
+/// The gallery section needs only metadata; fetches happen on demand.
+#[tauri::command(async)]
+pub fn dataset_list(
+    forge: State<'_, Forge3dState>,
+) -> Result<Vec<crate::forge3d::DatasetInfo>, String> {
+    let python = forge.probe(false).python;
+    crate::forge3d::dataset_list(&python)
+}
+
 /// The engine's colormap, sampled into the stops the Material preview paints.
 #[tauri::command(async)]
 pub fn colormap_stops(

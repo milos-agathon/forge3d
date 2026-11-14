@@ -380,6 +380,16 @@ export interface PlayheadResult {
   state: SessionState;
 }
 
+/** One entry of the engine's dataset registry (fetched or baked). */
+export interface DatasetInfo {
+  name: string;
+  kind: string | null;
+  filename: string | null;
+  description: string | null;
+  /** Present only when a local file resolves — nothing would be downloaded. */
+  path?: string;
+}
+
 /** One frame of an offline sequence export. */
 export interface AnimationFrameRequest {
   frame: number;

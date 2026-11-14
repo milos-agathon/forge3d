@@ -1,5 +1,6 @@
 import { useSession } from "../state/session-context";
 import { CloseIcon } from "./icons";
+import { DatasetGallery } from "./DatasetGallery";
 
 function metres(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
@@ -84,6 +85,11 @@ export function NewProjectDialog() {
             <span className="preset__meta mono">no DEM</span>
           </button>
         </div>
+
+        <DatasetGallery
+          onPick={(presetId) => void actions.createProject(presetId)}
+          disabled={busy}
+        />
 
         <footer className="modal__footer">
           <span className="hint">

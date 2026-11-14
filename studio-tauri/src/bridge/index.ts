@@ -25,6 +25,7 @@ import type {
   TerrainPreview,
   AnimationFrameRequest,
   WrittenFrame,
+  DatasetInfo,
   GraticuleGeometry,
   PolygonGeometry,
   VectorGeometry,
@@ -108,6 +109,8 @@ export interface StudioBridge {
   /** Replace the scene terrain's DEM with a raster the user picked — or add
    *  the terrain when the scene has none yet. */
   importTerrainDem(path: string): Promise<SessionState>;
+  /** The engine's dataset registry (bundled + downloadable samples). */
+  datasetList(): Promise<DatasetInfo[]>;
   /** Add a polygon layer from a GPKG/GeoJSON feature collection. */
   addPolygonLayer(
     path: string,

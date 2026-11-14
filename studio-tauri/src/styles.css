@@ -2020,6 +2020,48 @@ kbd {
   border-style: dashed;
 }
 
+.dataset-gallery__head {
+  margin-top: 14px;
+}
+
+.dataset-gallery__head h3 {
+  margin: 0 0 2px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.dataset-gallery__head .hint {
+  margin: 0 0 8px;
+}
+
+.dataset {
+  position: relative;
+}
+
+.dataset__thumb {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  image-rendering: pixelated;
+  background: var(--code-background);
+}
+
+.dataset__placeholder {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 6px;
+  border: 1px dashed var(--border);
+  color: var(--text-dim);
+  font-size: 22px;
+}
+
 .preset__name {
   font-weight: 650;
 }
