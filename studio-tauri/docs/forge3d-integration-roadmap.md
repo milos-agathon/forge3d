@@ -1166,13 +1166,13 @@ remedy in one breath (`pip install --user forge3d`, or set
 `FORGE3D_STUDIO_PYTHON`) — no pip, no sudo, no engine bundled, no bare
 python fallback. The shell discovers and *validates* its interpreter in a
 fixed order: `FORGE3D_STUDIO_PYTHON` (import-checked, never trusted
-blind) → ancestors' `.venv/bin/python` (repo checkouts) → `PATH python3`,
+blind) → ancestors' `.venv/bin/python` (repo checkouts) → `PATH python3` → `PATH python`,
 each probe overriding none of the others. `--engine-check` prints every
 candidate tried, one line each with its result, the verdict, and exits 0/1
 — stranger- and CI-verifiable, starts no GUI. Verified on this machine in
 four scenarios: env var set (exit 0), repo-cwd `.venv` fallback (exit 0),
 a fresh `uv` venv with `pip install forge3d` (1.48.0 → exit 0), a bare
-`PATH python3` without forge3d (exit 1 with the remedy printed). The
+`PATH python3`/`PATH python` without forge3d (exit 1 with the remedy printed). The
 desktop entry validates with `desktop-file-validate`; the deb's
 `Depends` are `libgbm1, mesa-vulkan-drivers` merged with the bundler's
 webkit/gtk defaults; the `.desktop` `Comment` no longer duplicates

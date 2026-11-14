@@ -85,7 +85,7 @@ verification on a fresh stranger machine remains unverified by design.
   `uv` venv with PyPI forge3d 1.48.0 (exit 0), the desktop entry validated,
   and `dpkg -l` recorded `ii`. CI's `deb-audit` job runs the same flow on
   ubuntu-latest with the system package manager.
-- A bare `PATH python3` probe is honest about half-installed interpreters:
+- A bare `PATH python3`/`PATH python` probe is honest about half-installed interpreters:
   a system `python3` with `forge3d` but no `numpy` fails with
   `import forge3d failed: No module named 'numpy'`. Working as designed;
   in the troubleshooting table.

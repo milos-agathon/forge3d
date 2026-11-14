@@ -1566,6 +1566,7 @@ fn labeled_interpreter_candidates() -> Vec<(String, String)> {
     }
 
     candidates.push(("PATH python3".to_owned(), "python3".to_owned()));
+    candidates.push(("PATH python".to_owned(), "python".to_owned()));
     let mut seen = std::collections::HashSet::new();
     candidates.retain(|(_, path)| seen.insert(path.clone()));
     candidates
@@ -1667,9 +1668,10 @@ fn probe_interpreter(python: &str) -> Result<EngineStatus, String> {
 /// 1 not found. Deliberately no auto-install, no sudo, and no bare-python
 /// fallback that cannot see forge3d.
 pub fn engine_check() -> i32 {
-    // The candidates list is never empty: `PATH python3` is always the last
-    // entry. (Duplicates, e.g. an env var pointing at `python3` itself, are
-    // dropped by the retain in `labeled_interpreter_candidates`.)
+    // The candidates list is never empty: `PATH python3` and `PATH python`
+    // are always the last entries. (Duplicates, e.g. an env var pointing at
+    // `python3` itself, are dropped by the retain in
+    // `labeled_interpreter_candidates`.)
     let candidates = labeled_interpreter_candidates();
     println!("{:<24}interpreter  result", "candidate");
     let mut found: Option<(String, String)> = None;

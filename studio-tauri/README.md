@@ -201,17 +201,18 @@ forge3d-studio-shell --engine-check
 # FORGE3D_STUDIO_PYTHON   /path/to/venv/bin/python  ok (forge3d 1.48.0)
 # repo .venv              /path/to/repo/.venv/bin/python  ok (forge3d 1.47.1)
 # PATH python3            python3  fail: import forge3d failed: No module named 'forge3d'
+# PATH python             python  fail: could not run python: No such file or directory (os error 2)
 # engine: found via FORGE3D_STUDIO_PYTHON (forge3d 1.48.0)
 ```
 
 The `repo .venv` line appears only when the shell is launched with a repo
 checkout as an ancestor (the `.venv` next to the project). On a stranger's
-machine only `FORGE3D_STUDIO_PYTHON` and `PATH python3` can match — that is
+machine only `FORGE3D_STUDIO_PYTHON` and the `PATH python3` / `PATH python` candidates can match — that is
 the intended honest behaviour, not a bug.
 
 `--engine-check` exits 0 on success, 1 on failure (with
 the exact remedies it tried). Discovery order: `FORGE3D_STUDIO_PYTHON`
-(validated, never trusted blind) → ancestors' `.venv` → `PATH python3`.
+(validated, never trusted blind) → ancestors' `.venv` → `PATH python3` → `PATH python`.
 No auto-install, no `sudo pip`, no bare-python fallback. One nuance: when the
 shell runs inside a repo checkout, the probe imports the checkout's
 `python/forge3d` (a dev convenience), with your own `PYTHONPATH` kept as the
