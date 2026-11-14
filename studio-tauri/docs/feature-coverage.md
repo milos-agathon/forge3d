@@ -207,11 +207,14 @@ authoring shows the output. The one unmatched term is the engine's
 ray-marched sun visibility (a ridge shadowing the ground behind it) — no
 three.js equivalent, documented.
 
-**Phase 17 — the engine's inputs, started.** The New Project dialog has an
-"Engine datasets" section — the registry DEMs with thumbnails rendered from
-their own heightfields, one click to seed a project, offline-safe via the
-repo-checkout fallback. Renderer presets and COG streaming stay gated
-behind their own triggers (`docs/phase-17-plan.md`).
+**Phase 17 — the engine's inputs, core landed.** The New Project dialog
+has an "Engine datasets" section — the registry DEMs with thumbnails
+rendered from their own heightfields, one click to seed a project,
+offline-safe via the repo-checkout fallback — and a "Remote DEM (COG)…"
+card: probe over one HEAD request (the engine's native range-reader), then
+download once into a hash-keyed cache and open as a normal DEM. Renderer
+presets and the tile-laddered progressive preview stay gated behind their
+own triggers (`docs/phase-17-plan.md`).
 
 **Not planned:** path tracing, splats, inverse rendering, point clouds,
 volumetrics, the globe. Different product tiers, and the roadmap's §8 already

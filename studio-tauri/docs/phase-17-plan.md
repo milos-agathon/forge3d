@@ -3,11 +3,19 @@
 **Status:** increments 2.1/2.2 landed (the New Project dialog gains an
 "Engine datasets" section — the four registry DEMs render elevation-ramp
 thumbnails from their own heightfields, and one click seeds a project from
-the repo checkout or, failing that, a hash-verified download); increments
-2.3/2.4 (renderer presets, COG streaming) remain gated behind their own
-triggers. The registry hands out only locally-resolvable paths, so nothing
-downloads at idle. The trigger decision ("build the low-risk pieces now,
-hold the rest") is recorded here as accepted.
+the repo checkout or, failing that, a hash-verified download); increment
+2.4 landed partially — the remote-DEM flow (probe via the engine's native
+range-reader, whole-file materialization into a hash-keyed local cache on
+open, preview identical to the local path); increment 2.3 (renderer
+presets) and the tile-laddered streaming preview remain gated behind their
+own triggers. The registry hands out only locally-resolvable paths, so
+nothing downloads at idle; confirming a remote DEM costs one HEAD request
+to probe and one full download on open. Verified end to end against a
+local HTTP range-capable server serving a tiled DEFLATE COG with
+overviews (probe output: 1024², 16 tiles, deflate-8, 4 overview levels,
+geographic bounds typed `EPSG:4326`; the materialized file opens as a
+normal local DEM; the New Project failure path reports fetch errors
+loudly instead of opening an empty scene silently).
 
 **Triggers (roadmap §8, verbatim):**
 | Trigger | State today |
@@ -94,16 +102,16 @@ Reasons below.
 * Explicitly out: `toon_viz` (no equivalent in the studio's light model),
   any part of the dict with no studio counterpart (documented).
 
-### 2.4 COG streaming (increment 4 — hold behind trigger, larger)
-* "Open URL…" for DEM/imagery: `open_cog(url)` server-side, window reads only
-  for the preview mesh and the still's tiles; no full download.
-* Hard requirements before this ships: offline fallback to full fetch when
-  the file is not streamable (LZW/predict 5 → rasterio fallback, already
-  built into `open_cog`), a cache budget, a UI affordance showing "streaming"
-  state, and cancellation.
-* The preview mesh then needs the COG resolution ladder (overviews) instead
-  of the single-grid 96×96 sample — that is the real work; do not sneak it
-  into 2.1/2.2.
+### 2.4 COG streaming (increment 4 — landed as far as a full download)
+* Landed: `remote_cog_info` probe (HTTP(S)/file URLs, one HEAD request, the
+  engine's native range-reader), New Project "Remote DEM (COG)…" card with a
+  Probe → summary → Open flow, materialization into a hash-keyed cache on
+  open, the usual local-DEM path for the still and the preview.
+* Honestly NOT landed: tile-laddered progressive preview (the 96×96 grid is
+  still read from the whole file) and any remote-COG render path without a
+  local copy. Those remain the real streaming work; the probe and the
+  download are deliberately separable so the network code has one shape
+  (validated URLs, engine-trusted authentication).
 
 ### 2.5 Not in this phase, on purpose
 * Point clouds/COPC UI (viewer tier, §8), buildings/meshes in Rendered

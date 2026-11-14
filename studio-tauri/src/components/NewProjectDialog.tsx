@@ -1,6 +1,7 @@
 import { useSession } from "../state/session-context";
 import { CloseIcon } from "./icons";
 import { DatasetGallery } from "./DatasetGallery";
+import { RemoteDemDialog } from "./RemoteDemDialog";
 
 function metres(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
@@ -90,6 +91,8 @@ export function NewProjectDialog() {
           onPick={(presetId) => void actions.createProject(presetId)}
           disabled={busy}
         />
+
+        <RemoteDemDialog />
 
         <footer className="modal__footer">
           <span className="hint">

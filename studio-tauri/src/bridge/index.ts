@@ -28,6 +28,7 @@ import type {
   DatasetInfo,
   GraticuleGeometry,
   PolygonGeometry,
+  RemoteCogInfo,
   VectorGeometry,
 } from "./types";
 
@@ -109,6 +110,8 @@ export interface StudioBridge {
   /** Replace the scene terrain's DEM with a raster the user picked — or add
    *  the terrain when the scene has none yet. */
   importTerrainDem(path: string): Promise<SessionState>;
+  /** Probe a remote DEM with the engine's native COG reader before any download. */
+  remoteCogInfo(url: string): Promise<RemoteCogInfo>;
   /** The engine's dataset registry (bundled + downloadable samples). */
   datasetList(): Promise<DatasetInfo[]>;
   /** Add a polygon layer from a GPKG/GeoJSON feature collection. */

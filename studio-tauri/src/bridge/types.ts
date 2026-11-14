@@ -380,6 +380,30 @@ export interface PlayheadResult {
   state: SessionState;
 }
 
+/** What the engine's native COG reader sees in a remote DEM. */
+export interface RemoteCogInfo {
+  url: string;
+  overviewCount: number;
+  /** Geographic [west, south, east, north] when the file declares one. */
+  bounds: [number, number, number, number] | null;
+  streamable: boolean;
+  levels: RemoteCogLevel[];
+  totalTiles: number;
+}
+
+export interface RemoteCogLevel {
+  level: number;
+  width: number;
+  height: number;
+  tileWidth: number;
+  tileHeight: number;
+  tilesAcross: number;
+  tilesDown: number;
+  tiles: number;
+  compression: number;
+  bitsPerSample: number;
+}
+
 /** One entry of the engine's dataset registry (fetched or baked). */
 export interface DatasetInfo {
   name: string;

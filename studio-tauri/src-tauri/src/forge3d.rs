@@ -431,24 +431,42 @@ impl Forge3dState {
         last
     }
 
-    /// A starter DEM by preset id ("bryce" | "swiss" | "dataset:<name>"),
+    /// A starter DEM by preset id ("bryce" | "swiss" | "dataset:<name>" | "url:<url>"),
     /// else the default. Dataset names resolve (and download, if need be)
     /// through the engine's own registry; the registry is the allow-list.
-    pub fn terrain_seed(&self, preset: Option<&str>) -> Option<studio_core::TerrainSeed> {
+    /// Errors are returned, not swallowed: a failed remote fetch must reach
+    /// the user as an error, not as an empty scene.
+    pub fn terrain_seed(
+        &self,
+        preset: Option<&str>,
+    ) -> Result<Option<studio_core::TerrainSeed>, String> {
+        if let Some(url) = preset.and_then(|id| id.strip_prefix("url:")) {
+            let python = self.probe(false).python;
+            let cache_dir = std::env::temp_dir().join("forge3d-cog-cache");
+            let cache = cache_dir.to_string_lossy().into_owned();
+            let trimmed = url.trim_end_matches('/');
+            let title = trimmed
+                .rsplit('/')
+                .next()
+                .map(str::to_owned)
+                .filter(|s| !s.is_empty());
+            let (path, _bytes, _cached) = url_fetch(&python, url, &cache)?;
+            return Ok(self.seed_for_absolute(PathBuf::from(path), title));
+        }
         if let Some(name) = preset.and_then(|id| id.strip_prefix("dataset:")) {
             let python = self.probe(false).python;
             let title = dataset_list(&python)
                 .ok()
                 .and_then(|rows| rows.into_iter().find(|row| row.name == name))
                 .and_then(|row| row.filename);
-            let path = dataset_fetch(&python, name).ok()?;
-            return self.seed_for_absolute(PathBuf::from(path), title);
+            let path = dataset_fetch(&python, name)?;
+            return Ok(self.seed_for_absolute(PathBuf::from(path), title));
         }
         let relative = preset
             .and_then(|id| SCENE_PRESETS.iter().find(|recipe| recipe.id == id))
             .map(|recipe| recipe.dem.to_owned())
             .unwrap_or_else(|| DEFAULT_DEM_RELATIVE.to_owned());
-        self.seed_for_relative(&relative)
+        Ok(self.seed_for_relative(&relative))
     }
 
     /// The starter scene's recipe, when the id names one.
@@ -1292,6 +1310,229 @@ pub fn dataset_fetch(python: &str, name: &str) -> Result<String, String> {
         .and_then(|path| path.as_str())
         .map(str::to_owned)
         .ok_or_else(|| "the dataset fetch returned no path".to_owned())
+}
+
+/// Probe a remote DEM (a COG, or any file the range-reader can open).
+/// One HEAD + header reads — nothing downloads beyond what the engine needs
+/// to answer the question "what is this file?".
+const REMOTE_COG_INFO_SCRIPT: &str = r#"
+import json, sys
+url = sys.argv[1]
+try:
+    import forge3d.cog as cog
+except Exception as exc:
+    print(json.dumps({"ok": False, "detail": "the engine's COG reader is unavailable: %s" % (exc,)}))
+    raise SystemExit(0)
+try:
+    ds = cog.open_cog(url)
+    levels = []
+    total_tiles = 0
+    for level in range(ds.overview_count):
+        info = ds.ifd_info(level)
+        total_tiles += info.tile_count
+        levels.append({
+            "level": level,
+            "width": info.width,
+            "height": info.height,
+            "tileWidth": info.tile_width,
+            "tileHeight": info.tile_height,
+            "tilesAcross": info.tiles_across,
+            "tilesDown": info.tiles_down,
+            "tiles": info.tile_count,
+            "compression": info.compression,
+            "bitsPerSample": info.bits_per_sample,
+        })
+    b = ds.bounds
+    print(json.dumps({
+        "ok": True,
+        "url": url,
+        "overviewCount": ds.overview_count,
+        "bounds": list(b) if b else None,
+        "streamable": True,
+        "levels": levels,
+        "totalTiles": total_tiles,
+    }))
+except Exception as exc:
+    print(json.dumps({"ok": False, "detail": str(exc)}))
+"#;
+
+/// Download a remote DEM to the studio cache. `url` must be http(s) or
+/// `file://`; the engine already validated it via `remote_cog_info`.
+const URL_FETCH_SCRIPT: &str = r#"
+import hashlib, json, sys, urllib.request
+url = sys.argv[1]
+cache = sys.argv[2]
+key = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+name = url.rstrip("/").rsplit("/", 1)[-1] or "remote.tif"
+if "." not in name:
+    name = name + ".tif"
+dest = cache + "/cog-" + key + ".tif"
+import os
+try:
+    os.makedirs(cache, exist_ok=True)
+    if os.path.isfile(dest) and os.path.getsize(dest) > 0:
+        print(json.dumps({"ok": True, "path": dest, "cached": True, "bytes": os.path.getsize(dest)}))
+        raise SystemExit(0)
+    with urllib.request.urlopen(url) as response:
+        data = response.read()
+    with open(dest, "wb") as out:
+        out.write(data)
+    print(json.dumps({"ok": True, "path": dest, "cached": False, "bytes": len(data)}))
+except Exception as exc:
+    print(json.dumps({"ok": False, "detail": str(exc)}))
+"#;
+
+/// Remote-DEM probe: what `remote_cog_info` returns to the gallery dialog.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteCogInfo {
+    pub url: String,
+    pub overview_count: u32,
+    pub bounds: Option<[f64; 4]>,
+    pub streamable: bool,
+    pub levels: Vec<RemoteCogLevel>,
+    pub total_tiles: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteCogLevel {
+    pub level: u32,
+    pub width: u32,
+    pub height: u32,
+    pub tile_width: u32,
+    pub tile_height: u32,
+    pub tiles_across: u32,
+    pub tiles_down: u32,
+    pub tiles: u32,
+    pub compression: u32,
+    pub bits_per_sample: u32,
+}
+
+fn validate_remote_url(url: &str) -> Result<(), String> {
+    let lower = url.to_ascii_lowercase();
+    if !(lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("file://"))
+    {
+        return Err("a remote DEM URL must be http://, https:// or file://".to_owned());
+    }
+    if url.len() > 2048 || url.chars().any(|c| c.is_control()) {
+        return Err("the remote DEM URL is malformed".to_owned());
+    }
+    Ok(())
+}
+
+/// Probe a remote DEM with the engine's COG reader (native range reads; one
+/// HEAD request, no pixel data fetched).
+pub fn remote_cog_info(python: &str, url: &str) -> Result<RemoteCogInfo, String> {
+    validate_remote_url(url)?;
+    let (stdout, stderr) = run_script(
+        python,
+        REMOTE_COG_INFO_SCRIPT,
+        &[url.to_owned()],
+        SCRIPT_TIMEOUT,
+    )?;
+    let line = stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with('{'))
+        .ok_or_else(|| format!("the remote probe produced no output: {}", stderr.trim()))?;
+    let value: serde_json::Value = serde_json::from_str(line.trim())
+        .map_err(|error| format!("the remote probe returned invalid JSON: {error}"))?;
+    if value.get("ok").and_then(|ok| ok.as_bool()) != Some(true) {
+        return Err(value
+            .get("detail")
+            .and_then(|detail| detail.as_str())
+            .unwrap_or("the remote probe failed")
+            .to_owned());
+    }
+    let levels = value
+        .get("levels")
+        .and_then(|rows| rows.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let parsed = levels
+        .iter()
+        .map(|row| RemoteCogLevel {
+            level: row.get("level").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            width: row.get("width").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            height: row.get("height").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            tile_width: row.get("tileWidth").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            tile_height: row.get("tileHeight").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            tiles_across: row.get("tilesAcross").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            tiles_down: row.get("tilesDown").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            tiles: row.get("tiles").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            compression: row.get("compression").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            bits_per_sample: row
+                .get("bitsPerSample")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32,
+        })
+        .collect();
+    let bounds = value
+        .get("bounds")
+        .and_then(|b| b.as_array())
+        .and_then(|rows| {
+            let nums: Vec<f64> = rows.iter().filter_map(|v| v.as_f64()).collect();
+            (nums.len() == 4).then(|| [nums[0], nums[1], nums[2], nums[3]])
+        });
+    Ok(RemoteCogInfo {
+        url: url.to_owned(),
+        overview_count: value
+            .get("overviewCount")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32,
+        bounds,
+        streamable: value
+            .get("streamable")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        levels: parsed,
+        total_tiles: value
+            .get("totalTiles")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
+    })
+}
+
+/// Materialize a remote DEM into the studio cache; returns its path and size.
+/// The hash of the URL keys the cache, so reopening the same remote DEM
+/// costs no download.
+pub fn url_fetch(python: &str, url: &str, cache_dir: &str) -> Result<(String, u64, bool), String> {
+    validate_remote_url(url)?;
+    // The engine probe must pass first: we only download what the reader can open.
+    remote_cog_info(python, url)?;
+    let cache = cache_dir.to_owned();
+    let (stdout, stderr) = run_script(
+        python,
+        URL_FETCH_SCRIPT,
+        &[url.to_owned(), cache],
+        Duration::from_secs(600),
+    )?;
+    let line = stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with('{'))
+        .ok_or_else(|| format!("the fetch produced no output: {}", stderr.trim()))?;
+    let value: serde_json::Value = serde_json::from_str(line.trim())
+        .map_err(|error| format!("the fetch returned invalid JSON: {error}"))?;
+    if value.get("ok").and_then(|ok| ok.as_bool()) != Some(true) {
+        return Err(value
+            .get("detail")
+            .and_then(|detail| detail.as_str())
+            .unwrap_or("the download failed")
+            .to_owned());
+    }
+    let path = value
+        .get("path")
+        .and_then(|p| p.as_str())
+        .ok_or_else(|| "the fetch returned no path".to_owned())?
+        .to_owned();
+    let bytes = value.get("bytes").and_then(|b| b.as_u64()).unwrap_or(0);
+    let cached = value
+        .get("cached")
+        .and_then(|b| b.as_bool())
+        .unwrap_or(false);
+    Ok((path, bytes, cached))
 }
 
 /// Interpreter candidates, most specific first.

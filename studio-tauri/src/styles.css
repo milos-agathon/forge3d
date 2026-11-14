@@ -2051,6 +2051,36 @@ kbd {
   background: var(--code-background);
 }
 
+.probe-summary {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+  background: var(--code-background);
+  font-size: 11px;
+}
+
+.probe-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--text-muted);
+}
+
+.probe-row span:first-child {
+  color: var(--text-dim);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+
+.modal__footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .dataset__placeholder {
   display: grid;
   place-items: center;
@@ -2547,4 +2577,13 @@ kbd {
   color: #f5c26b;
   background: rgba(12, 14, 18, 0.72);
   border-radius: 3px;
+}
+
+.input--mono {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.hint--error {
+  color: var(--danger);
 }

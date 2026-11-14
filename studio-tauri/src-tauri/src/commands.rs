@@ -72,7 +72,7 @@ pub struct ScenePreset {
 pub fn scene_presets(forge: State<'_, Forge3dState>) -> Vec<ScenePreset> {
     let mut presets = Vec::new();
     for recipe in &crate::forge3d::SCENE_PRESETS {
-        let seed = forge.terrain_seed(Some(recipe.id));
+        let seed = forge.terrain_seed(Some(recipe.id)).unwrap_or(None);
         presets.push(ScenePreset {
             id: recipe.id.to_owned(),
             name: recipe.name.to_owned(),
@@ -99,7 +99,7 @@ pub fn new_project(
     let seed = match preset.as_deref() {
         // The dialog's "Empty scene" really is empty: no DEM.
         Some("empty") => None,
-        other => forge.terrain_seed(other),
+        other => forge.terrain_seed(other)?,
     };
     let recipe = forge.scene_recipe(preset.as_deref());
     let mut session = lock(&state)?;
@@ -822,6 +822,17 @@ pub fn graticule_geometry(
     }
     let python = forge.probe(false).python;
     crate::forge3d::graticule_geometry(&python, &dem_path, interval_deg, labels.unwrap_or(true))
+}
+
+/// Probe a remote DEM with the engine's native COG reader. The dialog shows
+/// the result before anything downloads.
+#[tauri::command(async)]
+pub fn remote_cog_info(
+    forge: State<'_, Forge3dState>,
+    url: String,
+) -> Result<crate::forge3d::RemoteCogInfo, String> {
+    let python = forge.probe(false).python;
+    crate::forge3d::remote_cog_info(&python, &url)
 }
 
 /// The engine's dataset registry (bundled + downloadable samples).
