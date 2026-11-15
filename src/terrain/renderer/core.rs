@@ -182,6 +182,12 @@ pub struct TerrainScene {
     #[cfg(feature = "enable-gpu-instancing")]
     pub(super) scatter_concordia: bool,
     #[cfg(feature = "enable-gpu-instancing")]
+    pub(super) scatter_renderer_format: wgpu::TextureFormat,
+    #[cfg(feature = "enable-gpu-instancing")]
+    pub(super) scatter_renderer_depth_test: bool,
+    #[cfg(feature = "enable-gpu-instancing")]
+    pub(super) scatter_renderer_identity: bool,
+    #[cfg(feature = "enable-gpu-instancing")]
     pub(super) scatter_batches: Vec<crate::terrain::scatter::TerrainScatterBatch>,
     #[cfg(feature = "enable-gpu-instancing")]
     pub(super) scatter_last_frame_stats: crate::terrain::scatter::TerrainScatterFrameStats,

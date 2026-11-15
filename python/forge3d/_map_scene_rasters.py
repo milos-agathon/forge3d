@@ -14,11 +14,16 @@ def raster_content_hashes(recipe):
     from .map_scene import MapSceneNativeUnavailable, RasterOverlay
     from ._map_scene_validation import diagnostic_block
     from .raster_style import BivariateRasterStyle, raster_values_to_dict
+    from .terrain_materials import TerrainMaterialStyle
+    from .geospatial_materials import MaterialRasterStyle
     identities = []
-    for layer in recipe.layers:
-        if not isinstance(layer, RasterOverlay):
+    for layer in (recipe.terrain, *recipe.layers):
+        if not isinstance(layer, RasterOverlay) and not isinstance(getattr(layer, "style", None), TerrainMaterialStyle):
             continue
         sources = [("primary", layer.path, layer.data)]
+        if isinstance(layer.style, (TerrainMaterialStyle, MaterialRasterStyle)):
+            sources.extend((f"texture:{material.name}:{texture.channel}", texture.resolved_path, None)
+                           for material in layer.style.recipe.layers for texture in material.textures())
         if isinstance(layer.style, BivariateRasterStyle):
             sources.append(("secondary", layer.secondary_path, layer.secondary_data))
         for role, source_path, data in sources:
@@ -35,14 +40,18 @@ def raster_content_hashes(recipe):
                     with path.open("rb") as source:
                         while chunk := source.read(io.DEFAULT_BUFFER_SIZE):
                             digest.update(chunk)
-                identity = {"layer_id": layer.layer_id, "sha256": digest.hexdigest()}
+                identity = {"layer_id": getattr(layer, "layer_id", "terrain-material"), "sha256": digest.hexdigest()}
                 if layer.style is not None:
                     identity["source"] = role
+                if role == "primary" and isinstance(layer.style, MaterialRasterStyle) and layer.style.recipe.has_surface_channels:
+                    # Cached frames made before ordered channel composition may
+                    # have omitted the raster maps, even for identical inputs.
+                    identity["channel_composition"] = 1
                 identities.append(identity)
             except (OSError, ValueError, TypeError) as exc:
                 source_name = f" {role}" if layer.style is not None else ""
                 raise MapSceneNativeUnavailable([diagnostic_block(
-                    layer=str(layer.layer_id), reason=f"RasterOverlay{source_name} source is unavailable: {exc}",
+                    layer=str(getattr(layer, "layer_id", "terrain-material")), reason=f"RasterOverlay{source_name} source is unavailable: {exc}",
                     required_native="readable RasterOverlay source",
                 )]) from exc
     return identities
@@ -54,6 +63,13 @@ def raster_route_blocks(recipe):
     from ._map_scene_validation import diagnostic_block
     layers = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay)]
     styled = [layer for layer in layers if layer.style is not None]
+    from .terrain_materials import TerrainMaterialStyle
+    from .geospatial_materials import MaterialRasterStyle
+    from .raster_style import CategoricalRasterStyle
+    if (styled and len(styled) == len(layers) and
+        any(isinstance(layer.style, MaterialRasterStyle) for layer in styled) and
+        all(isinstance(layer.style, (TerrainMaterialStyle, MaterialRasterStyle, CategoricalRasterStyle)) for layer in styled)):
+        return []  # Explicit C01 aligned, ordered colour stack.
     if len(styled) > 1 or (styled and len(styled) != len(layers)):
         return [diagnostic_block(
             layer=str(layer.layer_id),
@@ -215,3 +231,88 @@ def terrain_raster_drape(recipe, heightmap):
             yield str(path), len(layers)
     finally:
         reservation.close()
+
+
+@contextmanager
+def material_surface_maps(recipe):
+    """Keep recipe-composed data images alive through the existing native draw."""
+    from dataclasses import replace
+    from collections.abc import Mapping
+    import numpy as np
+    from .raster_style import _single
+    from .terrain_materials import TerrainMaterialStyle, _channel_rgba
+    from .geospatial_materials import MaterialRasterStyle
+    from .map_scene import RasterOverlay, _load_raw_heightmap, _thematic_source
+    from .helpers.offscreen import save_png_deterministic
+    ground = recipe.terrain.style
+    ground = ground if isinstance(ground, TerrainMaterialStyle) else None
+    rasters = [layer for layer in recipe.layers if isinstance(layer, RasterOverlay)
+               and isinstance(layer.style, MaterialRasterStyle)]
+    if ground is None and not rasters:
+        yield recipe
+        return
+    channel_rasters = [layer for layer in rasters if layer.style.recipe.has_surface_channels]
+    metadata = dict(recipe.terrain.metadata or {})
+    legacy = metadata.get("material_maps") or metadata.get("materials")
+    ground_has_channels = ground is not None and ground.recipe.has_surface_channels
+    if legacy and (ground_has_channels or channel_rasters):
+        raise ValueError("recipe surface channels and legacy material_maps are competing sources")
+
+    channels = {}
+    if ground_has_channels or channel_rasters:
+        heights = _load_raw_heightmap(recipe.terrain)
+    if ground_has_channels:
+        prepared = ground.prepare(heights)
+        # The base terrain map already supplies the native default over its grid.
+        for name, data in (("normal", prepared.normals), ("roughness", prepared.roughness)):
+            if data is not None:
+                channels[name] = data, np.ones(data.shape[:2], dtype=bool)
+    if channel_rasters:
+        grid = ground.grid if ground is not None else rasters[0].style.grid
+        for layer in channel_rasters:
+            style = layer.style
+            values = _single(_thematic_source(layer.data, layer.path))
+            if style.grid != grid or values.shape != heights.shape:
+                raise ValueError(f"raster {layer.layer_id!r} surface channels must match the terrain grid")
+            valid = np.isfinite(values)
+            if style.elevations is not None:
+                valid &= np.isfinite(style.elevations)
+            if not valid.any():
+                continue
+            normals, roughness = style.channels(values)
+            for name, data in (("normal", normals), ("roughness", roughness)):
+                if data is None:
+                    continue
+                if name in channels:
+                    under, under_valid = channels[name]
+                    selected = valid[..., None] if data.ndim == 3 else valid
+                    data = np.where(selected, data, under)
+                    channels[name] = data, valid | under_valid
+                else:
+                    channels[name] = data, valid
+
+    masks = [valid for _, valid in channels.values()]
+    mask = masks[0] if masks else None
+    if mask is not None and any(not np.array_equal(mask, other) for other in masks[1:]):
+        raise ValueError("normal and roughness channels have different coverage; the shared native material mask requires equal coverage")
+
+    with tempfile.TemporaryDirectory(prefix="forge3d-material-channels-") as directory:
+        maps = dict(legacy) if isinstance(legacy, Mapping) else {}
+        maps.setdefault("physical_normals", True)
+        for name, (data, _) in channels.items():
+            if name == "normal":
+                # Authoring/export: +X east, OpenGL +G north, +Z outward.
+                # build_tbn in terrain_pbr_pom uses a south-facing bitangent.
+                # Convert only at this native boundary, leaving exchange intact.
+                data = data.copy()
+                data[..., 1] *= -1
+            rgba = _channel_rgba(name, data)
+            path = Path(directory) / (name + ".png")
+            save_png_deterministic(path, rgba)
+            maps[name + "_path"] = str(path)
+        if mask is not None and not mask.all():
+            path = Path(directory) / "mask.png"
+            save_png_deterministic(path, _channel_rgba("roughness", mask))
+            maps["mask_path"] = str(path)
+        metadata["material_maps"] = maps
+        yield replace(recipe, terrain=replace(recipe.terrain, metadata=metadata))

@@ -6,6 +6,16 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+### Changed
+- C01 uses the same native 3D buildings at one sample, during offline accumulation and in HDR output. Multisample/HDR building size, shape and brightness therefore change from the former post-tonemap composite; HDR now retains building radiance. Milos accepted this compatibility change. See [C01 release notes](docs/guides/c01_release_notes.md).
+- MapScene retains its fixed `msaa_samples=1` and `render_scale=1.0` behavior. Recipe `lighting.settings["cli_params"]` sampling keys remain stored but are ignored with a `UserWarning`, including when explicitly set to the default values. Provenance remains supported under its existing one-shot contract. Direct renderer sampling controls are unchanged.
+
+### Deprecated
+- `SamplingSettings.address_u`, `address_v` and `address_w` have no effect and are retained for source/serialized compatibility until a future release. Non-default values (`ClampToEdge` or `MirrorRepeat`, compared with the historical `Repeat` default) emit `DeprecationWarning` on construction or assignment. Frame resolves always clamp; these fields do not control material texture tiling.
+
+### Fixed
+- Scaled terrain beauty/AOV resolves clamp frame edges instead of wrapping colour from the opposite edge. Material texture tiling is unchanged; unscaled standard recipe images are unaffected. This also prevents opposite-edge scatter leakage into denoiser guides.
+
 ## [1.49.0]
 
 ### Added

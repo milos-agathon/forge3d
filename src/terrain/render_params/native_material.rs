@@ -34,6 +34,7 @@ impl Default for MaterialNoiseSettingsNative {
 pub struct MaterialLayerSettingsNative {
     // Optional terrain-wide material maps sampled in heightmap UV space.
     pub normal_path: Option<String>,
+    pub physical_normals: bool,
     pub roughness_path: Option<String>,
     pub mask_path: Option<String>,
     pub albedo_path: Option<String>,
@@ -71,6 +72,7 @@ impl Default for MaterialLayerSettingsNative {
     fn default() -> Self {
         Self {
             normal_path: None,
+            physical_normals: false,
             roughness_path: None,
             mask_path: None,
             albedo_path: None,

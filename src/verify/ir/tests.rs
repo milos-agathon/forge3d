@@ -677,6 +677,31 @@ fn terrain_renderer_source_hash_is_pinned() {
     );
 }
 
+/// Explicit owner-approved source-pin rewrite; ordinary test runs never write.
+#[test]
+fn terrain_source_pin_rewrite() {
+    let actual = super::engine::stable_hash(crate::shader_sources::terrain().as_bytes());
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/verify/ir/engine.rs");
+    let mut source = std::fs::read_to_string(&path).unwrap();
+    let prefix = "pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = ";
+    assert_eq!(source.matches(prefix).count(), 1);
+    let start = source.find(prefix).unwrap() + prefix.len();
+    let end = start + source[start..].find(';').unwrap();
+    let old = source[start..end].trim().replace('_', "");
+    let recorded = u64::from_str_radix(old.trim_start_matches("0x"), 16).unwrap();
+    if recorded == actual {
+        eprintln!("terrain pin unchanged: {actual:#018x}");
+        return;
+    }
+    assert!(std::env::var_os("FORGE3D_REFRESH_TERRAIN_PIN").is_some(),
+        "terrain pin dry run: {recorded:#018x} -> {actual:#018x}; owner approval and FORGE3D_REFRESH_TERRAIN_PIN=1 required");
+    let hex = format!("{actual:016x}");
+    let replacement = format!("0x{}_{}_{}_{}", &hex[0..4], &hex[4..8], &hex[8..12], &hex[12..16]);
+    source.replace_range(start..end, &replacement);
+    std::fs::write(path, source).unwrap();
+    eprintln!("terrain pin rewritten from assembled source: {recorded:#018x} -> {actual:#018x}");
+}
+
 #[test]
 fn determinism_source_hash_is_pinned() {
     let actual = super::engine::stable_hash(

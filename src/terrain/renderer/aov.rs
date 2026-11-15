@@ -286,6 +286,43 @@ fn aov_color_attachment(target: &AovAttachmentTarget) -> wgpu::RenderPassColorAt
 }
 
 impl TerrainScene {
+    /// Snapshot the actual raster depth, without quantizing through RGBA16F.
+    pub(super) fn capture_visibility_depth(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        targets: &RenderTargets,
+    ) -> Result<TrackedTexture> {
+        let size = targets._depth_texture.size();
+        let texture = tracked_create_texture(
+            self.device.as_ref(),
+            &wgpu::TextureDescriptor {
+                label: Some("terrain.visibility.depth"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            },
+        )?;
+        encoder.copy_texture_to_texture(
+            wgpu::ImageCopyTexture {
+                texture: &targets._depth_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::DepthOnly,
+            },
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::DepthOnly,
+            },
+            size,
+        );
+        Ok(texture)
+    }
     fn ensure_aov_pipeline_sample_count(
         &self,
         effective_msaa: u32,
@@ -358,15 +395,16 @@ impl TerrainScene {
     /// VERITAS: single-sample R32Uint source-id attachment. Registry/ledger
     /// accounting is owned by the `TrackedTexture` RAII wrapper (freed when
     /// the owning `AovFrame` drops the texture).
-    fn create_source_id_attachment_target(
+    fn create_identity_attachment_target(
         &self,
         width: u32,
         height: u32,
+        label: &'static str,
     ) -> Result<AovAttachmentTarget> {
         let internal_texture = tracked_create_texture(
             self.device.as_ref(),
             &wgpu::TextureDescriptor {
-                label: Some("terrain.aov.source_id"),
+                label: Some(label),
                 size: wgpu::Extent3d {
                     width,
                     height,
@@ -490,7 +528,9 @@ impl TerrainScene {
                 })
                 .transpose()?,
             source_id: include_source_id
-                .then(|| self.create_source_id_attachment_target(width, height))
+                .then(|| {
+                    self.create_identity_attachment_target(width, height, "terrain.aov.source_id")
+                })
                 .transpose()?,
         })
     }
@@ -650,9 +690,10 @@ impl TerrainScene {
 
         let blit_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("terrain.aov.blit.sampler"),
-            address_mode_u: Self::map_address_mode(sampling.address_u),
-            address_mode_v: Self::map_address_mode(sampling.address_v),
-            address_mode_w: Self::map_address_mode(sampling.address_w),
+            // Framebuffer edges cannot wrap like repeating material textures.
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: crate::core::gpu::deterministic_filter_mode(Self::map_filter_mode(
                 sampling.mag_filter,
             )),
@@ -989,6 +1030,12 @@ impl TerrainScene {
         // unsupported configurations are explicit errors, never silent skips.
         let aov_output_mask = requested_aov_output_mask(&decoded.aov);
         let want_source_id = decoded.aov.enabled && decoded.aov.source_id;
+        let want_building_id = decoded.aov.enabled && decoded.aov.building_id;
+        if want_building_id && effective_msaa > 1 {
+            return Err(anyhow!(
+                "building identity requires single-sample native reference rendering"
+            ));
+        }
         if want_source_id && effective_msaa > 1 {
             return Err(anyhow!(
                 "AOV source_id capture requires msaa_samples=1 (R32Uint targets cannot be multisample-resolved); got {effective_msaa}"
@@ -1009,6 +1056,20 @@ impl TerrainScene {
         } else {
             self.create_render_targets(params, requested_msaa, effective_msaa)?
         };
+        if want_building_id && render_targets.needs_scaling {
+            return Err(anyhow!(
+                "building identity requires an unscaled native reference"
+            ));
+        }
+        let building_ids = want_building_id
+            .then(|| {
+                self.create_identity_attachment_target(
+                    render_targets.internal_width,
+                    render_targets.internal_height,
+                    "terrain.aov.building_id",
+                )
+            })
+            .transpose()?;
         if want_source_id && render_targets.needs_scaling {
             return Err(anyhow!(
                 "AOV source_id capture requires render_scale=1.0 (per-pixel attribution cannot be resampled)"
@@ -1360,6 +1421,13 @@ impl TerrainScene {
                 });
         }
 
+        let terrain_visibility =
+            if render_targets.sample_count == 1 && !render_targets.needs_scaling {
+                Some(self.capture_visibility_depth(&mut encoder, &render_targets)?)
+            } else {
+                None
+            };
+
         #[cfg(feature = "enable-gpu-instancing")]
         {
             let scatter_state = self.build_scatter_render_state(
@@ -1378,8 +1446,16 @@ impl TerrainScene {
                 &height_inputs.heightmap_view,
                 shadow_setup.shadow_bind_group.as_ref(),
                 &scatter_state,
+                building_ids.as_ref().map(|target| &target.internal_view),
             )?;
         }
+
+        let visibility_depth = terrain_visibility
+            .map(|terrain| {
+                self.capture_visibility_depth(&mut encoder, &render_targets)
+                    .map(|scene| [terrain, scene])
+            })
+            .transpose()?;
 
         let needs_scaling = render_targets.needs_scaling;
         let (
@@ -1571,7 +1647,9 @@ impl TerrainScene {
             aov_targets.source_id.map(|target| target.internal_texture),
             final_width,
             final_height,
-        );
+        )
+        .with_visibility_depth(visibility_depth)
+        .with_building_ids(building_ids.map(|target| target.internal_texture));
 
         let beauty_frame = crate::Frame::new(
             self.device.clone(),

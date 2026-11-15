@@ -434,7 +434,7 @@ impl TerrainScene {
                 variation.snow_macro_amplitude,
                 variation.snow_detail_amplitude,
                 0.0,
-                0.0,
+                if materials.physical_normals { 1.0 } else { 0.0 },
             ],
             rock_variation: [
                 variation.rock_macro_amplitude,
@@ -464,7 +464,11 @@ impl TerrainScene {
                 } else {
                     0.0
                 },
-                if materials.albedo_path.is_some() { 1.0 } else { 0.0 },
+                if materials.albedo_path.is_some() {
+                    1.0
+                } else {
+                    0.0
+                },
             ],
         };
         self.queue.write_buffer(

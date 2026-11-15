@@ -11,6 +11,8 @@ use crate::terrain::scatter::{
 };
 
 pub(super) struct ScatterRenderState {
+    pub(super) depth_test: bool,
+    pub(super) offline: bool,
     pub(super) view: glam::Mat4,
     pub(super) proj: glam::Mat4,
     pub(super) eye_contract: glam::Vec3,
@@ -26,6 +28,8 @@ pub(super) struct ScatterRenderState {
 pub(super) struct TerrainScatterUploadBatch {
     pub(super) name: Option<String>,
     pub(super) color: [f32; 4],
+    pub(super) physical_color: bool,
+    pub(super) surface_depth: bool,
     pub(super) max_draw_distance: Option<f32>,
     pub(super) terrain_blend: TerrainScatterBlendConfig,
     pub(super) terrain_contact: TerrainScatterContactConfig,
@@ -43,7 +47,7 @@ impl TerrainScene {
         let signature = scatter_history_signature(&batches);
         let mut gpu_batches = Vec::with_capacity(batches.len());
         for batch in batches {
-            gpu_batches.push(TerrainScatterBatch::new(
+            let mut gpu_batch = TerrainScatterBatch::new(
                 self.device.as_ref(),
                 self.queue.as_ref(),
                 batch.levels,
@@ -55,7 +59,10 @@ impl TerrainScene {
                 batch.hlod_config,
                 batch.terrain_blend,
                 batch.terrain_contact,
-            )?);
+            )?;
+            gpu_batch.physical_color = batch.physical_color;
+            gpu_batch.surface_depth = batch.surface_depth;
+            gpu_batches.push(gpu_batch);
         }
 
         self.scatter_batches = gpu_batches;
@@ -121,6 +128,11 @@ impl TerrainScene {
         let eye_contract = render_from_contract.inverse().transform_point3(eye_render);
 
         ScatterRenderState {
+            // Fullscreen terrain is a foreground quad, not projected terrain
+            // geometry. Preserve its overlay contract on both render routes.
+            depth_test: is_mesh_camera_mode(&params.camera_mode)
+                || is_clipmap_camera_mode(&params.camera_mode),
+            offline: false,
             view,
             proj,
             eye_contract,
@@ -141,15 +153,26 @@ impl TerrainScene {
         heightmap_view: &wgpu::TextureView,
         shadow_bind_group: Option<&wgpu::BindGroup>,
         state: &ScatterRenderState,
+        identity_target: Option<&wgpu::TextureView>,
     ) -> Result<()> {
         if self.scatter_batches.is_empty() {
             self.scatter_last_frame_stats = TerrainScatterFrameStats::default();
             return Ok(());
         }
 
+        // Ordinary scatter keeps its established depth behavior. MapScene
+        // buildings and the offline/reference pair need exact surface ownership.
+        let color_format = render_targets.internal_texture.format();
+        let depth_test = state.depth_test
+            && (identity_target.is_some()
+                || state.offline
+                || self.scatter_batches.iter().any(|batch| batch.surface_depth));
         self.ensure_scatter_renderer_sample_count(
             render_targets.sample_count,
             render_targets.concordia.as_ref(),
+            color_format,
+            depth_test,
+            identity_target.is_some(),
         )?;
 
         let color_view = render_targets
@@ -191,7 +214,7 @@ impl TerrainScene {
         )?;
         queue.write_buffer(&hlod_instbuf, 0, bytemuck::cast_slice(&identity_packed));
 
-        let ordinary_attachments = [Some(wgpu::RenderPassColorAttachment {
+        let mut color_attachments = vec![Some(wgpu::RenderPassColorAttachment {
             view: color_view,
             resolve_target,
             ops: wgpu::Operations {
@@ -199,6 +222,16 @@ impl TerrainScene {
                 store: wgpu::StoreOp::Store,
             },
         })];
+        if let Some(view) = identity_target {
+            color_attachments.push(Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    store: wgpu::StoreOp::Store,
+                },
+            }));
+        }
         let concordia_attachments;
         let attachments = if let Some(frame) = render_targets.concordia.as_ref() {
             concordia_attachments = frame.gbuffer().geometry_attachments(
@@ -209,7 +242,7 @@ impl TerrainScene {
             );
             &concordia_attachments[..]
         } else {
-            &ordinary_attachments[..]
+            &color_attachments[..]
         };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("terrain.scatter.render_pass"),
@@ -230,7 +263,22 @@ impl TerrainScene {
             crate::core::shader_registry::record_shader_use("concordia.scatter.shader");
             pass.set_bind_group(3, &frame.frame_bind_group, &[]);
         }
-        for batch in &mut self.scatter_batches {
+        for (batch_index, batch) in self.scatter_batches.iter_mut().enumerate() {
+            let identity = [
+                batch_index as u32 + 1,
+                if batch.physical_color {
+                    if render_targets.internal_texture.format() == wgpu::TextureFormat::Rgba32Float
+                    {
+                        2
+                    } else {
+                        1
+                    }
+                } else {
+                    0
+                },
+                0,
+                0,
+            ];
             let (batch_stats, draws) = batch.prepare_draws(
                 device,
                 queue,
@@ -256,7 +304,7 @@ impl TerrainScene {
                 let mut wind = base_wind;
                 wind.wind_vec_bounds[3] = batch.level_mesh_height_max(draw.level_index);
 
-                renderer.draw_batch_params(
+                renderer.draw_batch_params_with_identity(
                     device,
                     &mut pass,
                     queue,
@@ -276,6 +324,7 @@ impl TerrainScene {
                     instbuf,
                     batch.level_index_count(draw.level_index),
                     draw.instance_count,
+                    identity,
                 );
             }
 
@@ -288,7 +337,7 @@ impl TerrainScene {
                     batch.hlod_cluster_ibuf(cluster_idx),
                 ) {
                     let index_count = batch.hlod_cluster_index_count(cluster_idx);
-                    renderer.draw_batch_params(
+                    renderer.draw_batch_params_with_identity(
                         device,
                         &mut pass,
                         queue,
@@ -308,6 +357,7 @@ impl TerrainScene {
                         &hlod_instbuf,
                         index_count,
                         1,
+                        identity,
                     );
                 }
             }
@@ -322,9 +372,15 @@ impl TerrainScene {
         &mut self,
         sample_count: u32,
         concordia: Option<&super::interactive::ConcordiaFrame>,
+        color_format: wgpu::TextureFormat,
+        depth_test: bool,
+        identity_output: bool,
     ) -> Result<()> {
         let sample_count = sample_count.max(1);
         if self.scatter_renderer_sample_count == sample_count
+            && self.scatter_renderer_format == color_format
+            && self.scatter_renderer_depth_test == depth_test
+            && self.scatter_renderer_identity == identity_output
             && self.scatter_concordia == concordia.is_some()
         {
             return Ok(());
@@ -337,18 +393,28 @@ impl TerrainScene {
                 &frame.frame_layout,
             )?
         } else {
-            crate::render::mesh_instanced::MeshInstancedRenderer::new_with_depth_state_and_shadow_layout(
+            crate::render::mesh_instanced::MeshInstancedRenderer::new_with_identity_output(
                 self.device.as_ref(),
-                self.color_format,
+                color_format,
                 Some(TERRAIN_DEPTH_FORMAT),
                 sample_count,
-                wgpu::CompareFunction::LessEqual,
-                false,
+                if depth_test {
+                    wgpu::CompareFunction::Less
+                } else if sample_count > 1 {
+                    wgpu::CompareFunction::LessEqual
+                } else {
+                    wgpu::CompareFunction::Always
+                },
+                depth_test,
                 Some(&self.shadow_bind_group_layout),
+                identity_output,
             )?
         };
         self.scatter_concordia = concordia.is_some();
         self.scatter_renderer_sample_count = sample_count;
+        self.scatter_renderer_format = color_format;
+        self.scatter_renderer_depth_test = depth_test;
+        self.scatter_renderer_identity = identity_output;
         Ok(())
     }
 }
@@ -371,6 +437,7 @@ fn scatter_history_signature(batches: &[TerrainScatterUploadBatch]) -> [u8; 32] 
             )
             .as_bytes(),
         );
+        hash.update([u8::from(batch.physical_color), u8::from(batch.surface_depth)]);
         hash.update(bytemuck::cast_slice(&batch.transforms_rowmajor));
         for level in &batch.levels {
             hash.update(format!("{:?}", level.max_distance).as_bytes());

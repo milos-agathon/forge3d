@@ -195,6 +195,7 @@ impl CartographyDepth {
             time_seconds,
             timing,
             &mut None,
+            None,
         );
         #[cfg(feature = "enable-gpu-instancing")]
         {
