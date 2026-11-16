@@ -583,9 +583,35 @@ def _complete_conversion_inventory():
     return sites
 
 
-def _scanned_conversion_inventory():
-    """The scanned inventory, excluding the exact lossless DD split."""
+def _littera_scanned_inventory():
     return [site for site in _complete_conversion_inventory() if site not in SANCTIONED_DD_SPLITS]
+
+
+def _undo_littera_delivery(sites):
+    from itertools import groupby
+
+    transition = _ledger_data()["littera_delivery"]
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["raw_candidate_count"], transition["raw_candidate_digest"],
+    )
+    by_path = {path: list(rows) for path, rows in groupby(sites, key=lambda site: site[0])}
+    for path, result in transition["result_rows_by_affected_path"].items():
+        assert by_path.get(path, []) == list(map(tuple, result)), f"LITTERA casts changed in {path}"
+        by_path[path] = list(map(tuple, transition["base_rows_by_affected_path"][path]))
+    restored = [site for path in sorted(by_path, key=Path) for site in by_path[path]]
+    assert (len(restored), _inventory_digest(restored)) == (
+        transition["raw_base_count"], transition["raw_base_digest"],
+    )
+    return restored
+
+
+def test_littera_delivery_transition_is_exact():
+    _undo_littera_delivery(_littera_scanned_inventory())
+
+
+def _scanned_conversion_inventory():
+    """Restore the reviewed parent inventory after authenticating the transition."""
+    return _undo_littera_delivery(_littera_scanned_inventory())
 
 
 def _undo_viewer_terrain_grid_axes_transition(sites):

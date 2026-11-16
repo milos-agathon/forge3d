@@ -78,6 +78,55 @@ def test_default_latin_atlas_is_packaged_and_used_by_fontatlas():
     assert f3d.load_atlas_metrics(json_path)["channels"] == 3
 
 
+def test_packaged_rgba_atlas_preserves_the_scalar_plane():
+    from forge3d.text_atlas import _load_atlas_image
+
+    png, metadata = default_latin_atlas_paths(rgba=True)
+    metrics = load_atlas_metrics(metadata)
+    image = _load_atlas_image(png, metrics)
+    assert (metrics["font_size"], metrics["px_range"], metrics["channels"]) == (96, 32, 4)
+    assert metrics["byte_count"] == image.nbytes
+    assert image[..., 3].min() < 128 < image[..., 3].max()
+
+
+def test_rgba_atlas_does_not_synthesize_a_missing_scalar_plane(tmp_path):
+    from forge3d._png import save_png
+    from forge3d.text_atlas import _load_atlas_image
+
+    png = tmp_path / "rgb.png"
+    save_png(png, np.full((2, 2, 3), 255, dtype=np.uint8))
+    with pytest.raises(ValueError, match="8-bit RGBA PNG"):
+        _load_atlas_image(png, {"width": 2, "height": 2, "channels": 4})
+
+
+def test_compiled_label_reports_insufficient_packaged_atlas_range():
+    from forge3d.map_scene import MapSceneTextLayoutError, _mapscene_native_label_batches
+
+    png, metadata = default_latin_atlas_paths(rgba=True)
+    scene = f3d.MapScene(
+        terrain=f3d.TerrainSource(data=np.zeros((8, 8), dtype=np.float32), crs="EPSG:32610",
+                                 metadata={"width": 8, "height": 8}),
+        camera=f3d.OrbitCamera(target=(0, 0, 0), distance=120),
+        lighting=f3d.LightingPreset(name="daylight"),
+        output=f3d.OutputSpec(width=160, height=96),
+        layers=[f3d.LabelLayer(
+            "labels", labels=[{"id": "town", "text": "Map",
+                              "geometry": {"type": "Point", "coordinates": [80, 48]}}],
+            occlusion="none", typography={"font_size": 12, "halo_width_px": 2},
+            glyph_atlas={"image_path": str(png), "metrics_path": str(metadata)},
+        )],
+    )
+    compiled = scene.compile_plan()
+    assert len(compiled.label_plans["labels"].accepted) == 1
+    with pytest.raises(MapSceneTextLayoutError) as caught:
+        _mapscene_native_label_batches(scene.recipe, compiled.label_plans, 160, 96)
+    diagnostic = caught.value.diagnostic
+    assert diagnostic["reason"] == "insufficient_atlas_range"
+    assert diagnostic["object_id"] == "town"
+    assert diagnostic["px_range"] == 32
+    assert diagnostic["required_px_range"] == float(np.float32(16 * (2 + np.sqrt(0.5))))
+
+
 def test_default_bake_is_deterministic_and_uses_committed_font():
     first = bake_atlas(charset="Map", font_size=18, px_range=4, padding=2)
     second = bake_atlas(charset="Map", font_size=18, px_range=4, padding=2)
@@ -157,6 +206,7 @@ def test_packaged_font_notices_map_every_binary_to_exact_hash_and_notice():
         "NotoSansArabic-subset.ttf": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic)",
         "NotoSansDevanagari-subset.ttf": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/devanagari)",
         "NotoSansHebrew-subset.ttf": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/hebrew)",
+        "NotoSansHebrew-marks-subset.ttf": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/hebrew)",
         "NotoSansLatin-subset.ttf": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)",
         "NotoSansSC-subset.ttf": "Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'",
     }

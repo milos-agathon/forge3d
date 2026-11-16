@@ -263,6 +263,54 @@ pub(crate) fn layout_curved_text_at_offset(
     }
 }
 
+/// Place an already visually ordered shaped stream. Origins and advances are
+/// in em units. Marks retain their base's tangent and shaping offset; ligature
+/// glyphs consume their own advance without a character-count assumption.
+#[cfg(feature = "extension-module")]
+pub(crate) fn layout_positioned_curved_glyphs(
+    path: &SampledPath,
+    glyphs: &[((f32, f32), f32)],
+    font_size: f32,
+    tracking: f32,
+    start_offset: f32,
+) -> Vec<(f32, f32, f32)> {
+    let mut output = Vec::with_capacity(glyphs.len());
+    let mut pen = 0.0f32;
+    let mut spacing = 0.0f32;
+    let mut base = None;
+    for &(origin, advance) in glyphs {
+        if advance > 0.0 {
+            let center = start_offset + (pen + spacing + advance * 0.5) * font_size;
+            let Some(point) = path.sample_at_distance(center) else {
+                return Vec::new();
+            };
+            let rotation = point.tangent.z.atan2(point.tangent.x);
+            let (sin, cos) = rotation.sin_cos();
+            let baseline = (
+                point.position.x - cos * advance * font_size * 0.5,
+                point.position.z - sin * advance * font_size * 0.5,
+            );
+            base = Some((baseline, rotation, pen));
+        }
+        let Some((baseline, rotation, base_pen)) = base else {
+            return Vec::new();
+        };
+        let (sin, cos) = rotation.sin_cos();
+        let dx = (origin.0 - base_pen) * font_size;
+        let dy = origin.1 * font_size;
+        output.push((
+            baseline.0 + cos * dx - sin * dy,
+            baseline.1 + sin * dx + cos * dy,
+            rotation,
+        ));
+        pen += advance;
+        if advance > 0.0 {
+            spacing += tracking;
+        }
+    }
+    output
+}
+
 /// Project curved text layout to screen space.
 pub fn project_curved_glyphs(
     layout: &CurvedTextLayout,

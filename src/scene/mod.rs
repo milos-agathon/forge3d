@@ -171,6 +171,7 @@ pub struct Scene {
     text_overlay_enabled: bool,
     text_overlay_alpha: f32,
     text_instances: Vec<crate::core::text_overlay::TextInstance>,
+    text_label_starts: Vec<usize>,
 
     // D11: 3D text meshes
     text3d_renderer: Option<crate::core::text_mesh::TextMeshRenderer>,

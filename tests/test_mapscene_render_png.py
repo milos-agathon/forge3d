@@ -596,10 +596,11 @@ def test_gpu_backend_uses_native_msdf_text_for_labels(tmp_path, monkeypatch):
             calls["base_alpha"] = alpha
             self.base = np.asarray(image).copy()
 
-        def set_native_text_atlas(self, atlas, channels=None, smoothing=None):
+        def set_native_text_atlas(self, atlas, channels=None, smoothing=None, *, px_range=8.0):
             calls["atlas_shape"] = tuple(atlas.shape)
             calls["atlas_channels"] = channels
             calls["atlas_smoothing"] = smoothing
+            calls["atlas_px_range"] = px_range
 
         def enable_native_text(self):
             calls["enabled"] = True
@@ -637,6 +638,7 @@ def test_gpu_backend_uses_native_msdf_text_for_labels(tmp_path, monkeypatch):
     from forge3d.text_atlas import default_latin_atlas_paths, load_atlas_metrics
 
     metrics = load_atlas_metrics(default_latin_atlas_paths()[1])
+    assert calls["atlas_px_range"] == metrics["px_range"]
     accepted = scene.compiled_label_plans["labels"].accepted[0]
     positioned = [glyph for glyph in accepted.positioned_glyphs if glyph["has_outline"]]
     render_size = 12.0
@@ -706,8 +708,8 @@ def test_native_label_compositor_uses_explicit_positioned_line_ranges(monkeypatc
         def set_raster_overlay(self, *_args):
             pass
 
-        def set_native_text_atlas(self, *_args):
-            pass
+        def set_native_text_atlas(self, *_args, px_range=8.0):
+            calls["atlas_px_range"] = px_range
 
         def enable_native_text(self):
             pass
@@ -730,6 +732,9 @@ def test_native_label_compositor_uses_explicit_positioned_line_ranges(monkeypatc
     map_scene._composite_native_label_layers(
         np.zeros((64, 80, 4), dtype=np.uint8), recipe, {"labels": plan}
     )
+
+    from forge3d.text_atlas import default_latin_atlas_paths, load_atlas_metrics
+    assert calls["atlas_px_range"] == load_atlas_metrics(default_latin_atlas_paths()[1])["px_range"]
 
     assert len(calls["rects"]) == len(
         [glyph for glyph in accepted.positioned_glyphs if glyph["has_outline"]]
@@ -775,7 +780,7 @@ def test_native_label_compositor_rejects_missing_shaped_identity(monkeypatch):
         def set_raster_overlay(self, *_args):
             pass
 
-        def set_native_text_atlas(self, *_args):
+        def set_native_text_atlas(self, *_args, px_range=8.0):
             pass
 
         def enable_native_text(self):
@@ -871,7 +876,7 @@ def test_native_label_compositor_rejects_late_missing_identity_before_any_append
         def set_raster_overlay(self, *_args):
             pass
 
-        def set_native_text_atlas(self, *_args):
+        def set_native_text_atlas(self, *_args, px_range=8.0):
             pass
 
         def enable_native_text(self):
@@ -936,7 +941,7 @@ def test_native_label_compositor_rejects_late_invalid_rect_before_any_append(
         def set_raster_overlay(self, *_args):
             pass
 
-        def set_native_text_atlas(self, *_args):
+        def set_native_text_atlas(self, *_args, px_range=8.0):
             pass
 
         def enable_native_text(self):
@@ -1045,7 +1050,7 @@ def test_native_label_compositor_rejects_invalid_atlas_uv_before_any_append(
         def set_raster_overlay(self, *_args):
             pass
 
-        def set_native_text_atlas(self, *_args):
+        def set_native_text_atlas(self, *_args, px_range=8.0):
             pass
 
         def enable_native_text(self):

@@ -64,7 +64,9 @@ data. Unsupported render or export backends do not return empty success:
 payloads keep the plan data and append a typed `placeholder_fallback`
 diagnostic with `supported` set to false.
 
-The current public compiler covers deterministic offline point and polygon
-planning. Advanced curved/repeated label rendering, complex script shaping,
-and renderer-specific backend execution remain bounded by diagnostics and later
-feature work rather than being claimed here.
+The compiler also consumes authoritative line and curved glyph geometry from
+the native adapter. Curved placement retains the shaper's visual order, advances
+and mark offsets; rendering consumes the resulting plan without running the
+placement solver again. A `glyph_atlas` font chain selects the shaping fonts.
+See [shaped outline rendering](littera_outline_rendering.md) for the CPU/SVG
+geometry interface and the separate LITTERA fidelity qualification.

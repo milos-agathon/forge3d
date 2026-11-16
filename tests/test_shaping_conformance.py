@@ -74,7 +74,30 @@ def test_shape_matches_harfbuzz(case):
     shaped = forge3d.text.shape(
         case["text"], fonts, case["size"], **case["options"]
     )
-    assert _harfbuzz_fixture_projection(shaped.to_dict()["runs"]) == case["runs"]
+    payload = shaped.to_dict()
+    runs = payload["runs"]
+    assert _harfbuzz_fixture_projection(runs) == case["runs"]
+    if "mark_positions" in case:
+        assert len(runs) == len(case["mark_positions"])
+        for run, expected in zip(runs, case["mark_positions"]):
+            assert [{key: glyph[key] for key in oracle}
+                    for glyph, oracle in zip(run["glyphs"], expected, strict=True)] == expected
+        if case["text"] in ("\u05d1\u05b0", "\u05d1\u05b8\u05bc", "\u05d1\u05bc", "\u05e9\u05c1"):
+            root = case["mark_positions"][0]
+            scale = case["size"] / 64
+            positioned = payload["positioned_glyphs"]
+            assert [(g["glyph_id"], g["origin"]) for g in positioned] == [
+                (g["glyph_id"], [scale * g["x_offset"], -scale * g["y_offset"]])
+                for g in root
+            ]
+
+
+def test_hebrew_font_reports_inherited_mark_outside_approved_coverage():
+    font = ROOT / "assets/fonts/NotoSansHebrew-marks-subset.ttf"
+    with pytest.raises(forge3d.text.TextShapingError) as caught:
+        forge3d.text.shape("\u05d1\u05b8\u05b0\u0323", [font], 12.0)
+    assert caught.value.diagnostics[0]["reason"] == "missing_glyph"
+    assert caught.value.diagnostics[0]["codepoint"] == "U+0323"
 
 
 def test_shaped_text_is_native_and_immutable():

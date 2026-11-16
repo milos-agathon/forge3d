@@ -94,6 +94,25 @@
       ]
     },
     {
+      "name": "NotoSansHebrew-marks-subset.ttf",
+      "sha256": "06dffb6483277cb91ad4ecfefa5b2c8527399d2914e225b64ee6a0816f80244d",
+      "archive_paths": [
+        "assets/fonts/NotoSansHebrew-marks-subset.ttf",
+        "python/forge3d/data/fonts/NotoSansHebrew-marks-subset.ttf",
+        "forge3d/data/fonts/NotoSansHebrew-marks-subset.ttf"
+      ],
+      "upstream_url": "https://raw.githubusercontent.com/google/fonts/4c1913251a6dd1ba34a6ef4b7a630178d01b88ff/ofl/notosanshebrew/NotoSansHebrew%5Bwdth,wght%5D.ttf",
+      "copyright": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/hebrew)",
+      "license_paths": [
+        "assets/fonts/NotoSansHebrew-OFL.txt",
+        "python/forge3d/data/fonts/OFL-1.1.txt"
+      ],
+      "subset_inputs": [
+        "NotoSansHebrew-subset.ttf cmap",
+        "U+05B0,U+05B8,U+05B9,U+05BC,U+05C1"
+      ]
+    },
+    {
       "name": "NotoSansSC-subset.ttf",
       "sha256": "a366764f4a666e85ba791d0eef9bbda8eca4a96e70287037d6c81c6b90ff8190",
       "archive_paths": [
@@ -121,6 +140,16 @@
     {
       "path": "python/forge3d/data/fonts/atlas_latin_default.json",
       "sha256": "d28d280511fc89b5dae2cadb00f64ec48150561d59ceaeb5bc021d9c26b5dc67",
+      "source_font_sha256": "3cdd82f05768b6101094b7daa24287053e07d6db5a21411d5076f5617f190e68"
+    },
+    {
+      "path": "python/forge3d/data/fonts/atlas_latin_rgba.json",
+      "sha256": "e38d9f3dd879232e636a174a837c99a628025b2d7bdc5ae641a3ff937d432c6e",
+      "source_font_sha256": "3cdd82f05768b6101094b7daa24287053e07d6db5a21411d5076f5617f190e68"
+    },
+    {
+      "path": "python/forge3d/data/fonts/atlas_latin_rgba.png",
+      "sha256": "bec2e50df6787552ea42afb31ff2ddba4716638931eb617449598fd0ef47f2da",
       "source_font_sha256": "3cdd82f05768b6101094b7daa24287053e07d6db5a21411d5076f5617f190e68"
     }
   ]

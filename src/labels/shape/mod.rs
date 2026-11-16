@@ -3,6 +3,7 @@ pub mod bidi;
 pub mod devanagari;
 pub mod gpos;
 pub mod gsub;
+mod hebrew;
 pub mod layout;
 pub mod linebreak;
 mod linebreak_emoji;
@@ -13,7 +14,7 @@ mod types;
 pub use layout::{FeatureSetting, LayoutTable};
 pub use types::{Direction, ShapedGlyph, ShapedRun, ShapedText, TextError};
 
-use crate::labels::font::FontCollection;
+use crate::labels::font::{to_q26_6, FontCollection};
 use crate::labels::unicode::{script as unicode_script, Script};
 use gpos::PositioningGlyph;
 use gsub::{Glyph, GsubLookup};
@@ -298,6 +299,10 @@ fn shape_span(
             .collect::<Result<_, _>>()?
     };
 
+    if first.script == Tag::from_bytes(b"hebr") {
+        hebrew::reorder_marks(run_text, &mut glyphs);
+    }
+
     if first.script == Tag::from_bytes(b"arab") {
         arabic::apply_feature_masks(run_text, &mut glyphs);
     } else if first.script == Tag::from_bytes(b"deva") {
@@ -317,12 +322,22 @@ fn shape_span(
     }
     normalize_zwnj_clusters(run_text, &mut glyphs);
 
+    let units_per_em = face.units_per_em();
+    if units_per_em == 0 {
+        return Err(TextError::MalformedOpenType("head unitsPerEm"));
+    }
+    let has_gpos = face.raw_face().table(Tag::from_bytes(b"GPOS")).is_some();
     let mut positioned: Vec<PositioningGlyph> = glyphs.iter().map(PositioningGlyph::from).collect();
     for glyph in &mut positioned {
-        glyph.x_advance = i32::from(
+        let advance = i32::from(
             face.glyph_hor_advance(glyph.id)
                 .ok_or(TextError::MalformedOpenType("hmtx advance"))?,
         );
+        glyph.x_advance = if has_gpos {
+            to_q26_6(advance, units_per_em)
+        } else {
+            advance
+        };
     }
     if let Some(table) = face.raw_face().table(Tag::from_bytes(b"GPOS")) {
         let settings = effective_features(table, first.script, language, features)?;
@@ -336,16 +351,23 @@ fn shape_span(
             language,
             &settings,
         )?;
-        gpos::apply_gpos(&face, &mut positioned, &selection, first.script)?;
+        gpos::apply_gpos_for_run(
+            &face,
+            &mut positioned,
+            &selection,
+            first.script,
+            units_per_em,
+            first.level & 1 == 1,
+        )?;
     } else {
         gpos::apply_legacy_kern(&face, &mut positioned)?;
     }
-    let units_per_em = face.units_per_em();
+    let normalization_units = if has_gpos { 64 } else { units_per_em };
     let shaped = positioned
         .into_iter()
         .map(|mut glyph| {
             glyph.cluster += byte_start as u32;
-            glyph.normalize(font_index, units_per_em)
+            glyph.normalize(font_index, normalization_units)
         })
         .collect::<Result<Vec<_>, _>>()?;
     let direction = if first.level & 1 == 1 {

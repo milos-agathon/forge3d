@@ -1,8 +1,9 @@
-"""Compatibility adapters for the native RGB MSDF atlas baker."""
+"""Compatibility adapters for the native MSDF atlas baker."""
 
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -30,14 +31,15 @@ def bake_atlas(
     font_size: int = 32,
     px_range: int = 8,
     padding: int = 4,
+    channels: int = 3,
 ) -> BakedAtlas:
-    """Bake deterministic RGB MSDF glyphs through the native outline pipeline."""
+    """Bake deterministic MSDF glyphs through the native outline pipeline."""
     from .text import bake_msdf_atlas
 
     font = Path(font_path) if font_path is not None else _default_font_path()
     characters = "".join(sorted({str(value)[0] for value in charset if str(value)}))
     baked = bake_msdf_atlas(
-        [font], characters, float(font_size), float(px_range), int(padding)
+        [font], characters, float(font_size), float(px_range), int(padding), channels=channels
     )
     metrics = dict(baked["metrics"])
     font_source = (
@@ -71,13 +73,16 @@ def validate_atlas_metrics(metrics: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required_top if key not in metrics]
     if missing:
         raise ValueError(f"Atlas metrics missing field(s): {', '.join(missing)}")
-    if metrics["kind"] != "msdf_font_atlas" or int(metrics["channels"]) != 3:
-        raise ValueError("Atlas metrics require kind='msdf_font_atlas' and channels=3")
+    if metrics["kind"] != "msdf_font_atlas" or int(metrics["channels"]) not in (3, 4):
+        raise ValueError("Atlas metrics require kind='msdf_font_atlas' and channels=3 or 4")
     glyphs = metrics["glyphs"]
     if not isinstance(glyphs, Mapping) or not glyphs:
         raise ValueError("Atlas metrics require a non-empty glyphs mapping")
     normalized = dict(metrics)
-    normalized["channels"] = 3
+    normalized["channels"] = int(metrics["channels"])
+    normalized["px_range"] = float(metrics["px_range"])
+    if not math.isfinite(normalized["px_range"]) or normalized["px_range"] <= 0.0:
+        raise ValueError("Atlas px_range must be finite and positive")
     normalized["glyphs"] = {}
     for key, value in glyphs.items():
         if not isinstance(value, Mapping):
@@ -151,7 +156,7 @@ def validate_atlas_metrics(metrics: Mapping[str, Any]) -> dict[str, Any]:
 def save_atlas(
     atlas: BakedAtlas, png_path: str | Path, json_path: str | Path
 ) -> tuple[Path, Path]:
-    """Save the RGB image with the in-tree encoder and canonical metadata JSON."""
+    """Save the MSDF image with the in-tree encoder and canonical metadata JSON."""
     from ._png import save_png
 
     png = Path(png_path)
@@ -167,6 +172,7 @@ def save_atlas(
     metrics.write_text(
         json.dumps(canonical, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     return png, metrics
 
@@ -175,9 +181,21 @@ def load_atlas_metrics(path: str | Path) -> dict[str, Any]:
     return validate_atlas_metrics(json.loads(Path(path).read_text(encoding="utf-8")))
 
 
-def default_latin_atlas_paths() -> tuple[Path, Path]:
+def _load_atlas_image(path: Path, metrics: Mapping[str, Any]) -> np.ndarray:
+    from ._png import decode_png
+
+    rgba = metrics["channels"] == 4
+    image = decode_png(path.read_bytes(), require_rgba8=rgba)
+    if image.shape[:2] != (int(metrics["height"]), int(metrics["width"])):
+        raise ValueError("Atlas image dimensions do not match its metadata")
+    return image
+
+
+def default_latin_atlas_paths(*, rgba: bool = False) -> tuple[Path, Path]:
+    """Give the bundled Latin atlas paths, with opt-in RGBA coverage."""
     base = Path(__file__).resolve().parent / "data" / "fonts"
-    return base / "atlas_latin_default.png", base / "atlas_latin_default.json"
+    name = "atlas_latin_rgba" if rgba else "atlas_latin_default"
+    return base / f"{name}.png", base / f"{name}.json"
 
 
 __all__ = [

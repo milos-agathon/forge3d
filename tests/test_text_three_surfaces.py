@@ -207,3 +207,14 @@ def test_legend_and_map_plate_title_call_shared_native_text(monkeypatch):
     assert calls == ["0", "5", "10", "Elevation", "Native title"]
     assert np.any(legend[..., 3] > 0)
     assert title is not None and np.any(title[..., 3] > 0)
+
+
+def test_exported_outline_raster_integrates_holes_and_overlap_exactly():
+    coverage = forge3d.text.rasterize_svg_path(
+        "M0.1 0.2L1.7 0.2L1.7 1.8L0.1 1.8ZM0.3 0.4L0.3 0.6L0.5 0.6L0.5 0.4Z", 3, 3,
+    )
+    assert coverage[0, 0] == pytest.approx(0.72 - 0.04, abs=np.finfo(np.float32).eps)
+    union = forge3d.text.rasterize_svg_path(
+        "M0 0L0.8 0L0.8 1L0 1ZM0.2 0L1 0L1 1L0.2 1Z", 1, 1,
+    )
+    assert union[0, 0] == 1.0
