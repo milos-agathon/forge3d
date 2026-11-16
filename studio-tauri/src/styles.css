@@ -1984,6 +1984,44 @@ kbd {
   border-top: 1px solid var(--border);
 }
 
+/* The engine-registry picker: one row per dataset, in a modal. */
+.dataset-list {
+  display: grid;
+  gap: 6px;
+}
+
+.dataset-list__row {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) 1fr auto;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-panel-alt);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dataset-list__row:hover {
+  border-color: var(--border-strong);
+}
+
+.dataset-list__name {
+  font-weight: 600;
+}
+
+.dataset-list__desc {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.dataset-list__meta {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
 .preset-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 
 import { useSession } from "../state/session-context";
 import type { CartographyLayer } from "../bridge/types";
+import { DatasetPicker } from "./DatasetPicker";
 
 /**
  * The map's layer stack.
@@ -148,9 +149,19 @@ function AddLayer() {
           <button type="button" onClick={() => void actions.addImageryLayer()}>
             Imagery…
           </button>
+          <DatasetPicker
+            kind="overlay"
+            label="Imagery from the engine…"
+            onPick={(name) => actions.addImageryLayerByName(name)}
+          />
           <button type="button" onClick={() => void actions.addVectorLayer()}>
             Vector layer…
           </button>
+          <DatasetPicker
+            kind="vector"
+            label="Vector from the engine…"
+            onPick={(name) => actions.addVectorLayerByName(name)}
+          />
           <button type="button" onClick={() => void actions.addPolygonLayer()}>
             Polygon layer…
           </button>

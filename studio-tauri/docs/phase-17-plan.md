@@ -122,8 +122,10 @@ Reasons below.
    the offline fallback (repo checkout) so CI passes without network.
 2. New Project → "From the engine's datasets". One dialog group; no new
    project types; `import_terrain_dem` path unchanged.
-3. Import-dialogs reuse. Same IPC; three call sites. — **open** (the registry
-   is wired into New Project only).
+3. Import-dialogs reuse. Same IPC; three call sites. — **landed 2026-11-16**:
+   the new `dataset_path` command resolves a registry name to a local path
+   through the engine's fetch, and the DEM, imagery and vector import sites
+   all use it (roadmap §12).
 4. (Gate) presets exposure, behind its own trigger. — **landed 2026-11-16**
    as five named recipes (roadmap §5.33); the trigger was the user's request.
 5. (Gate) COG streaming, behind its own trigger + the resolution-ladder work. —

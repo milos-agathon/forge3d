@@ -101,6 +101,12 @@ export interface SessionApi {
     clearRenderFrame(): void;
     /** Pick and import a DEM, replacing the terrain's source. */
     importTerrainDem(): Promise<void>;
+    /** Import a DEM from the engine's dataset registry, by name. */
+    importTerrainDemByName(name: string): Promise<void>;
+    /** Add an imagery overlay from the engine's dataset registry, by name. */
+    addImageryLayerByName(name: string): Promise<void>;
+    /** Add a vector layer from the engine's dataset registry, by name. */
+    addVectorLayerByName(name: string): Promise<void>;
     /** Pick a GeoPackage/GeoJSON of lines and attach it as the terrain's
      *  vector layer. */
     /** Select the layer the cartography panel is editing. */

@@ -560,6 +560,57 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, [fail, flash]);
 
+  // The engine's registry: the same resolution for every import site. The
+  // shell resolves the name (the engine fetches it, hash-verified, and
+  // caches it), and the file that lands is then imported like any other.
+  const importTerrainDemByName = useCallback(
+    async (name: string) => {
+      try {
+        setBusy(true);
+        const path = await bridge.datasetPath(name);
+        setState(await bridge.importTerrainDem(path));
+        flash(`Terrain DEM set from the engine's dataset "${name}"`);
+      } catch (cause) {
+        fail(cause);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [fail, flash],
+  );
+
+  const addImageryLayerByName = useCallback(
+    async (name: string) => {
+      try {
+        setBusy(true);
+        const path = await bridge.datasetPath(name);
+        setState(await bridge.addImageryLayer(path, 0.82));
+        flash(`Imagery layer added from the engine's dataset "${name}"`);
+      } catch (cause) {
+        fail(cause);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [fail, flash],
+  );
+
+  const addVectorLayerByName = useCallback(
+    async (name: string) => {
+      try {
+        setBusy(true);
+        const path = await bridge.datasetPath(name);
+        setState(await bridge.addVectorLayer(path, [0.9, 0.29, 0.1, 1.0], 2));
+        flash(`Vector layer added from the engine's dataset "${name}"`);
+      } catch (cause) {
+        fail(cause);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [fail, flash],
+  );
+
   const addVectorLayer = useCallback(async () => {
     try {
       const picked = await openDialog({
@@ -1150,6 +1201,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       relinkAsset,
       refreshAssetIntegrity,
       importTerrainDem,
+      importTerrainDemByName,
+      addImageryLayerByName,
+      addVectorLayerByName,
       addVectorLayer,
       addPolygonLayer,
       addImageryLayer,
@@ -1217,6 +1271,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       relinkAsset,
       refreshAssetIntegrity,
       importTerrainDem,
+      importTerrainDemByName,
+      addImageryLayerByName,
+      addVectorLayerByName,
       addVectorLayer,
       addPolygonLayer,
       addImageryLayer,

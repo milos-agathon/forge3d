@@ -16,6 +16,7 @@ import type {
 } from "../bridge/types";
 import { objectKindLabel } from "../bridge/types";
 import { RECIPES } from "../state/recipes";
+import { DatasetPicker } from "./DatasetPicker";
 import { bridge } from "../bridge/env";
 import { base64ToArrayBuffer, listGltfNodes } from "../viewport/assets";
 import { useSession } from "../state/session-context";
@@ -1203,6 +1204,11 @@ function TerrainEditor({
         >
           Change DEM…
         </button>
+        <DatasetPicker
+          kind="dem"
+          label="Engine DEMs…"
+          onPick={(name) => actions.importTerrainDemByName(name)}
+        />
       </div>
 
       <p className="hint">

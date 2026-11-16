@@ -114,6 +114,9 @@ export interface StudioBridge {
   remoteCogInfo(url: string): Promise<RemoteCogInfo>;
   /** The engine's dataset registry (bundled + downloadable samples). */
   datasetList(): Promise<DatasetInfo[]>;
+  /** Resolve a registry dataset to a local path (the engine fetches it,
+   *  hash-verified, and caches it). One IPC for every import site. */
+  datasetPath(name: string): Promise<string>;
   /** Add a polygon layer from a GPKG/GeoJSON feature collection. */
   addPolygonLayer(
     path: string,

@@ -270,6 +270,16 @@ the same postinst (it declared fewer and had no scriptlet until the audit),
 the appimage has no install step to speak in, and the README states what
 each bundle declares.
 
+**Open-by-name imports (2026-11-16).** The engine's dataset registry now
+reaches the import sites, not just New Project: one new IPC resolves a
+registry name to a local path through the engine's own hash-verified fetch,
+and the DEM, imagery-overlay and vector-layer imports all share it. The
+picker filters by kind, so a point cloud is never offered where a DEM
+belongs. The registry resolves to the same file the file picker would give
+(262,144 of 262,144 samples identical on Fuji at 512²), and the import
+moves the frame against the starter scene (157,949 changed samples for
+Fuji, 261,340 for the Swiss).
+
 **Next big increment (roadmap §12):** the engine surface Studio still cannot
 reach — **meshes in Rendered** (a glTF import shows in Solid/Material and
 vanishes in Rendered), **MapScene's native layers** (buildings, 3D Tiles,

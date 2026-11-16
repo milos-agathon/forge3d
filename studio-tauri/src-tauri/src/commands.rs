@@ -899,6 +899,19 @@ pub fn forge3d_probe(forge: State<'_, Forge3dState>, force: Option<bool>) -> Eng
     status
 }
 
+/// Resolve a dataset from the engine's registry to a local path.
+///
+/// One IPC for every import site: the DEM, the imagery overlay and the
+/// vector layer all resolve their file this way, so the engine's registry
+/// (hash-verified fetch, cached under `~/.forge3d/datasets`) is the only
+/// place a dataset is fetched. A missing `pooch` fails here with the
+/// engine's own install instructions.
+#[tauri::command(async)]
+pub fn dataset_path(forge: State<'_, Forge3dState>, name: String) -> Result<String, String> {
+    let python = forge.probe(false).python;
+    crate::forge3d::dataset_fetch(&python, &name)
+}
+
 // ---------------------------------------------------------------------- render
 
 /// Render the current scene at `width` × `height` through the embedded

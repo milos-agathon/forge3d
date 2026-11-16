@@ -101,6 +101,7 @@ export const tauriBridge: StudioBridge = {
   checkAssets: () => invoke<AssetIntegrity[]>("check_assets"),
 
   datasetList: () => invoke<DatasetInfo[]>("dataset_list"),
+  datasetPath: (name: string) => invoke<string>("dataset_path", { name }),
   remoteCogInfo: (url) => invoke<RemoteCogInfo>("remote_cog_info", { url }),
 
   terrainPreview: (path, resolution) =>

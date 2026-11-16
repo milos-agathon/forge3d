@@ -1322,9 +1322,18 @@ measured in pixels (changed-sample counts in the commit message).
    (`/usr/bin/forge3d-studio-shell`) and a `desktop-file-validate`-clean
    entry. The README now states what each bundle declares instead of
    shrugging at "unaudited".
-3. **Open-by-name for import / imagery / vector** — the dataset registry is
-   wired into New Project only; `phase-17-plan.md` §3 increment 3 (the same
-   IPC at three call sites) is still open.
+3. **Open-by-name for import / imagery / vector** — **done** (2026-11-16).
+   One new IPC (`dataset_path`) resolves a registry name to a local path
+   through the engine's own fetch (hash-verified, cached), and the three
+   import sites share it: the DEM (Inspector → "Engine DEMs…"), the imagery
+   overlay and the vector layer (the Cartography panel's "+ Add layer" menu).
+   The picker lists the registry by kind — `dem`, `vector`, `overlay` — so a
+   point cloud can never be offered where a DEM belongs (node test). Pixel
+   evidence: the registry resolves to the same file the file-picker would
+   give (Fuji 512²: **262,144 of 262,144 samples identical**, delta 0), and
+   the import itself moves the frame against the starter scene (**157,949**
+   changed samples for Fuji, **261,340** for the Swiss). Two registry DEMs
+   differ from each other (230,445), so the picker really picks terrain.
 4. **Meshes in Rendered** (§7.2) — the highest-value increment because the
    gap is user-visible today. Split into two: (a) the still composites
    imported meshes through the engine's own instanced path, measured;
