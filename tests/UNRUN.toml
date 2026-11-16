@@ -32,6 +32,25 @@
 # these fail on GPU-less runners. They are not in the GPU golden lane either.
 [[entries]]
 file = "tests/test_mapscene_screen_space_settings.py"
-reason = "fails_on_gpu_adapter_with_no_cpu_skip: test_mapscene_cloud_shadow_modulates_terrain_output asserts >=5% terrain pixels change; at the absolute 2 km world cloud period the 2 m fixture sees constant cloud field, so the delta is 0 (pre-existing on this adapter; the metadata path is native_concordia)"
+reason = "fails_on_gpu_adapter_with_no_cpu_skip: test_mapscene_cloud_shadow_modulates_terrain_output asserts >=5% terrain pixels change; at the absolute 2 km world cloud period the 2 m fixture sees constant cloud field, so the delta is 0 (pre-existing on this adapter; the metadata path is native_concordia). Also requires_hardware_adapter: MapScene native terrain/screen-space render raises MapSceneNativeUnavailable with no CPU skip on GPU-less runners"
 owner = "adeerkhan"
 expires = "2027-02-13"
+
+[[entries]]
+file = "tests/test_mapscene_buildings.py"
+reason = "requires_hardware_adapter: MapScene native terrain/building render raises MapSceneNativeUnavailable with no CPU skip on GPU-less runners"
+owner = "milos"
+expires = "2026-12-10"
+
+[[entries]]
+file = "tests/test_mapscene_furniture.py"
+reason = "requires_hardware_adapter: MapScene native terrain render raises MapSceneNativeUnavailable with no CPU skip on GPU-less runners"
+owner = "milos"
+expires = "2026-12-10"
+
+[[entries]]
+file = "tests/test_mapscene_render_png.py"
+reason = "requires_hardware_adapter: MapScene native offscreen terrain render raises MapSceneNativeUnavailable with no CPU skip on GPU-less runners"
+owner = "milos"
+expires = "2026-12-10"
+

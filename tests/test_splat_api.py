@@ -426,6 +426,45 @@ def test_render_fused_env_map_is_applied(tmp_path):
     np.testing.assert_array_equal(with_env, again)
 
 
+def _write_striped_hdr(path: Path, width: int = 512, height: int = 256) -> None:
+    """A Radiance HDR whose columns alternate between two radiances, one texel
+    wide: nearest-texel lookup shows flat bars, interpolation shows ramps."""
+    header = b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n" + f"-Y {height} +X {width}\n".encode()
+    texels = np.zeros((height, width, 4), np.uint8)
+    texels[..., 3] = 128
+    texels[:, ::2, :3] = 200
+    texels[:, 1::2, :3] = 100
+    path.write_bytes(bytes(header) + texels.tobytes())
+
+
+def test_render_fused_hdri_background_is_interpolated(tmp_path):
+    """An HDRI sky must not render as blocks of nearest-neighbour texels."""
+    if not gpu_available():
+        pytest.skip("no usable GPU adapter for the fused render")
+    hdr = tmp_path / "stripes.hdr"
+    _write_striped_hdr(hdr)
+    # A narrow lens: about 14 pixels per texel, looking up at open sky.
+    camera = splat.FusedCamera(origin=(0, 5, 10), look_at=(0, 25, -10), fov_y_deg=12.0)
+    result = splat.render_fused(
+        terrain=np.zeros((8, 8), np.float32),
+        camera=camera,
+        env_map=hdr,
+        samples=8,
+        width=320,
+        height=240,
+        seed=7,
+        return_aovs=True,
+    )
+    assert (result.hit_kind == splat.HIT_MISS).mean() > 0.9, "the test must look at open sky"
+    row = result.radiance[120, :, 1]
+    lo, hi = float(row.min()), float(row.max())
+    assert hi > lo * 1.5, f"the stripes are not resolved: {lo}..{hi}"
+    margin = 0.1 * (hi - lo)
+    between = float(((row > lo + margin) & (row < hi - margin)).mean())
+    # Nearest-texel lookup is flat bars with a one-pixel edge (about 7%).
+    assert between > 0.5, f"only {between:.0%} of the sky pixels are interpolated"
+
+
 def test_render_fused_aovs_shapes_and_contents(fused_result):
     r = fused_result
     h, w = 96, 128

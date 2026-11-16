@@ -181,6 +181,15 @@ impl TerrainScene {
             && effective_msaa == 1
             && pipeline_cache.visibility_write_pipeline.is_none()
         {
+            if !self
+                .device
+                .features()
+                .contains(wgpu::Features::SHADER_PRIMITIVE_INDEX)
+            {
+                return Err(anyhow!(
+                    "terrain visibility rendering requires unavailable SHADER_PRIMITIVE_INDEX"
+                ));
+            }
             let light_buffer = self
                 .light_buffer
                 .lock()

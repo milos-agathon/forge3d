@@ -59,6 +59,7 @@ impl Viewer {
             .as_ref()
             .and_then(|scene| scene.terrain.as_ref())
         {
+            let (near, far) = terrain.clip_planes();
             return FrameCamera {
                 kind: ActiveCameraKind::Terrain,
                 anchor: self.camera_anchor,
@@ -66,8 +67,8 @@ impl Viewer {
                 target_world: terrain.camera_target(),
                 up: terrain.camera_up(),
                 fov_deg: terrain.cam_fov_deg,
-                near: (terrain.cam_radius * 0.001).clamp(0.001, 1.0),
-                far: (terrain.cam_radius * 10.0).max(10.0),
+                near,
+                far,
             };
         }
 

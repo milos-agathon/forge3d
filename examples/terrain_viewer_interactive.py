@@ -123,10 +123,12 @@ def main() -> int:
                            help="Camera azimuth angle in degrees (default: 30.0)")
     cam_group.add_argument("--cam-theta", type=float, default=45.0,
                            help="Camera elevation angle in degrees (default: 45.0)")
-    cam_group.add_argument("--cam-radius", type=float, default=3800.0,
-                           help="Camera distance from center in world units (default: 3800.0)")
-    cam_group.add_argument("--cam-fov", type=float, default=30.0,
-                           help="Camera field of view in degrees (default: 30.0)")
+    cam_group.add_argument("--cam-radius", type=float,
+                           help="Camera distance in world units (default: fit the DEM)")
+    cam_group.add_argument("--cam-fov", type=float,
+                           help="Camera field of view in degrees (default: viewer field of view)")
+    parser.add_argument("--z-scale", type=float, default=1.0,
+                        help="Vertical exaggeration (default: 1.0 for true elevations)")
 
     # PBR+POM rendering options
     pbr_group = parser.add_argument_group("PBR Rendering", "High-quality terrain rendering options")
@@ -594,10 +596,7 @@ def main() -> int:
         process.terminate()
         return 1
     
-    # Set initial camera and terrain params
-    # z_scale controls height exaggeration: world_y = h_norm * terrain_width * z_scale * 0.1
-    # z_scale=1.0 gives 10% height-to-width ratio - good balance of relief
-    
+    # The viewer derives the camera radius from the DEM when no override is given.
     # Determine ambient default based on mode
     # PBR needs low ambient (0.05) to avoid washout, Legacy needs higher (0.3)
     ambient = args.ambient
@@ -607,7 +606,7 @@ def main() -> int:
     send_ipc(sock, {
         "cmd": "set_terrain",
         "phi": args.cam_phi, "theta": args.cam_theta, "radius": args.cam_radius, "fov": args.cam_fov,
-        "zscale": 0.1,
+        "zscale": args.z_scale,
         "sun_azimuth": args.sun_azimuth,
         "sun_elevation": args.sun_elevation,
         "sun_intensity": args.sun_intensity,

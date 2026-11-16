@@ -1218,13 +1218,37 @@ def _draw_title(image: Any, title: str) -> None:
 
 
 def _draw_simple_legend(image: Any, options: Mapping[str, Any]) -> None:
-    items = options.get("items") or options.get("labels")
+    items = options.get("entries") or options.get("items") or options.get("labels")
     if not isinstance(items, Sequence) or isinstance(items, (str, bytes)) or not items:
         return
     height, width = image.shape[:2]
-    rows = [str(item) for item in items[:8]]
-    panel_w = min(180, max(80, max(len(row) for row in rows) * 7 + 28))
-    panel_h = len(rows) * 13 + 12
+    # Semantic style legends supply label/rgba pairs. Legacy string labels
+    # remain usable as text, but cannot truthfully supply a colour key.
+    rows = []
+    for item in items:
+        if isinstance(item, Mapping):
+            label = str(item.get("label", ""))
+            rgba = item.get("rgba")
+            if rgba is None and "color" in item:
+                # Keep the established colour syntax, but reject invalid input
+                # instead of silently substituting an invented legend key.
+                rgba = _color(item["color"], (-1, -1, -1, 255))
+            if rgba is None or len(rgba) != 4 or any(
+                not np.isfinite(c) or int(c) != c or not 0 <= c <= 255 for c in rgba
+            ):
+                raise ValueError("Legend entries require explicit RGBA8 style colours")
+            swatch = tuple(int(c) for c in rgba)
+        else:
+            label, swatch = str(item), None
+        rows.append((label, swatch))
+    font_size = float(options.get("font_size", 12))
+    if not np.isfinite(font_size) or font_size <= 0:
+        raise ValueError("Legend font size must be finite and positive")
+    row_height = int(np.ceil(font_size * 1.5))
+    panel_w = max(_text_outline_metrics(row, font_size)[0] for row, _ in rows) + 36
+    panel_h = len(rows) * row_height + 16
+    if panel_w + 24 > width or panel_h + 24 > height:
+        raise ValueError("Legend cannot fit all entries; enlarge the output or use a publication layout")
     x0 = width - panel_w - 12
     y0 = height - panel_h - 12
     _blend_rect(
@@ -1235,11 +1259,49 @@ def _draw_simple_legend(image: Any, options: Mapping[str, Any]) -> None:
         y0 + panel_h,
         _color(options.get("background"), (255, 255, 255, 205)),
     )
-    for index, row in enumerate(rows):
-        y = y0 + 8 + index * 13
-        swatch = _rgb(row, salt="legend")
-        _draw_pixel_block(image, x0 + 8, y + 3, (*swatch, 255), radius=3)
-        _draw_text(image, row, (x0 + 18, y), color=(20, 20, 20, 255), halo=(255, 255, 255, 180))
+    for index, (row, swatch) in enumerate(rows):
+        y = y0 + 8 + index * row_height
+        if swatch is not None:
+            _draw_pixel_block(image, x0 + 8, y + 6, swatch, radius=3)
+        _draw_text(image, row, (x0 + 18, y), color=(20, 20, 20, 255),
+                   halo=(0, 0, 0, 0), halo_width_px=0, font_size=font_size)
+
+
+def _validate_scale_bounds(bounds: tuple[float, float, float, float], crs: str) -> None:
+    """Check transformable bounds and the centre's CRS area of use.
+
+    Small coordinates alone do not imply degrees: they are valid in, for
+    example, Web Mercator near its origin. Use the CRS definition instead.
+    A map can extend across an area-of-use boundary; only its centre must
+    belong to that area. Edge coordinates must still transform finitely.
+    """
+    try:
+        from pyproj import CRS, Transformer
+    except ImportError as exc:
+        raise ValueError("Automatic scale requires pyproj to validate bounds against their CRS") from exc
+    try:
+        definition = CRS.from_user_input(crs)
+        if not (definition.is_geographic or definition.is_projected):
+            raise ValueError("Scale requires a geographic or projected CRS")
+        points = np.asarray(_bounds_edge_samples(bounds), dtype=np.float64)
+        to_geographic = Transformer.from_crs(definition, "EPSG:4326", always_xy=True)
+        lon, lat = to_geographic.transform(
+            points[:, 0], points[:, 1], errcheck=True)
+        lon, lat = np.asarray(lon), np.asarray(lat)
+        valid = np.isfinite(lon) & np.isfinite(lat) & (lon >= -180) & (lon <= 180) & (lat >= -90) & (lat <= 90)
+        area = definition.area_of_use
+        if area is not None:
+            west, south, east, north = bounds
+            centre_lon, centre_lat = to_geographic.transform(
+                (west + east) / 2, (south + north) / 2, errcheck=True)
+            longitude_in_area = (area.west <= centre_lon <= area.east if area.west <= area.east
+                                 else centre_lon >= area.west or centre_lon <= area.east)
+            if not (longitude_in_area and area.south <= centre_lat <= area.north):
+                raise ValueError("Map centre falls outside the CRS area of use")
+        if not valid.all():
+            raise ValueError("Bounds cannot transform to finite geographic coordinates")
+    except Exception as exc:
+        raise ValueError(f"Automatic scale bounds cannot be validated for CRS {crs}: {exc}") from exc
 
 
 def _compose_scale_bar(image: Any, recipe: Any, options: Mapping[str, Any]) -> None:
@@ -1255,14 +1317,41 @@ def _compose_scale_bar(image: Any, recipe: Any, options: Mapping[str, Any]) -> N
     cfg = ScaleBarConfig(**_config_kwargs(ScaleBarConfig, scaled_options))
     meters_per_pixel = options.get("meters_per_pixel")
     if meters_per_pixel is None:
-        west, south, east, north = _furniture_bounds(recipe, options)
-        bbox = BBox(west=west, south=south, east=east, north=north, crs=str(options.get("crs", "EPSG:4326")))
+        from .map_scene import _mapscene_effective_camera_mode
+        if _mapscene_effective_camera_mode(recipe) != "screen":
+            raise ValueError("Automatic scale requires a screen plan view; omit perspective scale or supply a qualified local scale")
+        terrain_metadata = getattr(recipe.terrain, "metadata", None) or {}
+        candidates = [options.get("bbox"), options.get("bounds"),
+                      *(terrain_metadata.get(k) for k in ("bbox", "bounds", "extent"))]
+        # Graticule bounds are geographic line-generation inputs, not a
+        # substitute for the registered map bounds in the terrain's CRS.
+        bounds = _coerce_bounds(next((candidate for candidate in candidates if candidate is not None), None))
+        if bounds is None or not np.isfinite(bounds).all() or not (bounds[0] < bounds[2] and bounds[1] < bounds[3]):
+            raise ValueError("Automatic scale requires explicit registered map bounds")
+        west, south, east, north = bounds
+        crs = options.get("crs") or getattr(recipe.terrain, "crs", None)
+        if not crs:
+            raise ValueError("Automatic scale requires an explicit map CRS")
+        _validate_scale_bounds(bounds, str(crs))
+        bbox = BBox(west=west, south=south, east=east, north=north, crs=str(crs))
         meters_per_pixel = ScaleBar.compute_meters_per_pixel(
             bbox,
             int(image.shape[1]),
             geodesic=bool(options.get("geodesic", cfg.geodesic)),
         )
+    if not np.isfinite(meters_per_pixel) or float(meters_per_pixel) <= 0:
+        raise ValueError("Scale must be finite and positive")
+    from .map_scene import _mapscene_effective_camera_mode
+    qualification = options.get("qualification")
+    if _mapscene_effective_camera_mode(recipe) != "screen" and not (
+        isinstance(qualification, str) and qualification.strip()
+    ):
+        raise ValueError("A perspective scale requires a visible local-scale qualification")
     overlay, label, anchor = ScaleBar(float(meters_per_pixel), config=cfg).render_geometry()
+    if qualification:
+        label = f"{label} ({qualification})"
+    if qualification and _text_outline_metrics(label, cfg.font_size)[0] + anchor[0] > overlay.shape[1]:
+        raise ValueError("Scale label/qualification cannot fit; increase width_px")
     _draw_text(
         overlay,
         label,
@@ -1311,6 +1400,49 @@ def _compose_north_arrow(image: Any, recipe: Any, options: Mapping[str, Any]) ->
     )
 
 
+def _compose_semantic_scale_locator(image: Any, locator: Mapping[str, Any]) -> None:
+    """Paint the already compiled, north-up locator in its reserved viewport."""
+    height, width = image.shape[:2]
+    x0, y0, x1, y1 = locator["rect"]
+    left, top, right, bottom = round(x0 * width), round(y0 * height), round(x1 * width), round(y1 * height)
+    panel = image[top:bottom, left:right]
+    h, w = panel.shape[:2]
+    if not h or not w:
+        return
+    ink, paper = (232, 239, 235, 255), (18, 34, 37, 248)
+    route = _color(locator.get("route_color"), (246, 190, 102, 255))
+    focus = (89, 219, 211, 255)
+    _blend_rect(panel, 0, 0, w, h, paper)
+    # Keep the map viewport fixed when the notice appears or disappears.
+    map_panel = panel[:round(h * 0.8)]
+    footer = panel[map_panel.shape[0]:]
+    map_height = map_panel.shape[0]
+    map_h = min(map_height * 0.8, w * 0.8 / locator["aspect"])
+    map_w = map_h * locator["aspect"]
+
+    def px(point):
+        return ((w - map_w) / 2 + point[0] * map_w,
+                (map_height - map_h) / 2 + point[1] * map_h)
+
+    for path in locator["routes"].values():
+        _draw_polyline(map_panel, [px(point) for point in path], route, width_px=2,
+                       join="round", clip_to_geometry=True)
+    for point in locator["landmarks"].values():
+        _draw_disc(map_panel, *px(point), ink, 2.0, clip_to_geometry=True)
+    _draw_disc(map_panel, *px(locator["focus"]), focus, 3.5, clip_to_geometry=True)
+    _draw_text(map_panel, "N", (round(w * 0.86), round(h * 0.06)),
+               color=ink, halo=paper, font_size=min(w, h) * 0.12)
+    if footer.size and (locator.get("route_in_locator_only") or locator.get("route_continues_in_locator")):
+        notice = "Route in locator" if locator.get("route_in_locator_only") else "Full route in locator"
+        font_size = min(w, h) * 0.12
+        text_w, _, bounds = _text_outline_metrics(notice, font_size)
+        if text_w > w * 0.88:
+            font_size *= w * 0.88 / text_w
+            _, _, bounds = _text_outline_metrics(notice, font_size)
+        if bounds is not None:
+            anchor = _text_anchor_for_visual_center(w / 2, footer.shape[0] / 2, font_size, bounds)
+            _draw_text(footer, notice, anchor, color=ink, halo=paper, font_size=font_size)
+
 def _compose_furniture(image: Any, recipe: Any) -> None:
     furniture = getattr(recipe, "map_furniture", None)
     if furniture is None:
@@ -1328,3 +1460,6 @@ def _compose_furniture(image: Any, recipe: Any) -> None:
     if north_arrow:
         _compose_north_arrow(image, recipe, north_arrow)
     _draw_title(image, str(getattr(furniture, "title", "") or ""))
+    locator = (furniture.metadata or {}).get("semantic_scale_locator")
+    if locator:
+        _compose_semantic_scale_locator(image, locator)

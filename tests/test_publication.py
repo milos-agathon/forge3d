@@ -19,6 +19,304 @@ from forge3d.publication import PublicationSource, PublicationExtent, Publicatio
 pytestmark = pytest.mark.usefixtures("pro_license")
 
 
+@pytest.mark.parametrize("fault", [None, "tampered", "native-failure"])
+def test_flyover_cache_forwarding_and_failed_delivery(publication, fake_render, tmp_path, monkeypatch, fault):
+    import json
+    from types import SimpleNamespace
+    from forge3d import _publication_flyover
+    from forge3d import map_scene
+    from forge3d._png import load_png_rgba
+    from forge3d.map_scene import OrbitCamera
+    from forge3d.publication import PublicationLayout
+    recipe, page, _ = publication
+    recipe.camera_mode = "flat-perspective"
+    frame = replace(page, camera=OrbitCamera(distance=500,elevation_deg=30,azimuth_deg=270,fov_deg=35))
+    cache_path = tmp_path / "cache"
+    # This unit fixture already substitutes native frame execution. Supply its
+    # matching camera projection without creating GPU-backed terrain parameters;
+    # real camera geometry is exercised in test_publication_gpu.py.
+    def fixture_params(scene_recipe, heights, size):
+        assert scene_recipe.camera == frame.camera
+        assert np.all(heights == 0)
+        width, height = size
+        return SimpleNamespace(project_terrain_points=lambda points: [
+            (u * width, v * height, 0.5) for u, v, _height, _offset in points
+        ])
+    monkeypatch.setattr(map_scene, "_build_mapscene_terrain_params", fixture_params)
+    def native(scenes, *, base_seed, samples, out_dir, cache):
+        assert cache == cache_path
+        assert base_seed == 17 and samples == 1
+        if fault == "native-failure":
+            raise RuntimeError("Native test interruption")
+        out_dir.mkdir()
+        records = []
+        for i, scene in enumerate(scenes):
+            path = out_dir / f"frame-{i}.png"
+            scene.render(path, cache=cache)
+            record = {"frame_index":i,"image":path.name,"pixel_hash":hashlib.sha256(load_png_rgba(path).tobytes()).hexdigest(),
+                      "camera_hash":"fixture","scene_hash":"fixture"}
+            if fault == "tampered":
+                record["pixel_hash"] = "0"*64
+            records.append(record)
+        (out_dir / "flythrough_manifest.json").write_text(json.dumps(records))
+        return SimpleNamespace(frames=records)
+    monkeypatch.setattr(_publication_flyover,"render_flythrough",native)
+    output = tmp_path / "delivery"
+    if fault:
+        with pytest.raises((ValueError, RuntimeError), match="interruption|pixels differ"):
+            recipe.render_flyover([frame], output, layout=PublicationLayout(recipe.config), base_seed=17, cache=cache_path)
+        assert not list(output.iterdir())
+        assert not list(tmp_path.glob(".flyover-*"))
+    else:
+        result = recipe.render_flyover([frame], output, layout=PublicationLayout(recipe.config), base_seed=17, cache=cache_path)
+        assert len(result["frames"]) == 1
+        assert (output / "publication-flyover.json").is_file()
+
+
+def test_flyover_rejects_empty_sequence_and_unsupported_camera(publication, tmp_path):
+    from forge3d.publication import PublicationLayout
+    recipe,page,_ = publication
+    with pytest.raises(ValueError,match="nonempty"):
+        recipe.render_flyover([],tmp_path / "empty",layout=PublicationLayout(recipe.config),base_seed=0)
+    with pytest.raises(ValueError,match="flat-perspective"):
+        recipe.render_flyover([page],tmp_path / "screen",layout=PublicationLayout(recipe.config),base_seed=0)
+
+
+def test_simple_legend_keeps_all_style_keys_and_legacy_labels_have_no_swatches(monkeypatch):
+    from forge3d import _map_scene_render as render
+    texts, colours = [], []
+    monkeypatch.setattr(render, "_draw_text", lambda image, text, *a, **k: texts.append(text))
+    monkeypatch.setattr(render, "_draw_pixel_block", lambda image, x, y, colour, **k: colours.append(colour))
+    entries = [{"label": str(i), "rgba": [i, 40, 80, 255]} for i in range(12)]
+    image = np.zeros((400, 400, 4), np.uint8)
+    render._draw_simple_legend(image, {"entries": entries})
+    assert texts == [e["label"] for e in entries]
+    assert colours == [tuple(e["rgba"]) for e in entries]
+    colours.clear()
+    render._draw_simple_legend(image, {"labels": ["roads", "labels"]})
+    assert not colours
+    with pytest.raises(ValueError, match="cannot fit all entries"):
+        render._draw_simple_legend(image[:50], {"entries": entries})
+    render._draw_simple_legend(image, {"items": [{"label": "Forest", "color": "#2f855a"},
+                                                  {"label": "Snow", "color": "#f8fafc"}]})
+    assert colours == [(47, 133, 90, 255), (248, 250, 252, 255)]
+    with pytest.raises(ValueError, match="explicit RGBA8"):
+        render._draw_simple_legend(image, {"items": [{"label": "invalid", "color": "bad-colour"}]})
+
+
+def test_perspective_scale_needs_explicit_value_and_visible_qualification(publication, monkeypatch):
+    from forge3d import _map_scene_render as render
+    from forge3d.map_scene import LightingPreset, OrbitCamera, OutputSpec, TerrainSource
+    recipe, _, _ = publication
+    scene = MapScene(terrain=TerrainSource(data=np.zeros((2, 2)), crs="EPSG:32631"),
+                     camera=OrbitCamera(), output=OutputSpec(1000, 600),
+                     lighting=LightingPreset(settings={"cli_params": {"camera_mode": "mesh:zup"}}))
+    image = np.zeros((600, 1000, 4), np.uint8)
+    with pytest.raises(ValueError, match="Automatic scale requires"):
+        render._compose_scale_bar(image, scene.recipe, {})
+    with pytest.raises(ValueError, match="visible local-scale qualification"):
+        render._compose_scale_bar(image, scene.recipe, {"meters_per_pixel": 10})
+    labels = []
+    monkeypatch.setattr(render, "_draw_text", lambda image, text, *a, **k: labels.append(text))
+    render._compose_scale_bar(image, scene.recipe, {"meters_per_pixel": 10, "width_px": 600,
+                              "qualification": "at centre, horizontal"})
+    assert "at centre, horizontal" in labels[-1]
+
+
+def test_reusable_layout_insets_regenerate_with_source_and_style(publication, fake_render, tmp_path):
+    from forge3d.publication import PublicationLayout, PublicationInset
+    recipe, page, _ = publication
+    layout = PublicationLayout(replace(recipe.config, width=2000, margin=(100, 460, 170, 450)),
+                               [PublicationInset("detail", "Linked detail", page.bounds, (20, 120, 420, 550))])
+    recipe.layout = layout
+    first = recipe.render_series([page], tmp_path / "first")[0]
+    recipe.breaks = [50, 250]
+    changed = recipe.render_series([page], tmp_path / "changed")[0]
+    assert first["insets"][0]["id"] != changed["insets"][0]["id"]
+    assert first["insets"][0]["classification_id"] == first["dependencies"]["classification"]["id"]
+    assert len(fake_render) == 6
+    assert layout.insets[0].bounds == page.bounds
+    assert recipe.config.width == 1600  # Applying a layout never mutates its recipe config.
+    recipe.layout = replace(layout, insets=[replace(layout.insets[0], rect=(500, 120, 900, 550))])
+    with pytest.raises(ValueError, match="overlaps"):
+        recipe.render_series([page], tmp_path / "overlap")
+
+
+def test_subject_series_uses_declared_source_encoding_and_shared_layout(publication, fake_render, tmp_path):
+    from forge3d.publication import PublicationSubject, publication_output_support
+    recipe, page, values = publication
+    other_path = tmp_path / "households.tif"
+    gis.write_raster(other_path, np.where(values < 0, values, values / 2), crs="EPSG:32631",
+                     nodata=-9999, transform=(100, 0, 600000, 0, -100, 5820000))
+    other = replace(recipe.source, path=other_path, name="Households", units="households/source cell")
+    subjects = [PublicationSubject("population", "Population", recipe.source, recipe.breaks, recipe.palette),
+                PublicationSubject("comparison", "Households", other, [50, 250], recipe.palette)]
+    rows = recipe.render_subjects(subjects, [page], tmp_path)
+    assert len(rows) == 2
+    assert rows[0]["dependencies"]["classification"] != rows[1]["dependencies"]["classification"]
+    assert rows[0]["main_viewport"] == rows[1]["main_viewport"]
+    assert rows[0]["source"]["sha256"] != rows[1]["source"]["sha256"]
+    assert rows[1]["legend"]["units"] == "households/source cell"
+    assert "Households" in rows[1]["caption"]
+    assert "/comparison/" in rows[1]["output"]["path"].replace("\\", "/")
+    for support in publication_output_support().values():
+        assert support["pdf"] is support["svg"] is support["editable_text"] is support["print_colour"] is False
+    with pytest.raises(ValueError, match="distinct safe IDs"):
+        recipe.render_subjects([subjects[0], replace(subjects[0], subject_id="POPULATION")], [page], tmp_path)
+
+
+def test_locator_drawn_pixels_independent_geographic_registration(publication, fake_render, tmp_path):
+    from PIL import Image
+    from pyproj import Transformer
+    recipe, page, _ = publication
+    # Interior asymmetric rectangle avoids conflating viewport border and footprint.
+    bounds = BBox(600500, 5818500, 601500, 5819500, "EPSG:32631")
+    result = recipe.render_series([replace(page, bounds=bounds)], tmp_path)[0]
+    image = np.asarray(Image.open(result["output"]["path"]).convert("RGBA"))
+    x0, y0, x1, y1 = result["locator_rect"]
+    locator = image[y0:y1, x0:x1]
+    # PROJ independently registers WORLD coordinates to saved locator pixels;
+    # neither receipt footprint nor recipe helper is used. Unlike rasterio,
+    # pyproj is installed in the CPU-only fast lane and has no local test stub.
+    sx, sy = (x1-x0)/3000, -(y1-y0)/2000
+    transform = Transformer.from_pipeline(
+        f"+proj=affine +s11={sx:.17g} +s22={sy:.17g} "
+        f"+xoff={-600000*sx:.17g} +yoff={-5820000*sy:.17g}")
+    xx, yy = transform.transform([600500, 601500, 601000, 601000],
+                                 [5819000, 5819000, 5818500, 5819500])
+    xx, yy = np.floor(xx).astype(int), np.floor(yy).astype(int)
+    for x, y in zip(xx, yy):
+        assert np.any(np.all(locator[y-1:y+2, x-1:x+2] == [18, 33, 43, 255], axis=-1))
+    # No spurious extent rectangle at the source/map bounds.
+    assert not np.any(np.all(locator[0] == [18, 33, 43, 255], axis=-1))
+
+
+def test_bookends_share_revision_and_final_frame_geometry(publication, fake_render, tmp_path):
+    from forge3d.publication import PublicationLayout
+    recipe, page, _ = publication
+    layout = PublicationLayout(replace(recipe.config, width=1920, height=1080))
+    base = recipe.render_bookends(page, replace(page, title="End"), tmp_path / "base", layout=layout)
+    recipe.breaks = [50, 250]
+    revised = recipe.render_bookends(page, replace(page, title="End"), tmp_path / "revision", layout=layout)
+    assert [r["page_id"] for r in revised] == ["title", "end"]
+    assert all(r["output"]["size"] == [1920, 1080] for r in revised)
+    assert revised[0]["dependencies"]["classification"] == revised[1]["dependencies"]["classification"]
+    for old, new in zip(base, revised):
+        assert old["dependencies"]["legend"] != new["dependencies"]["legend"]
+        assert old["output"]["pixel_sha256"] != new["output"]["pixel_sha256"]
+
+
+def test_time_series_consumes_c04_source_caption_and_missing_state(publication, fake_render, tmp_path):
+    import json
+    from forge3d.observation_time import ObservationRecord, ObservationTrack
+    recipe, page, _ = publication
+    record = ObservationRecord("2024", "2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z",
+                               "2025-01-01T00:00:00Z", {"source": recipe.source.description()})
+    times = ["2023-12-31T23:59:59Z", "2024-01-01T00:00:00Z", "2025-01-01T00:00:00Z"]
+    track = ObservationTrack([record], "hold")
+    receipts = recipe.render_times(track, times, [page], tmp_path)
+    assert [r["selection"]["state"] for r in receipts] == ["missing", "observed", "held"]
+    assert receipts[0]["map_rendered"] is False and receipts[0]["source"] is None
+    assert "No observation" in receipts[0]["caption"]
+    assert len(fake_render) == 4  # A missing time must not manufacture a map.
+    assert "Held observation" in receipts[-1]["caption"] and "2024" in receipts[-1]["caption"]
+    table = json.loads((tmp_path / "selection-table.json").read_text())
+    assert [r["selection"] for r in receipts] == table["selections"]
+    assert receipts[1]["dependencies"]["map"] == receipts[2]["dependencies"]["map"]
+    assert receipts[1]["dependencies"]["caption"] != receipts[2]["dependencies"]["caption"]
+    selected = track.select([times[1]])[0]
+    with pytest.raises(ValueError, match="selected record"):
+        replace(recipe, source=replace(recipe.source, year="2023")).render_series(
+            [page], tmp_path / "wrong", selection=selected)
+
+
+def test_time_series_rejects_stale_outputs_before_mutation(publication, fake_render, tmp_path):
+    from forge3d.observation_time import ObservationTrack
+    recipe, page, _ = publication
+    output = tmp_path / "series"
+    track = ObservationTrack([], "no-data")
+    times = ["2024-01-01T00:00:00Z", "2025-01-01T00:00:00Z"]
+    recipe.render_times(track, times, [page], output)
+    before = {p.relative_to(output): p.read_bytes() for p in output.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match="Stale time-series outputs"):
+        recipe.render_times(track, times[:1], [page], output)
+    assert before == {p.relative_to(output): p.read_bytes() for p in output.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match="Stale time-series outputs"):
+        recipe.render_times(track, times, [replace(page, page_id="other")], output)
+
+
+def test_source_year_matches_declared_observation_year(publication, fake_render, tmp_path):
+    from forge3d.observation_time import ObservationRecord, ObservationTrack
+    recipe, page, _ = publication
+    def track(source):
+        return ObservationTrack([ObservationRecord("a", "2024-01-01T00:00:00+01:00",
+            "2024-01-01T00:00:00+01:00", "2025-01-01T00:00:00+01:00",
+            {"source": source.description()})], "hold")
+    time = ["2025-01-01T00:00:00+01:00"]
+    good = recipe.render_times(track(recipe.source), time, [page], tmp_path / "good")[0]
+    assert "Time 2025-01-01T00:00:00+01:00" in good["caption"]
+    assert "Age 366 days" in good["caption"]
+    wrong = track(replace(recipe.source, year="2031"))
+    with pytest.raises(ValueError, match="observation year"):
+        recipe.render_times(wrong, time, [page], tmp_path / "wrong")
+    assert not (tmp_path / "wrong").exists()
+
+
+def test_series_delegates_forward_cache_to_mapscene(publication, fake_render, tmp_path):
+    from forge3d.observation_time import ObservationRecord, ObservationTrack
+    from forge3d.publication import PublicationLayout, PublicationSubject
+    recipe, page, _ = publication
+    cache = tmp_path / "cache"
+    record = ObservationRecord("a", "2024-01-01T00:00:00Z", "2024-01-01T00:00:00Z",
+                               "2025-01-01T00:00:00Z", {"source": recipe.source.description()})
+    recipe.render_times(ObservationTrack([record], "hold"), ["2024-01-01T00:00:00Z"],
+                        [page], tmp_path / "time", cache=cache)
+    recipe.render_bookends(page, page, tmp_path / "book", layout=PublicationLayout(recipe.config), cache=cache)
+    recipe.render_subjects([PublicationSubject("subject", "Subject", recipe.source, recipe.breaks, recipe.palette)],
+                           [page], tmp_path / "subject", cache=cache)
+    assert fake_render and all(s.last_render_metadata["cache_argument"] == str(cache) for s in fake_render)
+
+
+def test_missing_page_write_failure_preserves_existing_files(publication, monkeypatch, tmp_path):
+    from forge3d.observation_time import ObservationTrack
+    from forge3d import publication as module
+    recipe, page, _ = publication
+    track = ObservationTrack([], "no-data")
+    output = tmp_path / "series"
+    recipe.render_times(track, ["2024-01-01T00:00:00Z"], [page], output)
+    before = {p.relative_to(output): p.read_bytes() for p in output.rglob("*") if p.is_file()}
+    def fail(path, image):
+        path.write_bytes(b"incomplete PNG")
+        raise OSError("Interrupted write")
+    monkeypatch.setattr(module, "save_png", fail)
+    with pytest.raises(OSError, match="Interrupted write"):
+        recipe.render_times(track, ["2025-01-01T00:00:00Z"], [page], output)
+    assert before == {p.relative_to(output): p.read_bytes() for p in output.rglob("*") if p.is_file()}
+
+
+def test_selection_table_write_is_atomic(publication, monkeypatch, tmp_path):
+    from pathlib import Path
+    from forge3d.observation_time import ObservationTrack
+    recipe, page, _ = publication
+    output = tmp_path / "series"
+    track = ObservationTrack([], "no-data")
+    times = ["2024-01-01T00:00:00Z"]
+    recipe.render_times(track, times, [page], output)
+    table = output / "selection-table.json"
+    original = table.read_bytes()
+    write = Path.write_text
+    def interrupted(path, text, *args, **kwargs):
+        if path.name == "selection-table.json":
+            write(path, '{"incomplete":', *args, **kwargs)
+            raise OSError("Interrupted table")
+        return write(path, text, *args, **kwargs)
+    monkeypatch.setattr(Path, "write_text", interrupted)
+    with pytest.raises(OSError, match="Interrupted table"):
+        recipe.render_times(track, times, [page], output)
+    assert table.read_bytes() == original
+    assert not list(output.glob(".selection-*"))
+
+
 @pytest.fixture
 def publication(tmp_path):
     path = tmp_path / "2024.tif"

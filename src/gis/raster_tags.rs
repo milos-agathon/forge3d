@@ -367,6 +367,57 @@ pub(crate) fn read_crs<R: std::io::Read + std::io::Seek>(
     Ok(wkt.map(|wkt| (Some(wkt), None)))
 }
 
+/// Horizontal coordinate model declared by a GeoTIFF's GeoKeys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GeoKeyModel {
+    Projected,
+    Geographic,
+    Geocentric,
+}
+
+/// Read `GTModelTypeGeoKey` (1024), falling back to which CRS key is present:
+/// a `ProjectedCSTypeGeoKey` (3072) means projected and a lone
+/// `GeographicTypeGeoKey` (2048) means geographic. Returns `None` when there is
+/// no GeoKey directory or it declares neither. Malformed directories also
+/// return `None`; `read_crs` is the reader that rejects them.
+pub(crate) fn read_geokey_model<R: std::io::Read + std::io::Seek>(
+    decoder: &mut Decoder<R>,
+) -> GisResult<Option<GeoKeyModel>> {
+    let Some(value) = decoder.find_tag(Tag::GeoKeyDirectoryTag)? else {
+        return Ok(None);
+    };
+    let directory = value
+        .into_u16_vec()
+        .map_err(|err| GisError::InvalidCrs(err.to_string()))?;
+    let entry_count = directory.get(3).copied().unwrap_or(0) as usize;
+    let Some(entries) = directory.get(4..4 + entry_count * 4) else {
+        return Ok(None);
+    };
+    let mut model = None;
+    let mut projected_key = false;
+    let mut geographic_key = false;
+    for entry in entries.chunks_exact(4) {
+        if entry[1] != 0 || entry[2] != 1 {
+            continue;
+        }
+        match (entry[0], entry[3]) {
+            (1024, 1) => model = Some(GeoKeyModel::Projected),
+            (1024, 2) => model = Some(GeoKeyModel::Geographic),
+            (1024, 3) => model = Some(GeoKeyModel::Geocentric),
+            (2048, code) if code != 0 => geographic_key = true,
+            (3072, code) if code != 0 => projected_key = true,
+            _ => {}
+        }
+    }
+    Ok(model.or(if projected_key {
+        Some(GeoKeyModel::Projected)
+    } else if geographic_key {
+        Some(GeoKeyModel::Geographic)
+    } else {
+        None
+    }))
+}
+
 fn iau_authority_from_ascii(ascii: &str) -> GisResult<Option<HashMap<String, String>>> {
     let cleaned = ascii.trim_matches(char::from(0)).trim();
     let segments = cleaned
@@ -565,7 +616,9 @@ fn looks_like_wkt(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{iau_authority_from_ascii, read_crs, read_transform};
+    use super::{
+        iau_authority_from_ascii, read_crs, read_geokey_model, read_transform, GeoKeyModel,
+    };
     use std::io::Cursor;
     use tiff::decoder::Decoder;
     use tiff::encoder::{colortype, TiffEncoder};
@@ -884,5 +937,54 @@ mod tests {
         let authority = authority.unwrap();
         assert_eq!(authority.get("name").map(String::as_str), Some("EPSG"));
         assert_eq!(authority.get("code").map(String::as_str), Some("32633"));
+    }
+
+    fn decoder_with_geokeys(geokeys: Option<&[u16]>) -> Decoder<Cursor<Vec<u8>>> {
+        let mut bytes = Cursor::new(Vec::new());
+        {
+            let mut encoder = TiffEncoder::new(&mut bytes).unwrap();
+            let mut image = encoder.new_image::<colortype::Gray8>(1, 1).unwrap();
+            if let Some(geokeys) = geokeys {
+                image
+                    .encoder()
+                    .write_tag(Tag::GeoKeyDirectoryTag, geokeys)
+                    .unwrap();
+            }
+            image.write_data(&[0]).unwrap();
+        }
+        bytes.set_position(0);
+        Decoder::new(bytes).unwrap()
+    }
+
+    #[test]
+    fn geokey_model_prefers_model_type_then_crs_key() {
+        let cases: [(&[u16], Option<GeoKeyModel>); 6] = [
+            // GDAL EPSG:4326: model type 2 plus GeographicTypeGeoKey.
+            (
+                &[1, 1, 0, 2, 1024, 0, 1, 2, 2048, 0, 1, 4326],
+                Some(GeoKeyModel::Geographic),
+            ),
+            (
+                &[1, 1, 0, 2, 1024, 0, 1, 1, 3072, 0, 1, 32610],
+                Some(GeoKeyModel::Projected),
+            ),
+            (&[1, 1, 0, 1, 1024, 0, 1, 3], Some(GeoKeyModel::Geocentric)),
+            // No model type: a lone geographic key is geographic ...
+            (&[1, 1, 0, 1, 2048, 0, 1, 4326], Some(GeoKeyModel::Geographic)),
+            // ... but a projected key wins over its base geographic CRS.
+            (
+                &[1, 1, 0, 2, 2048, 0, 1, 4326, 3072, 0, 1, 32610],
+                Some(GeoKeyModel::Projected),
+            ),
+            (&[1, 1, 0, 1, 1025, 0, 1, 1], None),
+        ];
+        for (geokeys, expected) in cases {
+            let mut decoder = decoder_with_geokeys(Some(geokeys));
+            assert_eq!(read_geokey_model(&mut decoder).unwrap(), expected, "{geokeys:?}");
+        }
+        let mut decoder = decoder_with_geokeys(None);
+        assert_eq!(read_geokey_model(&mut decoder).unwrap(), None);
+        let mut decoder = decoder_with_geokeys(Some(&[1, 1, 0, 9, 1024, 0, 1, 2]));
+        assert_eq!(read_geokey_model(&mut decoder).unwrap(), None);
     }
 }

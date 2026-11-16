@@ -251,7 +251,7 @@ def test_small_tile_residency_limit_binds_at_steady_state():
         assert stats["resident_height_bytes"] <= budget, stats
         assert stats["gpu_visible_current_bytes"] <= gpu_ceiling, stats
         assert stats["gpu_visible_high_water_bytes"] <= gpu_ceiling, stats
-        time.sleep(0)
+        renderer._wait_height_streaming()
     steady = [row for row in samples if row["tiles_uploaded"] >= row["total_tiles"]]
     assert stats["total_tiles"] == 64 and k < stats["total_tiles"], stats
     assert steady, "the bounded loop must exercise replacements beyond initial fill"

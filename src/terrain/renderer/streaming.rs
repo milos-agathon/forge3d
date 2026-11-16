@@ -106,6 +106,7 @@ struct HeightUploadRing {
     owner: AllocationOwner,
     buffer_size: u64,
     flights: Vec<Option<HeightUploadFlight>>,
+    tile_flight_count: usize,
     reserved_overview_rollback_slot: Option<usize>,
 }
 
@@ -178,6 +179,7 @@ impl HeightUploadRing {
         queue: Arc<wgpu::Queue>,
         owner: AllocationOwner,
         buffer_size: u64,
+        globe_mode: bool,
     ) -> Self {
         Self {
             device,
@@ -185,6 +187,11 @@ impl HeightUploadRing {
             owner,
             buffer_size,
             flights: (0..ORBIS_UPLOAD_RING_COUNT).map(|_| None).collect(),
+            // An overview switch needs a candidate flight plus guaranteed rollback.
+            // Tile streaming must not consume that pair while GPU work is pending.
+            // Keep the existing ring budget and apply ordinary non-blocking
+            // backpressure to tiles instead of failing the next overview switch.
+            tile_flight_count: ORBIS_UPLOAD_RING_COUNT - if globe_mode { 2 } else { 0 },
             reserved_overview_rollback_slot: None,
         }
     }
@@ -207,9 +214,13 @@ impl HeightUploadRing {
 
     fn has_capacity(&mut self) -> bool {
         self.reclaim();
-        self.flights.iter().enumerate().any(|(index, flight)| {
-            flight.is_none() && Some(index) != self.reserved_overview_rollback_slot
-        })
+        self.flights
+            .iter()
+            .take(self.tile_flight_count)
+            .enumerate()
+            .any(|(index, flight)| {
+                flight.is_none() && Some(index) != self.reserved_overview_rollback_slot
+            })
     }
 
     #[cfg(feature = "enable-globe")]
@@ -251,6 +262,7 @@ impl HeightUploadRing {
         let Some(slot) = self
             .flights
             .iter()
+            .take(self.tile_flight_count)
             .enumerate()
             .position(|(index, flight)| {
                 flight.is_none() && Some(index) != self.reserved_overview_rollback_slot
@@ -984,6 +996,7 @@ impl HeightVtFamilyRuntime {
                 queue,
                 allocation_owner.clone(),
                 upload_buffer_size,
+                globe_mode,
             ),
             loader,
             lod,

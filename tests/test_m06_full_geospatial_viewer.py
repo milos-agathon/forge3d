@@ -9,6 +9,7 @@ shipped executable rather than an in-process test double.
 from __future__ import annotations
 
 import json
+import math
 import os
 import queue
 import re
@@ -269,6 +270,29 @@ def _heightfield(width: int, height: int) -> np.ndarray:
         + xx * 0.08
     )
     return np.asarray(field, dtype=np.float32)
+
+
+def _cone(width: int, height: int, peak: float) -> np.ndarray:
+    yy, xx = np.mgrid[0:height, 0:width]
+    radius = np.hypot(
+        (xx - (width - 1) / 2.0) / (width / 2.0),
+        (yy - (height - 1) / 2.0) / (height / 2.0),
+    )
+    return np.asarray(peak * np.clip(1.0 - radius, 0.0, 1.0), dtype=np.float32)
+
+
+def _wgs84_metres_per_degree(latitude_deg: float) -> tuple[float, float]:
+    """Metres per degree of (longitude, latitude) on WGS84, from its flattening."""
+    semi_major = 6_378_137.0
+    flattening = 1.0 / 298.257_223_563
+    eccentricity_sq = flattening * (2.0 - flattening)
+    phi = math.radians(latitude_deg)
+    w = math.sqrt(1.0 - eccentricity_sq * math.sin(phi) ** 2)
+    per_radian = math.pi / 180.0
+    return (
+        per_radian * semi_major * math.cos(phi) / w,
+        per_radian * semi_major * (1.0 - eccentricity_sq) / w**3,
+    )
 
 
 def _write_local_tiff(path: Path, values: np.ndarray) -> None:
@@ -630,6 +654,60 @@ def test_m06_georeferencing_fail_closed_and_local_pixel_lock(tmp_path: Path) -> 
         _write_json("georeferencing.json", {"backend": os.environ.get("WGPU_BACKEND"), "oracles": oracles, "parity": parity, "rejections": rejections})
     finally:
         viewer.close("georeferencing-viewer.log")
+
+
+def test_m06_geographic_dem_matches_metric_twin_and_keeps_relief(tmp_path: Path) -> None:
+    """Issue 289: an EPSG:4326 DEM used to load with a footprint in degrees
+    against heights in metres (a blank frame), and the default shader drew
+    relief at 0.1% of the terrain width (a flat plate)."""
+    viewer = ViewerProcess()
+    try:
+        width, height = 160, 96
+        lon0, lat_top, span_lon, span_lat = 7.0, 46.012, 0.02, 0.012
+        kx, ky = _wgs84_metres_per_degree(lat_top - span_lat * 0.5)
+        span_x, span_y = span_lon * kx, span_lat * ky
+        cone = _cone(width, height, peak=400.0)
+        geographic = tmp_path / "geographic-epsg4326.tif"
+        metric = tmp_path / "metric-twin.tif"
+        _write_geotiff(geographic, cone, origin_x=lon0, origin_y=lat_top, span_x=span_lon, span_y=span_lat, crs="EPSG:4326")
+        # A geographic DEM is placed in local metres from its north-west
+        # corner: the same world as a projected raster with that corner at 0.
+        _write_geotiff(metric, cone, origin_x=0.0, origin_y=0.0, span_x=span_x, span_y=span_y, crs="EPSG:32632")
+        assert _rasterio_oracle(geographic)["crs"] == "EPSG:4326"
+
+        target = [span_x * 0.5, 200.0, span_y * 0.5]
+        side_view = {
+            "cmd": "set_terrain_camera",
+            "phi_deg": 137.0,
+            "theta_deg": 80.0,
+            "radius": 2.0 * span_x,
+            "fov_deg": 50.0,
+            "target": target,
+        }
+        frames: dict[str, np.ndarray] = {}
+        for name, path in (("geographic", geographic), ("metric", metric)):
+            _load_terrain(viewer, path)
+            viewer.ok(side_view)
+            viewer.wait_frames(2)
+            frames[name] = viewer.snapshot(tmp_path / f"{name}.png")
+        parity = _metrics(frames["geographic"], frames["metric"])
+        _write_diff("geographic-vs-metric-diff.png", frames["geographic"], frames["metric"])
+        assert _parity_passes(parity), parity
+
+        # The height colormap follows raw elevation, so only geometry changes
+        # with z_scale: a 400 m cone against the same cone at 4 m.
+        viewer.ok({"cmd": "set_terrain", "zscale": 0.01})
+        viewer.wait_frames(2)
+        squashed = viewer.snapshot(tmp_path / "metric-squashed.png")
+        changed = np.abs(frames["metric"] - squashed).max(axis=2) > 0.08
+        changed_rows = int(np.count_nonzero(changed.sum(axis=1) >= 3))
+        _write_json(
+            "geographic.json",
+            {"span_m": [span_x, span_y], "parity": parity, "relief_changed_rows": changed_rows},
+        )
+        assert changed_rows >= 25, changed_rows
+    finally:
+        viewer.close("geographic-viewer.log")
 
 
 def test_m06_nonzero_origin_effects_orbit_no_flash_and_scatter(tmp_path: Path) -> None:

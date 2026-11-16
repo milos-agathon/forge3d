@@ -178,8 +178,11 @@ const ENV_HEIGHT: u32 = 128;
 /// background while the analytic sun keeps providing the direct light.
 const ENV_CLAMP: f32 = 12.0;
 /// Widest environment uploaded for an HDRI source (the Hosek bake stays at
-/// 256x128): 1024 texels give the background sun ~0.35 deg detail.
-const ENV_MAX_WIDTH: u32 = 1024;
+/// 256x128). The sky fills the frame, so this sets its sharpness: 4096 texels
+/// are about two pixels per texel at 1080p and a 55 deg lens. Each texel costs
+/// 16 B against the render budget, so a full-size sky is 134 MB; a smaller
+/// source costs only its own size.
+const ENV_MAX_WIDTH: u32 = 4096;
 const MAX_RESTARTS: u32 = 256;
 /// Terrain tiles per axis in the top-level structure (upper bound).
 const TERRAIN_TILE_GRID: u32 = 8;
@@ -1860,19 +1863,19 @@ mod env_map_tests {
         // Bright uniform sky over dark ground with one extremely hot texel
         // (an unclipped HDRI sun): the exposure must ignore the outlier and
         // the disc must come out clamped instead of firefly-scale.
-        let mut img = image(2048, 1024, |_, y| {
-            if y < 512 {
+        let mut img = image(8192, 64, |_, y| {
+            if y < 32 {
                 [0.4, 0.5, 0.6]
             } else {
                 [0.05, 0.05, 0.05]
             }
         });
-        img.data[3 * (10 * 2048 + 100)] = 50_000.0;
+        img.data[3 * (10 * 8192 + 100)] = 50_000.0;
         let env = env_from_hdr_image(&img, 0.0).unwrap();
         assert_eq!(
             (env.width, env.height),
-            (1024, 512),
-            "a 2:1 source downsamples to 1024 wide"
+            (ENV_MAX_WIDTH, 32),
+            "a source wider than the cap downsamples to the cap"
         );
 
         let sky_lum = luminance(&env.pixels[0..3]);
@@ -1882,9 +1885,9 @@ mod env_map_tests {
         );
         assert!(env.pixels.iter().all(|v| v.is_finite() && *v <= ENV_CLAMP));
         // The disc survived as a clamped hot blob (source (100,10) -> (50,5)).
-        assert_eq!(env.pixels[(5 * 1024 + 50) * 3], ENV_CLAMP);
+        assert_eq!(env.pixels[(5 * 4096 + 50) * 3], ENV_CLAMP);
         // The ground half stays below the normalised sky.
-        assert!(luminance(&env.pixels[(300 * 1024) * 3..][..3]) < sky_lum);
+        assert!(luminance(&env.pixels[(20 * 4096) * 3..][..3]) < sky_lum);
     }
 
     #[test]

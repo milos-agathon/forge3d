@@ -219,7 +219,9 @@ impl TaaRenderer {
                     binding: 3,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
+                        // Depth is R32Float and is read with textureLoad.
+                        // Filtering would need an optional device feature.
+                        sample_type: TextureSampleType::Float { filterable: false },
                         view_dimension: TextureViewDimension::D2,
                         multisampled: false,
                     },

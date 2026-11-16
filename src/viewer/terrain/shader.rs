@@ -24,13 +24,12 @@ struct VertexOutput {
     @location(2) raw_height: f32,
 };
 
+// Same vertical contract as the PBR and shadow shaders, and as the CPU camera
+// target and vector drape: metres above the DEM minimum, times z_scale.
 fn height_to_world_y(h: f32) -> f32 {
     let min_h = u.terrain_params.x;
-    let h_range = u.terrain_params.y;
-    let simple_height_extent = u.terrain_params.z;
     let z_scale = u.terrain_params.w;
-    let h_normalized = (h - min_h) / max(h_range, 1.0);
-    return h_normalized * simple_height_extent * z_scale * 0.001;
+    return (h - min_h) * z_scale;
 }
 
 fn compute_heightmap_normal(uv: vec2<f32>) -> vec3<f32> {

@@ -28,6 +28,18 @@ cargo forge3d-clippy
 cargo test --workspace --all-features
 ```
 
+If `tests/conftest.py` can't import a working native extension, it installs
+maturin and builds one before any test runs. Set `FORGE3D_NO_BOOTSTRAP=1` to
+skip that, for example for Python-only checks of examples or docs against a
+build you already have. With the flag set, conftest no longer adds `python/`
+to `sys.path`, so tests import whichever `forge3d` Python finds. To test this
+checkout's Python sources, put `python/` on `PYTHONPATH` and make sure a built
+`_forge3d` sits next to them:
+
+```bash
+FORGE3D_NO_BOOTSTRAP=1 PYTHONPATH=python python -m pytest tests/test_install_smoke.py -v
+```
+
 ## Code Style
 
 - Python: keep public signatures typed and match the existing module layout.

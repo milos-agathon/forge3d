@@ -10,6 +10,12 @@ reason = "det_raster.wgsl: raster canary whose output hash is compared to commit
 owner = "determinism"
 expiry = "2027-08-06"
 
+[[unproven]]
+path = "src/shaders/sky_hdri.wgsl"
+reason = "sky_hdri.wgsl: the visible HDRI environment-map sky; its pixel-to-direction mapping mirrors the proven analytic sky, but the single environment-texture tap and its storage-image output are not yet modeled as a standalone PROBATUM contract. Deterministic one tap, no derivatives; the HDR is the same IBL map already validated by the lit path."
+owner = "render-quality"
+expiry = "2027-11-16"
+
 # PROBATUM proof-coverage ledger. Expired entries fail tests/test_shader_proofs.py.
 
 [[unproven]]

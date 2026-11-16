@@ -697,8 +697,10 @@ def test_native_material_vt_cache_bypass_is_reported(tmp_path, active):
     material = f3d.MaterialSet.terrain_default()
     environment = f3d.IBL.from_hdr(str(hdr), intensity=1.0)
     pixels = np.full((248, 248, 4), (128, 128, 255, 255), dtype=np.uint8)
+    reference_renderer = f3d.TerrainRenderer(f3d.Session(window=False))
     for material_index in range(material.material_count):
         renderer.register_material_vt_source(material_index, "albedo", pixels, (248, 248), None)
+        reference_renderer.register_material_vt_source(material_index, "albedo", pixels, (248, 248), None)
     config = _canonical_params_config()(64, 64)
     if active:
         config.vt = TerrainVTSettings(enabled=True, atlas_size=256,
@@ -706,7 +708,9 @@ def test_native_material_vt_cache_bypass_is_reported(tmp_path, active):
     params = f3d.TerrainRenderParams(config)
     height = np.ascontiguousarray(canonical_heightmap(), dtype=np.float32)
     f3d.clear_native_degradations()
-    fresh = renderer.render_terrain_pbr_pom(material, environment, params, height, cache=None).to_numpy().tobytes()
+    # Compare the same initial residency state: feedback from a previous frame
+    # can replace the sole atlas tile when several materials compete for it.
+    fresh = reference_renderer.render_terrain_pbr_pom(material, environment, params, height, cache=None).to_numpy().tobytes()
     cached = renderer.render_terrain_pbr_pom(material, environment, params, height, cache=tmp_path / "unused").to_numpy().tobytes()
     report = dict(renderer.last_anamnesis_cache_report)
     assert fresh == cached

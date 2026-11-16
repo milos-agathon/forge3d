@@ -14,6 +14,59 @@ import forge3d.map_scene as ms
 from _concordia_scene import capture, render, require_gpu, scene
 
 
+def test_deterministic_device_renders_taa_and_rejects_unavailable_clipmap_feature(tmp_path):
+    """Exercise the actual feature-free device in a fresh process."""
+    import os
+    import subprocess
+    import sys
+    import textwrap
+
+    require_gpu()
+    backend = f3d.device_probe()["backend"].lower()
+    evidence = tmp_path / "deterministic-device.json"
+    script = textwrap.dedent('''
+        import json, sys
+        from pathlib import Path
+        import numpy as np
+        sys.path.insert(0, "tests")
+        import forge3d as f3d
+        from forge3d._native import get_native_module
+        from forge3d.map_scene import MapSceneNativeUnavailable
+        from _concordia_scene import capture, render, scene
+        from test_mapscene_native_pipeline import test_opaque_unlit_point_keeps_its_authored_display_color
+        native = get_native_module()
+        native.clear_native_degradations()
+        result, data = capture(scene(effects=("taa",), cartography=False, height_ao=False), history=True)
+        assert np.any(result.rgba[..., :3])
+        assert result.metadata["native_pipeline"]["temporal_history_used"]
+        test_opaque_unlit_point_keeps_its_authored_display_color()
+        capabilities = dict(native.capabilities())
+        assert capabilities["granted"] == []
+        assert capabilities["limits"]["max_bind_groups"] >= 8
+        model = scene(effects=("taa",), cartography=False, height_ao=False)
+        model.recipe.lighting.settings["camera"] = {"camera_mode": "screen"}
+        model.recipe.terrain.metadata["clipmap"] = {"enabled": True, "levels": 3,
+            "ring_resolution": 16, "terrain_extent_m": 32.0, "max_resident_height_bytes": 3*16*16*4}
+        try:
+            render(model)
+        except MapSceneNativeUnavailable as error:
+            assert "SHADER_PRIMITIVE_INDEX" in str(error)
+        else:
+            raise AssertionError("feature-free clipmap rendering was not rejected")
+        errors = [entry for entry in native.native_degradations()
+                  if entry["kind"] in {"validation_error", "uncaptured_gpu_error"}]
+        assert not errors, errors
+        Path(sys.argv[1]).write_text(json.dumps({"capabilities": capabilities,
+            "taa_rendered": True, "clipmap_refused_before_gpu_validation": True,
+            "gpu_errors": errors}, indent=2))
+    ''')
+    result = subprocess.run([sys.executable, "-c", script, str(evidence)],
+        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True,
+        env={**os.environ, "FORGE3D_DETERMINISTIC": "1", "WGPU_BACKEND": backend, "WGPU_BACKENDS": backend})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(evidence.read_text())["taa_rendered"]
+
+
 def test_native_path_has_no_cpu_surrogate_calls():
     for function in (ms._render_native_offscreen_result, ms._render_terrain_renderer_result_impl):
         tree = ast.parse(inspect.getsource(function))

@@ -71,7 +71,14 @@ impl ViewerTerrainScene {
             }
         }
         if needs_shadows && self.shadow_pipeline.is_some() {
-            self.render_shadow_passes(encoder, view_mat, proj, -sun_dir, render_origin_span);
+            self.render_shadow_passes(
+                encoder,
+                view_mat,
+                proj,
+                (frame.near, frame.far),
+                -sun_dir,
+                render_origin_span,
+            );
         } else if needs_shadows {
             eprintln!(
                 "[render] Skipping shadow passes: pipeline={}",
@@ -256,7 +263,8 @@ impl ViewerTerrainScene {
             render_origin_span,
             h_range,
             shader_z_scale,
-            cam_radius,
+            near: frame.near,
+            far: frame.far,
             vo_sun_dir: [sun_dir.x, sun_dir.y, sun_dir.z],
             vo_lighting,
         })

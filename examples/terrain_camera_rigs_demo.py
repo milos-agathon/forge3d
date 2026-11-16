@@ -10,6 +10,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 import sys
 import time
@@ -20,11 +21,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "python"))
 
 import forge3d as f3d
 from forge3d import io as f3dio
+from forge3d.animation import CameraKeyframe
 from forge3d.camera_rigs import (
     TerrainClearance,
     TerrainOrbitRig,
     TerrainRailRig,
     TerrainTargetFollowRig,
+    _orbit_eye,
+    _orbit_from_eye_target,
+    _unwrap_phi,
 )
 from forge3d.terrain_scatter import TerrainScatterSource
 
@@ -40,21 +45,62 @@ def _contract_point(width: float, x: float, z: float) -> tuple[float, float]:
     return (float(width * x), float(width * z))
 
 
-def _load_scatter_source(path: Path, z_scale: float) -> TerrainScatterSource:
+def _load_rig_terrain(path: Path, z_scale: float):
     if path.suffix.lower() == ".npy":
         heightmap = np.asarray(np.load(path), dtype=np.float32)
+        height, width = heightmap.shape
+        origin = (0.0, 0.0)
+        span = (float(width), float(height))
     else:
         dem = f3dio.load_dem(str(path), fill_nodata_values=True)
-        data = getattr(dem, "data", None)
-        if data is None:
-            raise SystemExit("DEM loader did not return a .data array")
-        heightmap = np.asarray(data, dtype=np.float32)
+        heightmap = dem.data
+        origin, span = _viewer_footprint(dem)
 
-    return TerrainScatterSource(
-        heightmap,
-        z_scale=float(z_scale),
-        terrain_width=float(max(heightmap.shape)),
-    )
+    source = TerrainScatterSource(heightmap, z_scale=z_scale, terrain_width=max(span))
+    return source, origin, span
+
+
+def _viewer_footprint(dem: f3dio.DEMData):
+    from rasterio.crs import CRS
+
+    if dem.transform is None or dem.transform.is_identity:
+        height, width = dem.data.shape
+        return (0.0, 0.0), (float(width), float(height))
+    west, south, east, north = dem.bounds
+    crs = CRS.from_string(dem.crs) if dem.crs else None
+    authority = crs.to_authority() if crs is not None else None
+    planetary = authority is not None and authority[0].startswith("IAU")
+    if crs is not None and crs.is_geographic and not planetary:
+        if crs.units_factor[0] != "degree":
+            raise ValueError("The camera rig example requires geographic coordinates in degrees")
+        # Match the viewer's WGS84 scale at the footprint centre latitude.
+        latitude = math.radians((south + north) / 2.0)
+        eccentricity_squared = 6.694_379_990_141_316e-3
+        w = math.sqrt(1.0 - eccentricity_squared * math.sin(latitude) ** 2)
+        prime_vertical = 6_378_137.0 / w
+        meridional = 6_378_137.0 * (1.0 - eccentricity_squared) / w**3
+        span_x = math.radians(east - west) * prime_vertical * math.cos(latitude)
+        span_z = math.radians(north - south) * meridional
+        return (0.0, 0.0), (span_x, span_z)
+    return (west, -north), (east - west, north - south)
+
+
+def _place_animation(animation, width: float, origin, span) -> None:
+    """Map the rig's square heightfield to the viewer's rectangular footprint."""
+    scale_x, scale_z = span[0] / width, span[1] / width
+
+    def world_point(point):
+        x, y, z = point
+        return (origin[0] + x * scale_x, y, origin[1] + z * scale_z)
+
+    keyframes = []
+    for key in animation.get_keyframes():
+        eye = _orbit_eye(key.target, key.radius, key.phi_deg, key.theta_deg)
+        target = world_point(key.target)
+        phi, theta, radius = _orbit_from_eye_target(world_point(eye), target)
+        phi = _unwrap_phi(keyframes[-1].phi_deg if keyframes else key.phi_deg, phi)
+        keyframes.append(CameraKeyframe(key.time, phi, theta, radius, key.fov_deg, target))
+    animation.replace_keyframes(keyframes)
 
 
 def _build_rig(preset: str, source: TerrainScatterSource):
@@ -78,11 +124,11 @@ def _build_rig(preset: str, source: TerrainScatterSource):
     if preset == "rail_luxembourg":
         return TerrainRailRig(
             path_xz=[
-                _contract_point(width, 0.18, 0.68),
+                _contract_point(width, 0.22, 0.65),
                 _contract_point(width, 0.34, 0.62),
-                _contract_point(width, 0.50, 0.56),
-                _contract_point(width, 0.70, 0.48),
-                _contract_point(width, 0.84, 0.40),
+                _contract_point(width, 0.50, 0.57),
+                _contract_point(width, 0.70, 0.55),
+                _contract_point(width, 0.83, 0.61),
             ],
             duration=10.0,
             camera_height_offset=0.03 * width,
@@ -175,9 +221,10 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     dem_path = args.dem or f3d.fetch_dem(PRESET_DATASETS[args.preset])
-    scatter_source = _load_scatter_source(Path(dem_path), z_scale=float(args.z_scale))
+    scatter_source, origin, span = _load_rig_terrain(Path(dem_path), z_scale=float(args.z_scale))
     rig = _build_rig(args.preset, scatter_source)
     animation = rig.bake(scatter_source, samples_per_second=int(args.samples_per_second))
+    _place_animation(animation, scatter_source.terrain_width, origin, span)
 
     print(
         f"[tv17] preset={args.preset} dem={Path(dem_path).name} "

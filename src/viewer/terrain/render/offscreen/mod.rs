@@ -14,6 +14,9 @@ pub(super) struct SnapshotRenderState {
     pub(super) render_origin_span: [f32; 4],
     pub(super) h_range: f32,
     pub(super) shader_z_scale: f32,
+    /// Clip planes of the frame camera (depth linearisation in effects).
+    pub(super) near: f32,
+    pub(super) far: f32,
     pub(super) vo_view_proj: [[f32; 4]; 4],
     pub(super) vo_sun_dir: [f32; 3],
     pub(super) vo_lighting: [f32; 4],
