@@ -1376,14 +1376,21 @@ measured in pixels (changed-sample counts in the commit message).
    than a Studio-side re-implementation — but only after the engine's
    anchoring is real-world.
 
-Held for a decision, not for lack of work: the **map plate** (the engine's
+**Held for a decision, not for lack of work:** the **map plate** (the engine's
 `MapPlate` calls `_check_pro_access`, so a plate export needs a licensing
-answer before it is an increment), and the **PR that runs `deb-audit`** on a
-real runner — the job is written and YAML-valid, but the branch has never
-been merged to `main` (main has no `studio-tauri/` tree) and the merge
-conflicts in three engine-side files, so a pull request today would produce
-no CI evidence at all. The hunk-by-hunk resolution plan is
-[`rebase-onto-main.md`](rebase-onto-main.md).
+answer before it is an increment).
+
+**The PR ran and passed (2026-11-16).** [PR #310](https://github.com/milos-agathon/forge3d/pull/310)
+carries the Studio surface onto `main` after the rebase
+([`rebase-onto-main.md`](rebase-onto-main.md)). Both relevant jobs are green:
+`fmt · lint · types · node tests · Rust suites` and **`deb audit — engine probe
+in both interpreter scenarios`**. On the hosted runner the deb was built and
+`dpkg -i`'d, the postinst printed the remedy, a bare PATH produced exit 1 with
+`pip install --user forge3d` in the output, `FORGE3D_STUDIO_PYTHON` pointing at a
+fresh venv produced `ok (forge3d 1.49.0)` and exit 0, and
+`desktop-file-validate` was clean. Five latent branch issues were found and
+fixed by that PR (Node 22, WebKitGTK dev libs, a clippy lint, the HDRI sample
+asset, and their own merge resolutions) — each fixed at the cause.
 ---
 
 ## Appendix A — module coverage decisions

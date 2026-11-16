@@ -100,3 +100,12 @@ branch's entries on top of it, and re-run the ledger gate
    workflow's `deb-audit` job builds the deb, `dpkg -i`s it, validates the
    desktop entry and runs `--engine-check` in both interpreter scenarios —
    the engine-discovery evidence that only a runner can produce.
+
+**Outcome (2026-11-16):** the rebase landed on `studio/rebase-main`, PR #310
+was opened, and every check passed. The hosted `deb audit` job's own log shows
+`dpkg -i` unpacking and configuring the package, the postinst printing the
+remedy, a bare PATH exiting 1 with `pip install --user forge3d` in the output,
+and `FORGE3D_STUDIO_PYTHON` finding forge3d 1.49.0 from a fresh venv (exit 0).
+CI also caught five latent branch issues (Node 20 vs `--experimental-strip-types`,
+missing WebKitGTK dev libs in the lint job, a newer clippy lint, a gitignored
+sample HDRI) — each fixed at the cause before the green run.

@@ -84,7 +84,13 @@ verification on a fresh stranger machine remains unverified by design.
   then passed `--engine-check` from a repo-less cwd against a fresh
   `uv` venv with PyPI forge3d 1.49.0 (exit 0), the desktop entry validated,
   and `dpkg -l` recorded `ii`. CI's `deb-audit` job runs the same flow on
-  ubuntu-latest with the system package manager.
+  ubuntu-latest with the system package manager — **and it passed on PR #310
+  (2026-11-16)**: the hosted runner installed the deb with `dpkg -i`, printed
+  the remedy from the postinst, reported `engine: not found` with the remedy
+  on a bare PATH (exit 1), and `ok (forge3d 1.49.0)` with
+  `FORGE3D_STUDIO_PYTHON` pointed at a fresh venv (exit 0). The desktop entry
+  validated there too. The hosted stranger-install claim is now measured,
+  not just local.
 - A bare `PATH python3`/`PATH python` probe is honest about half-installed interpreters:
   a system `python3` with `forge3d` but no `numpy` fails with
   `import forge3d failed: No module named 'numpy'`. Working as designed;
