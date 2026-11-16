@@ -22,7 +22,11 @@ jobs:
           - config: ubuntu-x64
             runner: ubuntu-latest
           - config: macos-arm64
-            runner: macos-15
+            # macos-15 twice queued without ever getting a runner (empty
+            # runner_name, cancelled at 15 min, no log). Every other macOS
+            # job in this repo uses macos-latest and is passing; use that
+            # pool for the evidence leg too.
+            runner: macos-latest
           - config: windows-x64
             runner: windows-latest
     runs-on: ${{ matrix.runner }}
