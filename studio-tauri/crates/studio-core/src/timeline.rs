@@ -241,10 +241,7 @@ impl Keyframe {
     /// Channel-specific range check: the camera FOV must stay a usable angle,
     /// everything else is bounded only by finiteness (validated separately).
     fn channel_out_of_range(self, channel: Channel) -> bool {
-        if channel == Channel::FovDeg && !(1.0..179.0).contains(&self.value) {
-            return true;
-        }
-        false
+        channel == Channel::FovDeg && !(1.0..179.0).contains(&self.value)
     }
 }
 
