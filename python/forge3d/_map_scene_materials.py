@@ -44,10 +44,10 @@ def drape_physical_vectors(recipe, shape, base):
     from ._map_scene_common import _same_crs
     from ._map_scene_render import _paint, _feature_number
     from .alignment import _require_rasterio, _affine_from_metadata
-    from shapely.geometry import shape as geometry_shape
     layers = [layer for layer in recipe.layers if isinstance(layer, ms.VectorOverlay) and physical_vector(layer)]
     if not layers:
         return base
+    from shapely.geometry import shape as geometry_shape
     _require_rasterio()
     from rasterio.features import rasterize
     grid = ms._terrain_alignment_grid(recipe.terrain, fallback_shape=shape)

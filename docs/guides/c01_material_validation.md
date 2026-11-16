@@ -1,18 +1,38 @@
 # C01 validation on current main
 
-Current work is in the isolated `D:/forge3d-worktrees/c01-current-main`
-checkout at main `f80dba3d613af33290689e49b9de18b167e49988`, with local
-changes from candidate `4a251d086cf95df62274963a489c6af76fcca092`.
-See the [current results and reproducible commands](../../artifacts/c01/review/REPORT.md)
-and [Milos's assessment of the prepared renders](c01_human_trial.md).
-The November 15 follow-up corrects mixed terrain/raster channels and verifies
-the rebuilt native exports for cloud and screen-space effects. The four
-effects tests pass with one-shot terrain ownership or HDR as required.
-Current acceptance remains open for the terrain pin and shader proof, signed
-shader identity, Milos's assessment of the prepared original and snow revision,
-and exclusive-host F6 counters. Cross-backend qualification is absent. The October 19 owner decision
-waives hands-on authoring and effort measurement for step 3. The sections
-below describe historical runtimes, source revisions and acceptance records.
+The reviewed C01 integration is in [draft PR #308](https://github.com/milos-agathon/forge3d/pull/308).
+It is based on main `f80dba3d613af33290689e49b9de18b167e49988` and preserves
+the original candidate `4a251d086cf95df62274963a489c6af76fcca092` in its
+worktree. The isolated checkout retains the [validation receipts and commands](../../artifacts/c01/review/REPORT.md).
+
+The November 15 validation covers mixed terrain and raster channels and
+native cloud and screen-space exports. On the original draft's RTX 3070/Vulkan
+runtime `d3ae07ab5c43980ebb1951e8cd06e7ca0cc84cd089c6c7901aeb37c40fb2d391`,
+379 C01 cases, 309 one-shot pipeline cases and all 17 selected
+physical publication cases passed with zero skips. These runs used
+`WGPU_BACKEND=vulkan` and `FORGE3D_NO_BOOTSTRAP=1`. Physical publication
+also set `FORGE3D_RUN_GPU_ANAMNESIS=1`. All 23 default PNGs matched clean
+main byte for byte. The computed terrain pin `0x1e4e931cfb13547f` passed
+the strict check, and all seven shader assembly tests and eight Python
+shader proofs passed.
+
+Milos accepted the prepared original and snow revision for step 3. Soil
+and rock blend together, and he still needs the legend to distinguish
+snow from the summit zone. The October 19 decision waived hands-on
+authoring and comparative effort for this step.
+[Owner assessment](c01_human_trial.md).
+
+C01 remains partial. F6 requires an exclusive-host timing run and measured
+pass-scoped hardware texture-fetch counts. The 23 signed shader-identity
+checks still fail against the existing certificates. The
+[certificate workflow](../../.github/workflows/certificate-refresh.yml)
+runs on protected `main` after an authorized integration. Completing
+that gate requires separately authorized signing, review and promotion
+of the certificates, and a passing rerun. Independent physical
+cross-backend qualification remains absent.
+
+The sections below retain historical runtimes, revisions and acceptance
+records.
 
 # Integrated C01 validation — 2026-10-19
 

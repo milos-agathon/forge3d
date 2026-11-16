@@ -399,7 +399,7 @@ impl TerrainScene {
         &self,
         width: u32,
         height: u32,
-        label: &'static str,
+        label: &str,
     ) -> Result<AovAttachmentTarget> {
         let internal_texture = tracked_create_texture(
             self.device.as_ref(),
