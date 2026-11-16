@@ -1379,7 +1379,11 @@ measured in pixels (changed-sample counts in the commit message).
 Held for a decision, not for lack of work: the **map plate** (the engine's
 `MapPlate` calls `_check_pro_access`, so a plate export needs a licensing
 answer before it is an increment), and the **PR that runs `deb-audit`** on a
-real runner (the job is written and YAML-valid; only the merge is the user's).
+real runner — the job is written and YAML-valid, but the branch has never
+been merged to `main` (main has no `studio-tauri/` tree) and the merge
+conflicts in three engine-side files, so a pull request today would produce
+no CI evidence at all. The hunk-by-hunk resolution plan is
+[`rebase-onto-main.md`](rebase-onto-main.md).
 ---
 
 ## Appendix A — module coverage decisions
