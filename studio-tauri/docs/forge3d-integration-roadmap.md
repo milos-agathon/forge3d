@@ -1243,20 +1243,25 @@ BVH product path, no hybrid preview.
 
 ## 8. Explicitly not built (with the trigger that would change that)
 
-| Feature | Why not now | Trigger |
-|---|---|---|
-| MapScene as the default path | current path already renders; rewrite risk | vector layers land |
-| Labels / furniture / style import | big model + style spec surface | vectors shipped, users ask for text/legend |
-| Point clouds / 3D Tiles / buildings | engine marks them underdeveloped/native-required | engine exposes an offline render |
-| VT / scatter / smoke volumes | subsystems, not settings | a large-scene user asks |
-| Camera rigs / CHRONOS / ANAMNESIS | current per-frame export works; caching is an optimization | sequences get slow |
-| Path tracing / splat / inverse / globe | different product tier | explicit request |
-| Bundles / certificates / provenance | no interchange/provenance need yet | sharing/verification requested |
-| COG remote streaming | local COGs are GeoTIFFs and already import via rasterio | a URL-based DEM is requested |
-| Licensing UI | no Pro-gated feature is exposed yet | first gated feature |
-| Detached viewer / Jupyter widgets | Studio viewport is the product path | diagnostics request |
-| Datasets / presets / material library | sample projects already exist | onboarding gap measured |
-| Precision/dd harnesses | internal determinism tooling | a precision bug is reported |
+The table is a *trigger* list, not a wish list: each row names the condition
+that would justify building the thing. The **state today** column is the
+audit trail — it says which triggers have since been met (and the increment
+that answered them) and which are still unmet. Reviewed 2026-11-16.
+
+| Feature | Why not now | Trigger | State today |
+|---|---|---|---|
+| MapScene as the default path | current path already renders; rewrite risk | vector layers land | **met** — Phase 15 made MapScene the render path for every still and frame |
+| Labels / furniture / style import | big model + style spec surface | vectors shipped, users ask for text/legend | **partly met** — labels, furniture and the graticule shipped (Phase 14/16); *style* import (Mapbox/style expressions) is still open |
+| Point clouds / 3D Tiles / buildings | engine marks them underdeveloped/native-required | engine exposes an offline render | **unmet** — the engine has them natively; Studio cannot author them yet. Next big increment (§12) |
+| VT / scatter / smoke volumes | subsystems, not settings | a large-scene user asks | unmet |
+| Camera rigs / CHRONOS / ANAMNESIS | current per-frame export works; caching is an optimization | sequences get slow | unmet (the per-frame export is the Studio path) |
+| Path tracing / splat / inverse / globe | different product tier | explicit request | unmet |
+| Bundles / certificates / provenance | no interchange/provenance need yet | sharing/verification requested | unmet |
+| COG remote streaming | local COGs are GeoTIFFs and already import via rasterio | a URL-based DEM is requested | **partly met** — probe + whole-file materialization into a hash-keyed cache shipped (Phase 17.2.4); the tile-laddered progressive read is the open part (§12) |
+| Licensing UI | no Pro-gated feature is exposed yet | first gated feature | unmet — the engine's `MapPlate` is Pro-gated (`_check_pro_access`), so plate export needs a licensing decision before it is an increment |
+| Detached viewer / Jupyter widgets | Studio viewport is the product path | diagnostics request | unmet |
+| Datasets / presets / material library | sample projects already exist | onboarding gap measured | **met** — the dataset registry gallery (Phase 17.2.1/2.2) and the five renderer-preset recipes (Phase 17b) shipped; the *material* library is still open |
+| Precision/dd harnesses | internal determinism tooling | a precision bug is reported | unmet |
 
 ## 9. Schema policy (keeps the lazy path honest)
 
@@ -1276,33 +1281,61 @@ BVH product path, no hybrid preview.
 - GPU: only when the pixel is the product (e.g. HDRI sky). Look settings do not
   need golden images; their payload is the contract.
 
-## 11. Build order and effort
+## 11. Build order and effort — what shipped, what is next
 
-| Order | Increment | Days | Depends |
+The original table listed ten increments; **eight of them shipped** (Phases 5–16
+plus the AOV stills). What remains is the heavy pair and the streaming work.
+Reviewed 2026-11-16.
+
+| # | Increment | Days | State |
 |---|---|---|---|
-| 1 | 8.0 engine facts in probe | 0.5 | — |
-| 2 | 9.0 sun from date/time | 0.5 | done |
-| 3 | 5.1 sky model | 1 | 8.0 (feature list) |
-| 4 | 5.2 water | 0.5 | — |
-| 5 | 5.3 clouds | 0.5 | — |
-| 6 | 5.4 post (bloom/vignette) | 0.5 | — |
-| 7 | 5.5 shadows | 0.5 | — |
-| 8 | 10.0 AOV/denoise stills | 1 | — | done |
-| 9 | 7.1 vector layers | 3–5 | user request |
-| 10 | 7.2 meshes | 5–10 | user request |
+| 1 | 8.0 engine facts in probe (backend, adapter, granted-features snapshot) | 0.5 | **done** |
+| 2 | 9.0 sun from date/time/location | 0.5 | **done** |
+| 3 | 5.1 sky model + atmosphere | 1 | **done** |
+| 4 | 5.2 water | 0.5 | **done** |
+| 5 | 5.3 clouds | 0.5 | **done** |
+| 6 | 5.4 post (bloom/vignette) | 0.5 | **done** |
+| 7 | 5.5 shadows | 0.5 | **done** |
+| 8 | 10.0 AOV/denoise stills | 1 | **done** |
+| 9 | 7.1 vector layers | 3–5 | **done** — Phase 14/15 (lines, labels, furniture, graticule, polygons, legend) |
+| 10 | 7.2 meshes in Rendered | 5–10 | **open** — §12, the visible gap: glTF shows in Solid/Material and vanishes in Rendered |
+| 11 | COG tile-laddered streaming | 1–2 | **open** — §12; the probe and the download shipped, the progressive read did not |
+| 12 | MapScene native layers (buildings / 3D Tiles / point clouds) | big | **open** — §12; one layer kind per increment |
 
-That is ~4.5 days for everything a terrain studio needs now, with the two heavy
-items gated on real requests.
+## 12. Next increments (2026-11-16)
 
-## 12. Next three commits
+The list the user agreed to work through, in order. Each is one increment per
+commit, gates green, docs landing with the work, and every shipped control
+measured in pixels (changed-sample counts in the commit message).
 
-1. ~~`feat(studio): sun from date/time/location`~~ — **done**: `solar_position`
-   one-shot, `sun_rotation` + ephemeris/round-trip tests, light inspector group.
-2. `feat(studio): engine facts in the probe` — backend/adapter shipped; the
-   granted-features snapshot and gating controls are still open.
-3. `feat(studio): sky model and atmosphere settings` — §2 recipe for the four
-   sky fields; payload + Python validation tests.
+1. **Docs truth pass** — this table, §8's state column and §11: the plan docs
+   described shipped work as pending. **done** (2026-11-16).
+2. **rpm/appimage audit** — both bundles build but were never inspected.
+   Build them, read what is inside (desktop entry, binary path, declared
+   dependencies) and record what the audit shows, so "unaudited" becomes a
+   finding rather than a shrug.
+3. **Open-by-name for import / imagery / vector** — the dataset registry is
+   wired into New Project only; `phase-17-plan.md` §3 increment 3 (the same
+   IPC at three call sites) is still open.
+4. **Meshes in Rendered** (§7.2) — the highest-value increment because the
+   gap is user-visible today. Split into two: (a) the still composites
+   imported meshes through the engine's own instanced path, measured;
+   (b) the Rendered viewport shows them. Lazy path only
+   (`io.import_gltf` + `geometry` + `instance_mesh_gpu_render`) — no path
+   tracer, no BVH product path.
+5. **COG tile-laddered streaming** (`phase-17-plan.md` §2.4) — the probe and
+   the whole-file materialization shipped; the open work is the progressive
+   read: windowed reads at increasing resolution as the user zooms, through
+   the engine's native range reader, with the honest fallback when a COG's
+   compression cannot stream.
+6. **MapScene native layers** (§8) — the largest engine surface Studio cannot
+   reach. One layer kind per increment, each mapping onto the recipe's own
+   layer type rather than a Studio-side re-implementation.
 
+Held for a decision, not for lack of work: the **map plate** (the engine's
+`MapPlate` calls `_check_pro_access`, so a plate export needs a licensing
+answer before it is an increment), and the **PR that runs `deb-audit`** on a
+real runner (the job is written and YAML-valid; only the merge is the user's).
 ---
 
 ## Appendix A — module coverage decisions

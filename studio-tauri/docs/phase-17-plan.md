@@ -5,23 +5,20 @@
 thumbnails from their own heightfields, and one click seeds a project from
 the repo checkout or, failing that, a hash-verified download); increment
 2.4 landed partially — the remote-DEM flow (probe via the engine's native
-range-reader, whole-file materialization into a hash-keyed local cache on
-open, preview identical to the local path); increment 2.3 (renderer
-presets) and the tile-laddered streaming preview remain gated behind their
-own triggers. The registry hands out only locally-resolvable paths, so
-nothing downloads at idle; confirming a remote DEM costs one HEAD request
-to probe and one full download on open. Verified end to end against a
-local HTTP range-capable server serving a tiled DEFLATE COG with
-overviews (probe output: 1024², 16 tiles, deflate-8, 4 overview levels,
-geographic bounds typed `EPSG:4326`; the materialized file opens as a
-normal local DEM; the New Project failure path reports fetch errors
-loudly instead of opening an empty scene silently).
+range-reader, whole-file materialization into a hash-keyed cache on
+open, preview identical to the local path); **increment 2.3 (renderer
+presets) landed on 2026-11-16** — the user asked for the presets a stranger
+expects, so the trigger was met by the request rather than by an onboarding
+gap, and they shipped as five named Studio recipes (roadmap §5.33: one
+undoable `Batch` each, the command payload asserted in the node lane,
+measured pixel deltas per recipe). The tile-laddered streaming preview
+remains the open part of 2.4 (roadmap §12).
 
 **Triggers (roadmap §8, verbatim):**
 | Trigger | State today |
 |---|---|
-| Datasets/presets — "onboarding gap measured" | **Unmet** — no user, including you, has reported an onboarding gap; starter scenes exist and open offline |
-| COG streaming — "a URL-based DEM is requested" | **Unmet** — no request seen |
+| Datasets/presets — "onboarding gap measured" | **Met for datasets and presets** — the registry gallery shipped (2.1/2.2) and the five preset recipes shipped on 2026-11-16 because the request itself was the trigger. A *material library* is still unmet |
+| COG streaming — "a URL-based DEM is requested" | **Partly met** — the URL-DEM flow shipped (probe + download + cache); the progressive read did not |
 | Bundles — "sharing/verification requested" | Unmet — unrelated to this phase |
 
 **Decision this plan gates on:** do we build it *with triggers unmet* because
@@ -125,9 +122,13 @@ Reasons below.
    the offline fallback (repo checkout) so CI passes without network.
 2. New Project → "From the engine's datasets". One dialog group; no new
    project types; `import_terrain_dem` path unchanged.
-3. Import-dialogs reuse. Same IPC; three call sites.
-4. (Gate) presets exposure, behind its own trigger.
-5. (Gate) COG streaming, behind its own trigger + the resolution-ladder work.
+3. Import-dialogs reuse. Same IPC; three call sites. — **open** (the registry
+   is wired into New Project only).
+4. (Gate) presets exposure, behind its own trigger. — **landed 2026-11-16**
+   as five named recipes (roadmap §5.33); the trigger was the user's request.
+5. (Gate) COG streaming, behind its own trigger + the resolution-ladder work. —
+   **half landed**: probe + whole-file materialization shipped; the
+   resolution-ladder work is open (roadmap §12).
 
 ## 4. What this does NOT change
 

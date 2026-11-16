@@ -267,6 +267,12 @@ the desktop entry, runs `--engine-check` in both interpreter scenarios —
 the gate is the probe, not a GPU render. `rpm`/`appimage` remain built but
 unaudited, documented in the README.
 
-**Not planned:** path tracing, splats, inverse rendering, point clouds,
-volumetrics, the globe. Different product tiers, and the roadmap's §8 already
-says so.
+**Next big increment (roadmap §12):** the engine surface Studio still cannot
+reach — **meshes in Rendered** (a glTF import shows in Solid/Material and
+vanishes in Rendered), **MapScene's native layers** (buildings, 3D Tiles,
+point clouds — the engine's recipe carries them; Studio's map stack cannot
+author them), and the **COG tile-laddered read** (the probe and the download
+shipped; the progressive windowed read did not).
+
+**Not planned:** path tracing, splats, inverse rendering, volumetrics, the
+globe. Different product tiers, and the roadmap's §8 already says so.
