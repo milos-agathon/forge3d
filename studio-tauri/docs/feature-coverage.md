@@ -287,6 +287,11 @@ bytes, 17 range requests, no full-body GET**, and the preview matches the
 local read of the same DEM. The ladder's further rungs (a heightfield that
 refines with the camera, a still that streams) remain open.
 
+**The active implementation plan is
+[`docs/phase-18-onward-plan.md`](phase-18-onward-plan.md)** — phases 18–22:
+finish the COG ladder, glTF models in Rendered, MapScene native layers,
+publication convergence with upstream 1.48/1.49, and viewer/terrain parity.
+
 **The three native-layer increments are measured, not assumed**
 (`docs/native-layers-findings.md`, 2026-11-16): the mesh renderer works but
 hard-codes its camera, the buildings layer is city-scale (0 changed samples

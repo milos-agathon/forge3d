@@ -101,6 +101,13 @@ branch's entries on top of it, and re-run the ledger gate
    desktop entry and runs `--engine-check` in both interpreter scenarios —
    the engine-discovery evidence that only a runner can produce.
 
+**Fork state (2026-11-16):** the fork's `main` had diverged — 20 unique Studio
+milestone commits (M5–M10) and 59 upstream commits — so a fast-forward would
+have destroyed work. Instead the fork gained a clean `upstream-main` mirror at
+upstream's `f80dba3d`; PR #310's branch already contains those commits via the
+rebase. Merging upstream into the fork's `main` needs an explicit decision
+(preserve both sides with a merge commit, rather than force-push).
+
 **Outcome (2026-11-16):** the rebase landed on `studio/rebase-main`, PR #310
 was opened, and every check passed. The hosted `deb audit` job's own log shows
 `dpkg -i` unpacking and configuring the package, the postinst printing the

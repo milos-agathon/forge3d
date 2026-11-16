@@ -1315,6 +1315,13 @@ Reviewed 2026-11-16.
 
 ## 12. Next increments (2026-11-16)
 
+**The working plan has moved to [`phase-18-onward-plan.md`](phase-18-onward-plan.md)**
+— five phases (COG ladder, meshes in Rendered, MapScene native layers,
+publication convergence, viewer parity), each with its increments, engine
+surface, measurements and gates. The list below is the historical snapshot of
+the session that produced the rebase and PR #310; keep it for provenance, not
+as the active checklist.
+
 The list the user agreed to work through, in order. Each is one increment per
 commit, gates green, docs landing with the work, and every shipped control
 measured in pixels (changed-sample counts in the commit message).
