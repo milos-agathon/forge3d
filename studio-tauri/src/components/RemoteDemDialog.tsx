@@ -1,8 +1,9 @@
 import { useState } from "react";
 
 import { bridge } from "../bridge/env";
-import type { RemoteCogInfo } from "../bridge/types";
+import type { RemoteCogInfo, RemoteCogPreview } from "../bridge/types";
 import { useSession } from "../state/session-context";
+import { thumbPixels } from "../viewport/datasetThumb";
 import { CloseIcon } from "./icons";
 
 const COMPRESSION_NAMES: Record<number, string> = {
@@ -28,12 +29,14 @@ export function RemoteDemDialog() {
   const [url, setUrl] = useState("");
   const [probing, setProbing] = useState(false);
   const [info, setInfo] = useState<RemoteCogInfo | null>(null);
+  const [preview, setPreview] = useState<RemoteCogPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const close = () => {
     setOpen(false);
     setError(null);
     setInfo(null);
+    setPreview(null);
     setProbing(false);
   };
 
@@ -43,8 +46,17 @@ export function RemoteDemDialog() {
     setProbing(true);
     setError(null);
     setInfo(null);
+    setPreview(null);
     try {
       setInfo(await bridge.remoteCogInfo(target));
+      // The ladder's first rung: the overview, read through the engine's
+      // range reader — the terrain shows up before the file is downloaded.
+      // A preview that fails is not a probe failure: the summary still stands.
+      try {
+        setPreview(await bridge.remoteCogPreview(target, 96));
+      } catch {
+        setPreview(null);
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -150,6 +162,31 @@ export function RemoteDemDialog() {
               </div>
             )}
           </div>
+        )}
+
+        {preview && (
+          <figure className="cog-preview">
+            <canvas
+              width={preview.resolution}
+              height={preview.resolution}
+              ref={(node) => {
+                if (!node) return;
+                const ctx = node.getContext("2d");
+                if (!ctx) return;
+                const pixels = thumbPixels(preview);
+                ctx.putImageData(
+                  new ImageData(pixels, preview.resolution, preview.resolution),
+                  0,
+                  0,
+                );
+              }}
+            />
+            <figcaption className="hint">
+              Preview from overview level {preview.level} (
+              {preview.levelWidth} × {preview.levelHeight} px) — read through the
+              engine&rsquo;s range reader; the full file downloads on open.
+            </figcaption>
+          </figure>
         )}
 
         {error && <p className="hint hint--error">Probe failed: {error}</p>}

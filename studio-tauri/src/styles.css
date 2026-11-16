@@ -2089,6 +2089,27 @@ kbd {
   background: var(--code-background);
 }
 
+/* The remote DEM's overview preview, drawn with the studio's elevation ramp. */
+.cog-preview {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.cog-preview canvas {
+  width: 240px;
+  height: 240px;
+  image-rendering: pixelated;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--code-background);
+}
+
+.cog-preview figcaption {
+  max-width: 420px;
+}
+
 .probe-summary {
   display: grid;
   gap: 6px;

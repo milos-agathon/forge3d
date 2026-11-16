@@ -835,6 +835,18 @@ pub fn remote_cog_info(
     crate::forge3d::remote_cog_info(&python, &url)
 }
 
+/// A remote DEM's preview, read through the engine's range reader: the
+/// ladder's first rung. The dialog shows the terrain before the file lands.
+#[tauri::command(async)]
+pub fn remote_cog_preview(
+    forge: State<'_, Forge3dState>,
+    url: String,
+    resolution: Option<u32>,
+) -> Result<serde_json::Value, String> {
+    let python = forge.probe(false).python;
+    crate::forge3d::remote_cog_preview(&python, &url, resolution.unwrap_or(96))
+}
+
 /// The engine's dataset registry (bundled + downloadable samples).
 /// The gallery section needs only metadata; fetches happen on demand.
 #[tauri::command(async)]

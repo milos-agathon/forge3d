@@ -22,6 +22,7 @@ import type {
   GraticuleGeometry,
   PolygonGeometry,
   RemoteCogInfo,
+  RemoteCogPreview,
   VectorGeometry,
 } from "./types";
 
@@ -100,6 +101,8 @@ export const tauriBridge: StudioBridge = {
 
   checkAssets: () => invoke<AssetIntegrity[]>("check_assets"),
 
+  remoteCogPreview: (url: string, resolution?: number) =>
+    invoke<RemoteCogPreview>("remote_cog_preview", { url, resolution }),
   datasetList: () => invoke<DatasetInfo[]>("dataset_list"),
   datasetPath: (name: string) => invoke<string>("dataset_path", { name }),
   remoteCogInfo: (url) => invoke<RemoteCogInfo>("remote_cog_info", { url }),

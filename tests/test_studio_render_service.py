@@ -1536,3 +1536,126 @@ def test_the_vector_attribute_legend_reaches_the_plate(tmp_path):
         assert int((distance < 40).sum()) >= 30, (
             "%s swatch missing from the plate legend" % name
         )
+
+
+# ----------------------------------------------------------------------
+# The shell's remote-DEM preview: the ladder's first rung.
+#
+# The script lives in the Rust shell (it is what the shell runs), so the
+# test reads it from the source and runs it the same way: the script IS the
+# contract. The claim under test: the remote DEM's preview comes from the
+# engine's range reader at a coarse overview, costs a fraction of the file,
+# and shows the same terrain the local file would.
+
+
+def _remote_preview_script() -> str:
+    """The shell's remote-preview script, extracted from the Rust source."""
+    import re
+
+    source = (REPO / "studio-tauri" / "src-tauri" / "src" / "forge3d.rs").read_text(
+        encoding="utf-8"
+    )
+    match = re.search(
+        r'const REMOTE_COG_PREVIEW_SCRIPT: &str = r#"(.*?)"#;', source, re.S
+    )
+    assert match is not None, "the shell has no remote-preview script"
+    return match.group(1)
+
+
+def _write_cog_with_overviews(path: Path, size: int = 1024) -> bytes:
+    """A real Cloud Optimized GeoTIFF with a 2/4 pyramid (GDAL's COG driver)."""
+    import rasterio
+    from rasterio.transform import from_origin
+
+    data = (np.arange(size * size, dtype=np.uint16).reshape(size, size) % 9000).astype(
+        "uint16"
+    )
+    with rasterio.open(
+        path,
+        "w",
+        driver="COG",
+        height=size,
+        width=size,
+        count=1,
+        dtype="uint16",
+        blocksize=256,
+        compress="DEFLATE",
+        overview_resampling="average",
+        num_threads="ALL_CPUS",
+        crs="EPSG:4326",
+        transform=from_origin(138.6, 35.5, 0.0002, 0.0002),
+    ) as dst:
+        dst.write(data, 1)
+    return path.read_bytes()
+
+
+def _run_remote_preview(url: str, resolution: int) -> dict:
+    import json
+    import subprocess
+    import sys
+
+    script = _remote_preview_script()
+    result = subprocess.run(
+        [sys.executable, "-c", script, url, str(resolution)],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "PYTHONPATH": str(REPO / "python"),
+            "HOME": str(Path.home()),
+        },
+    )
+    assert result.stdout.strip(), f"the preview produced no output: {result.stderr}"
+    payload = json.loads(
+        next(line for line in result.stdout.splitlines() if line.strip().startswith("{"))
+    )
+    assert payload.get("ok") is True, payload
+    return payload
+
+
+def test_the_remote_dem_preview_reads_the_overview_through_the_range_reader(tmp_path):
+    """The remote preview is the ladder's first rung: a coarse overview read
+    through the engine's range reader, costing a fraction of the file — and
+    showing the same terrain the local file would."""
+    import sys
+
+    sys.path.insert(0, str(REPO / "tests"))
+    from _cog_http_fixtures import _clear_cog_cache, _serve_range
+
+    cog_path = tmp_path / "demo.cog.tif"
+    body = _write_cog_with_overviews(cog_path)
+    total = len(body)
+
+    _clear_cog_cache()
+    server, url, served = _serve_range(body)
+    try:
+        preview = _run_remote_preview(url, 64)
+    finally:
+        server.shutdown()
+
+    # The overview was read, not the full resolution: the script picked a
+    # level coarser than the source.
+    assert preview["level"] > 0, preview
+    assert preview["levelWidth"] < 1024, preview
+    assert len(preview["heights"]) == 64 * 64
+
+    # The bytes that arrived are a fraction of the file — the ladder's first
+    # rung is cheap. (A whole-file download would show a full-body GET.)
+    assert served["full_requests"] == 0, f"the preview fell back to a full download: {served}"
+    assert served["range_requests"] > 0, served
+    assert served["bytes"] < total // 2, (
+        f"the overview preview transferred {served['bytes']} of {total} bytes"
+    )
+
+    # The same terrain the local file would show: the remote preview's
+    # heights match a local read of the same DEM, within the averaging the
+    # overview does.
+    local = _run_remote_preview(f"file://{cog_path}", 64)
+    remote_heights = np.asarray(preview["heights"], dtype=np.float64)
+    local_heights = np.asarray(local["heights"], dtype=np.float64)
+    span = max(1e-6, float(preview["maxElevation"]) - float(preview["minElevation"]))
+    drift = np.abs(remote_heights - local_heights)
+    assert float(drift.max()) <= 0.05 * span, (
+        f"the remote preview drifted from the local one by {float(drift.max())} of {span}"
+    )

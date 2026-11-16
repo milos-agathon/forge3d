@@ -29,6 +29,7 @@ import type {
   GraticuleGeometry,
   PolygonGeometry,
   RemoteCogInfo,
+  RemoteCogPreview,
   VectorGeometry,
 } from "./types";
 
@@ -112,6 +113,8 @@ export interface StudioBridge {
   importTerrainDem(path: string): Promise<SessionState>;
   /** Probe a remote DEM with the engine's native COG reader before any download. */
   remoteCogInfo(url: string): Promise<RemoteCogInfo>;
+  /** A remote DEM's preview, read through the engine's range reader. */
+  remoteCogPreview(url: string, resolution?: number): Promise<RemoteCogPreview>;
   /** The engine's dataset registry (bundled + downloadable samples). */
   datasetList(): Promise<DatasetInfo[]>;
   /** Resolve a registry dataset to a local path (the engine fetches it,

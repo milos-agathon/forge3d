@@ -1353,13 +1353,18 @@ measured in pixels (changed-sample counts in the commit message).
    Split once the engine exposes a camera: (a) the still composites imported
    meshes through the engine's own instanced path, measured; (b) the Rendered
    viewport shows them.
-5. **COG tile-laddered streaming** (`phase-17-plan.md` §2.4) — **studio-side
-   only; measured 2026-11-16** ([`native-layers-findings.md`](native-layers-findings.md)).
-   The engine's reader is already tile-based (`read_tile(x, y, lod)`), so
-   nothing is missing engine-side; the work is Studio's asset model (a remote
-   DEM asset kind), a tile cache, and a preview heightfield that refines with
-   the camera — the probe and the whole-file materialization shipped, the
-   progressive read did not.
+5. **COG tile-laddered streaming** (`phase-17-plan.md` §2.4) — **the first
+   rung landed 2026-11-16; the rest is studio-side**
+   ([`native-layers-findings.md`](native-layers-findings.md)). The remote
+   DEM's *preview* now comes from the engine's range reader: the shell reads
+   the coarsest overview that still carries the requested resolution
+   (`read_tile` over that level) and the dialog shows the terrain **before
+   anything is downloaded**. Measured against a real COG (1024², 3 levels)
+   over a range-serving HTTP server: **34,256 bytes — 6.0 % of the file —
+   in 17 range requests, no full-body GET**, and the preview matches the
+   local read of the same DEM. What remains: the viewport's heightfield
+   must refine with the camera (a remote DEM asset kind + a tile cache), and
+   the still's read should stream instead of materializing the file.
 6. **MapScene native layers** (§8) — **engine-facing; measured 2026-11-16**
    ([`native-layers-findings.md`](native-layers-findings.md)). The engine's
    recipe owns buildings, point clouds and 3D Tiles, and the buildings route

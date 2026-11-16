@@ -1356,6 +1356,113 @@ except Exception as exc:
     print(json.dumps({"ok": False, "detail": str(exc)}))
 "#;
 
+/// A remote DEM's preview, read through the engine's own range reader.
+///
+/// The ladder's first rung: the coarsest overview level that still carries
+/// the requested resolution, assembled from the engine's tiles — no whole
+/// file is downloaded, and the bytes that arrive are the overview's. The
+/// payload matches the local `terrainPreview` shape, so the studio's own
+/// elevation ramp draws both.
+const REMOTE_COG_PREVIEW_SCRIPT: &str = r#"
+import json, sys
+url = sys.argv[1]
+resolution = max(8, min(256, int(sys.argv[2])))
+try:
+    import numpy as np
+    import forge3d.cog as cog
+except Exception as exc:
+    print(json.dumps({"ok": False, "detail": "the engine is unavailable: %s" % (exc,)}))
+    raise SystemExit(0)
+try:
+    ds = cog.open_cog(url)
+    # `overview_count` counts the levels, full resolution included: the
+    # engine's own probe reads `ifd_info(level)` for level in that range.
+    levels = max(1, int(ds.overview_count))
+    # The coarsest level that still has `resolution` pixels on both sides
+    # (the levels run fine to coarse, so the last acceptable one wins); if
+    # none does, the coarsest available.
+    level = levels - 1
+    for candidate in range(levels):
+        info = ds.ifd_info(candidate)
+        if info.width >= resolution and info.height >= resolution:
+            level = candidate
+    info = ds.ifd_info(level)
+    height, width = int(info.height), int(info.width)
+    grid = np.zeros((height, width), dtype="float64")
+    for ty in range(int(info.tiles_down)):
+        for tx in range(int(info.tiles_across)):
+            tile = np.asarray(ds.read_tile(tx, ty, level), dtype="float64")
+            if tile.ndim != 2 or tile.size == 0:
+                continue
+            th, tw = tile.shape[:2]
+            y0 = ty * int(info.tile_height)
+            x0 = tx * int(info.tile_width)
+            y1 = min(height, y0 + th)
+            x1 = min(width, x0 + tw)
+            if y1 <= y0 or x1 <= x0:
+                continue
+            grid[y0:y1, x0:x1] = tile[: y1 - y0, : x1 - x0]
+    valid = np.isfinite(grid)
+    if not valid.any():
+        print(json.dumps({"ok": False, "detail": "the remote DEM has no valid samples"}))
+        raise SystemExit(0)
+    values = grid[valid]
+    low, high = np.percentile(values, [0.01, 99.99])
+    ys = np.linspace(0, height, resolution + 1).astype(int)
+    xs = np.linspace(0, width, resolution + 1).astype(int)
+    out = np.empty((resolution, resolution), dtype="float64")
+    for j in range(resolution):
+        for i in range(resolution):
+            block = grid[ys[j]:max(ys[j] + 1, ys[j + 1]), xs[i]:max(xs[i] + 1, xs[i + 1])]
+            good = block[np.isfinite(block)]
+            out[j, i] = float(np.clip(good.mean(), low, high)) if good.size else float(low)
+    print(json.dumps({
+        "ok": True,
+        "width": width,
+        "height": height,
+        "resolution": resolution,
+        "minElevation": float(low),
+        "maxElevation": float(high),
+        "heights": [round(float(value), 2) for value in out.ravel()],
+        "level": int(level),
+        "levelWidth": width,
+        "levelHeight": height,
+        "overviewCount": int(ds.overview_count),
+        "bounds": list(ds.bounds) if ds.bounds else None,
+    }))
+except Exception as exc:
+    print(json.dumps({"ok": False, "detail": str(exc)}))
+"#;
+
+/// The remote DEM's preview, read through the engine's range reader.
+pub fn remote_cog_preview(
+    python: &str,
+    url: &str,
+    resolution: u32,
+) -> Result<serde_json::Value, String> {
+    validate_remote_url(url)?;
+    let (stdout, stderr) = run_script(
+        python,
+        REMOTE_COG_PREVIEW_SCRIPT,
+        &[url.to_owned(), resolution.to_string()],
+        SCRIPT_TIMEOUT,
+    )?;
+    let line = stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with('{'))
+        .ok_or_else(|| format!("the remote preview produced no output: {}", stderr.trim()))?;
+    let value: serde_json::Value = serde_json::from_str(line.trim())
+        .map_err(|error| format!("the remote preview returned invalid JSON: {error}"))?;
+    if value.get("ok").and_then(|ok| ok.as_bool()) != Some(true) {
+        return Err(value
+            .get("detail")
+            .and_then(|detail| detail.as_str())
+            .unwrap_or("the remote preview failed")
+            .to_owned());
+    }
+    Ok(value)
+}
+
 /// Download a remote DEM to the studio cache. `url` must be http(s) or
 /// `file://`; the engine already validated it via `remote_cog_info`.
 const URL_FETCH_SCRIPT: &str = r#"

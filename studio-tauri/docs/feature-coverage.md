@@ -280,6 +280,13 @@ belongs. The registry resolves to the same file the file picker would give
 moves the frame against the starter scene (157,949 changed samples for
 Fuji, 261,340 for the Swiss).
 
+**The remote DEM previews before it downloads (2026-11-16).** The "Remote DEM
+(COG)…" dialog now reads the file's coarsest overview through the engine's
+range reader and shows the terrain before the download: **6.0 % of the file's
+bytes, 17 range requests, no full-body GET**, and the preview matches the
+local read of the same DEM. The ladder's further rungs (a heightfield that
+refines with the camera, a still that streams) remain open.
+
 **The three native-layer increments are measured, not assumed**
 (`docs/native-layers-findings.md`, 2026-11-16): the mesh renderer works but
 hard-codes its camera, the buildings layer is city-scale (0 changed samples

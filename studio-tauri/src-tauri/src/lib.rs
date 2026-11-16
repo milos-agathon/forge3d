@@ -89,6 +89,7 @@ pub fn run() {
             commands::graticule_geometry,
             commands::colormap_stops,
             commands::dataset_list,
+            commands::remote_cog_preview,
             commands::dataset_path,
             commands::remote_cog_info,
             commands::import_terrain_dem,

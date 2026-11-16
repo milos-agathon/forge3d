@@ -548,6 +548,28 @@ export interface GraticuleGeometry {
 }
 
 /** A DEM sampled for the Studio viewport (heights are row-major, bottom-up). */
+/**
+ * A remote DEM's preview, read through the engine's range reader: the
+ * ladder's first rung (the coarsest overview that still carries the
+ * requested resolution). The same shape as a local `TerrainPreview`, so the
+ * studio's own elevation ramp draws both.
+ */
+export interface RemoteCogPreview {
+  ok: boolean;
+  width: number;
+  height: number;
+  resolution: number;
+  minElevation: number;
+  maxElevation: number;
+  heights: number[];
+  /** The overview level the preview was read from (0 = full resolution). */
+  level: number;
+  levelWidth: number;
+  levelHeight: number;
+  overviewCount: number;
+  bounds: [number, number, number, number] | null;
+}
+
 export interface TerrainPreview {
   ok: boolean;
   width: number;
