@@ -82,7 +82,7 @@ verification on a fresh stranger machine remains unverified by design.
   not know the scratch path). Clean single-pass run: unpack → configure →
   the real postinst printed the remedy and exited 0. The installed bundle
   then passed `--engine-check` from a repo-less cwd against a fresh
-  `uv` venv with PyPI forge3d 1.48.0 (exit 0), the desktop entry validated,
+  `uv` venv with PyPI forge3d 1.49.0 (exit 0), the desktop entry validated,
   and `dpkg -l` recorded `ii`. CI's `deb-audit` job runs the same flow on
   ubuntu-latest with the system package manager.
 - A bare `PATH python3`/`PATH python` probe is honest about half-installed interpreters:

@@ -1171,7 +1171,7 @@ each probe overriding none of the others. `--engine-check` prints every
 candidate tried, one line each with its result, the verdict, and exits 0/1
 — stranger- and CI-verifiable, starts no GUI. Verified on this machine in
 four scenarios: env var set (exit 0), repo-cwd `.venv` fallback (exit 0),
-a fresh `uv` venv with `pip install forge3d` (1.48.0 → exit 0), a bare
+a fresh `uv` venv with `pip install forge3d` (1.49.0 → exit 0), a bare
 `PATH python3`/`PATH python` without forge3d (exit 1 with the remedy printed). The
 desktop entry validates with `desktop-file-validate`; the deb's
 `Depends` are `libgbm1, mesa-vulkan-drivers` merged with the bundler's
@@ -1184,7 +1184,7 @@ render**; the hosted runner has no terrain-safe GPU. On this machine a
 real `dpkg -i` was executed inside a user-namespace stranger root (Debian
 `dpkg_1.23.12`; declared Depends seeded in `var/lib/dpkg/status`; the
 maintainer script ran for real; `ii` recorded; the installed bundle probed
-the fresh `uv` venv's forge3d 1.48.0 from a repo-less cwd, exit 0). `rpm`/`appimage`
+the fresh `uv` venv's forge3d 1.49.0 from a repo-less cwd, exit 0). `rpm`/`appimage`
 remain built but unaudited, documented as such in the README. When the
 shell runs inside a repo checkout, the probe imports the checkout's
 `python/forge3d` with the caller's `PYTHONPATH` kept as the tail
@@ -1310,10 +1310,18 @@ measured in pixels (changed-sample counts in the commit message).
 
 1. **Docs truth pass** — this table, §8's state column and §11: the plan docs
    described shipped work as pending. **done** (2026-11-16).
-2. **rpm/appimage audit** — both bundles build but were never inspected.
-   Build them, read what is inside (desktop entry, binary path, declared
-   dependencies) and record what the audit shows, so "unaudited" becomes a
-   finding rather than a shrug.
+2. **rpm/appimage audit** — **done** (2026-11-16). Built and inspected all
+   three bundles. Findings: the `rpm` declared *fewer* runtime dependencies
+   than the `deb` (the bundler auto-detects only gtk/webkit, so
+   `libgbm1`/`mesa-vulkan-drivers` were missing) and carried **no**
+   maintainer script — it now declares the same four dependencies and runs
+   the same postinst, so a Fedora stranger gets the same remedy message. The
+   `appimage` bundles its own GTK/WebKit stack (113 MB) and, having no
+   install step, cannot print the remedy — that lives in the README and in
+   `--engine-check`. All three carry the same binary
+   (`/usr/bin/forge3d-studio-shell`) and a `desktop-file-validate`-clean
+   entry. The README now states what each bundle declares instead of
+   shrugging at "unaudited".
 3. **Open-by-name for import / imagery / vector** — the dataset registry is
    wired into New Project only; `phase-17-plan.md` §3 increment 3 (the same
    IPC at three call sites) is still open.

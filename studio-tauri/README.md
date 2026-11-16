@@ -179,16 +179,25 @@ The CI `bundle` job on `main` ships a `deb` artifact. Locally:
 ```bash
 npm run tauri:build -- --bundles deb
 sudo dpkg -i "src-tauri/target/release/bundle/deb/Forge3D Studio_0.1.0_amd64.deb"
-python3 -m pip install --user forge3d   # the engine — PyPI, 1.48.0 (verified)
+python3 -m pip install --user forge3d   # the engine — PyPI (1.49.0 verified 2026-11-16)
 ```
 
-Only the `deb` is built in CI and audited (`deb-audit` job: builds the deb,
-installs it with `dpkg -i`, validates the desktop entry, then runs
-`--engine-check` in both interpreter scenarios — the gate is the probe, not a
-GPU render, because the runner has no terrain-safe GPU). The `rpm` and
-`appimage` targets remain unverified: build them with
-`npm run tauri:build -- --bundles rpm` / `--bundles appimage` and treat them
-as unvetted until they get the same audit.
+The `deb` is the bundle CI audits (`deb-audit` job: builds the deb, installs
+it with `dpkg -i`, validates the desktop entry, then runs `--engine-check` in
+both interpreter scenarios — the gate is the probe, not a GPU render, because
+the runner has no terrain-safe GPU).
+
+**What the three bundles declare (audited 2026-11-16 on this machine):**
+
+| Bundle | Declares | Tells the stranger at install | Notes |
+|---|---|---|---|
+| `deb` (4.8 MB) | `libgbm1`, `mesa-vulkan-drivers` + the bundler's `libwebkit2gtk-4.1-0`, `libgtk-3-0` | yes — the postinst prints the remedy | `dpkg -i` executed in a user-namespace stranger root: unpack → configure → remedy → exit 0 |
+| `rpm` (4.8 MB) | the same four | yes — the same postinst as a scriptlet | the bundler only auto-detects gtk/webkit, so the rpm declared *fewer* deps than the deb until this audit fixed it |
+| `appimage` (113 MB) | bundles its own GTK/WebKit stack | no — an AppImage has no install step | the remedy lives in this file and in `--engine-check` |
+
+Build the other two with `npm run tauri:build -- --bundles rpm,appimage`.
+All three ship the same desktop entry (`desktop-file-validate` clean) and
+the same binary at `/usr/bin/forge3d-studio-shell`.
 
 The package deliberately *never* requires the engine at install time; the
 postinst only names the remedy. Verify what the shell will see:
@@ -198,11 +207,11 @@ Real output, run from a repo checkout with `FORGE3D_STUDIO_PYTHON` set:
 ```bash
 forge3d-studio-shell --engine-check
 # candidate               interpreter  result
-# FORGE3D_STUDIO_PYTHON   /path/to/venv/bin/python  ok (forge3d 1.48.0)
+# FORGE3D_STUDIO_PYTHON   /path/to/venv/bin/python  ok (forge3d 1.49.0)
 # repo .venv              /path/to/repo/.venv/bin/python  ok (forge3d 1.47.1)
 # PATH python3            python3  fail: import forge3d failed: No module named 'forge3d'
 # PATH python             python  fail: could not run python: No such file or directory (os error 2)
-# engine: found via FORGE3D_STUDIO_PYTHON (forge3d 1.48.0)
+# engine: found via FORGE3D_STUDIO_PYTHON (forge3d 1.49.0)
 ```
 
 The `repo .venv` line appears only when the shell is launched with a repo

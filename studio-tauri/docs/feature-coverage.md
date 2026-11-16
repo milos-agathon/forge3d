@@ -254,18 +254,21 @@ interpreter candidate by importing forge3d, in a fixed order:
 `forge3d-studio-shell --engine-check` prints every candidate tried, one
 line each, the verdict, and exits 0/1 — it starts no GUI and it is what the
 stranger and CI read. Verified in four scenarios (env var, repo-cwd
-`.venv`, fresh `uv` venv with PyPI forge3d 1.48.0, bare `PATH python3`/`PATH python` —
+`.venv`, fresh `uv` venv with PyPI forge3d 1.49.0, bare `PATH python3`/`PATH python` —
 exit 1 with the remedy printed) **and with a real `dpkg -i` executed in a
 user-namespace stranger root** (Debian `dpkg_1.23.12`, declared Depends
 seeded, the maintainer script ran for real; `ii` recorded; the installed
-bundle's probe found the fresh venv's forge3d 1.48.0 from a repo-less cwd,
+bundle's probe found the fresh venv's forge3d 1.49.0 from a repo-less cwd,
 exit 0). Desktop entry validates with
 `desktop-file-validate`; the deb's declared `Depends` are libgbm1 and
 mesa-vulkan-drivers (merged with the bundler's webkit/gtk defaults). CI
 gains a `deb-audit` job (PR + main): builds the deb, `dpkg -i`, validates
 the desktop entry, runs `--engine-check` in both interpreter scenarios —
-the gate is the probe, not a GPU render. `rpm`/`appimage` remain built but
-unaudited, documented in the README.
+the gate is the probe, not a GPU render. `rpm`/`appimage` were audited on
+2026-11-16: the rpm now declares the same dependencies as the deb and runs
+the same postinst (it declared fewer and had no scriptlet until the audit),
+the appimage has no install step to speak in, and the README states what
+each bundle declares.
 
 **Next big increment (roadmap §12):** the engine surface Studio still cannot
 reach — **meshes in Rendered** (a glTF import shows in Solid/Material and

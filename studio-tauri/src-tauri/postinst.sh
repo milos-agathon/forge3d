@@ -1,6 +1,6 @@
 #!/bin/sh
-# The deb never requires the engine; it only names the remedy. The shell
-# probes `FORGE3D_STUDIO_PYTHON`, ancestors' .venv, then system python3.
+# The packages never require the engine; they only name the remedy. The shell
+# probes `FORGE3D_STUDIO_PYTHON`, ancestors' .venv, then PATH python3/python.
 # A first-run machine needs python3 + the engine (PyPI: forge3d).
 printf '%s\n' "Forge3D Studio installed. It needs the forge3d Python package at runtime:"
 printf '%s\n' "  pip install --user forge3d"

@@ -49,6 +49,13 @@
           "libgbm1",
           "mesa-vulkan-drivers"
         ]
+      },
+      "rpm": {
+        "postInstallScript": "./postinst.sh",
+        "depends": [
+          "libgbm1",
+          "mesa-vulkan-drivers"
+        ]
       }
     }
   }
