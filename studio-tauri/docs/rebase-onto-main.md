@@ -101,6 +101,16 @@ branch's entries on top of it, and re-run the ledger gate
    desktop entry and runs `--engine-check` in both interpreter scenarios —
    the engine-discovery evidence that only a runner can produce.
 
+**A later CARTOGRAPHER-PRIME run (2026-11-17, head `d7bf4852`) lost its
+`macos-arm64` leg**: the job was cancelled after 15 minutes with no log and no
+runner name, so the aggregate `Verify three hosted runner configurations` gate
+failed with `missing runner configs: macos-arm64`. The same workflow passed all
+three legs on the previous head (`1cc86f19`), and `d7bf4852` changes only
+documentation — so this is a hosted-runner cancellation, not a code failure.
+The Studio jobs (`fmt · lint · types · node tests · Rust suites` and
+`deb audit`) passed on both heads. No admin rights to re-run the job from this
+session; a fresh run was triggered by this note.
+
 **Fork state (2026-11-16):** the fork's `main` had diverged — 20 unique Studio
 milestone commits (M5–M10) and 59 upstream commits — so a fast-forward would
 have destroyed work. Instead the fork gained a clean `upstream-main` mirror at
