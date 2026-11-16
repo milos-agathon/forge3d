@@ -280,6 +280,12 @@ belongs. The registry resolves to the same file the file picker would give
 moves the frame against the starter scene (157,949 changed samples for
 Fuji, 261,340 for the Swiss).
 
+**The three native-layer increments are measured, not assumed**
+(`docs/native-layers-findings.md`, 2026-11-16): the mesh renderer works but
+hard-codes its camera, the buildings layer is city-scale (0 changed samples
+over a 24 km DEM), and the COG ladder needs no engine change at all — only
+Studio's asset model.
+
 **Next big increment (roadmap §12):** the engine surface Studio still cannot
 reach — **meshes in Rendered** (a glTF import shows in Solid/Material and
 vanishes in Rendered), **MapScene's native layers** (buildings, 3D Tiles,

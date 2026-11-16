@@ -1234,6 +1234,17 @@ VectorLayer { id, name, asset, visible, style: { color, widthPx, opacity } }
 **Lazy path only:** `io.import_gltf` + `geometry` + `instance_mesh_gpu_render`,
 composited over the terrain frame with the same camera. No path tracer, no
 BVH product path, no hybrid preview.
+
+**Measured 2026-11-16 — the plan's premise needs an engine change first.**
+`instance_mesh_gpu_render` has no camera parameter and its Rust entry point
+hard-codes the eye at (3, 2, 3) looking at the origin
+(`src/render/instancing.rs:204`), so a mesh cannot share the terrain's
+orbit camera; the renderer supports `set_view_proj`, the Python entry point
+just never exposes it. The engine's in-recipe alternative for a glTF is a
+*texture* composite in a screen rectangle (a landmark card), which needs the
+model's albedo as a separate PNG while the importer exposes only texture
+slots. Details, arithmetic and the two other native-layer findings:
+[`native-layers-findings.md`](native-layers-findings.md).
 - Reuse the existing glTF asset and node selection.
 - Service command `render_meshes` or an extra pass inside `render_map`.
 - UI: none beyond what exists (objects already exist; Rendered just starts
@@ -1334,20 +1345,31 @@ measured in pixels (changed-sample counts in the commit message).
    the import itself moves the frame against the starter scene (**157,949**
    changed samples for Fuji, **261,340** for the Swiss). Two registry DEMs
    differ from each other (230,445), so the picker really picks terrain.
-4. **Meshes in Rendered** (§7.2) — the highest-value increment because the
-   gap is user-visible today. Split into two: (a) the still composites
-   imported meshes through the engine's own instanced path, measured;
-   (b) the Rendered viewport shows them. Lazy path only
-   (`io.import_gltf` + `geometry` + `instance_mesh_gpu_render`) — no path
-   tracer, no BVH product path.
-5. **COG tile-laddered streaming** (`phase-17-plan.md` §2.4) — the probe and
-   the whole-file materialization shipped; the open work is the progressive
-   read: windowed reads at increasing resolution as the user zooms, through
-   the engine's native range reader, with the honest fallback when a COG's
-   compression cannot stream.
-6. **MapScene native layers** (§8) — the largest engine surface Studio cannot
-   reach. One layer kind per increment, each mapping onto the recipe's own
-   layer type rather than a Studio-side re-implementation.
+4. **Meshes in Rendered** (§7.2) — **engine-facing; measured 2026-11-16**
+   ([`native-layers-findings.md`](native-layers-findings.md)). The mesh
+   renderer works, but its camera is hard-coded at (3, 2, 3) looking at the
+   origin, so it cannot be composited with the terrain's camera; the engine's
+   in-recipe route for a glTF is a texture card, not a model in the scene.
+   Split once the engine exposes a camera: (a) the still composites imported
+   meshes through the engine's own instanced path, measured; (b) the Rendered
+   viewport shows them.
+5. **COG tile-laddered streaming** (`phase-17-plan.md` §2.4) — **studio-side
+   only; measured 2026-11-16** ([`native-layers-findings.md`](native-layers-findings.md)).
+   The engine's reader is already tile-based (`read_tile(x, y, lod)`), so
+   nothing is missing engine-side; the work is Studio's asset model (a remote
+   DEM asset kind), a tile cache, and a preview heightfield that refines with
+   the camera — the probe and the whole-file materialization shipped, the
+   progressive read did not.
+6. **MapScene native layers** (§8) — **engine-facing; measured 2026-11-16**
+   ([`native-layers-findings.md`](native-layers-findings.md)). The engine's
+   recipe owns buildings, point clouds and 3D Tiles, and the buildings route
+   works at city scale (the engine's own suite is green here) — but over a
+   country-scale DEM it changes **0 of 262,144 samples**, because the
+   building height is a fraction of a ~45 m terrain extent. Point clouds need
+   a DEM in the cloud's CRS (the repository's only COPC has none). One layer
+   kind per increment, each mapping onto the recipe's own layer type rather
+   than a Studio-side re-implementation — but only after the engine's
+   anchoring is real-world.
 
 Held for a decision, not for lack of work: the **map plate** (the engine's
 `MapPlate` calls `_check_pro_access`, so a plate export needs a licensing
