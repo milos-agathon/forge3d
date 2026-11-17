@@ -21,6 +21,7 @@ from .atmosphere import AtmosphereSettings, SUN_ELEVATION_SWEEP_DEG
 from .precision import dd_harness, dd_jitter_demo, dd_selftest
 from .graticule import GraticuleSpec, generate_graticule
 from .legend import Legend, LegendConfig
+from .raster_recipe import RasterRecipe as RasterRecipe, RasterRecipeSource as RasterRecipeSource
 from .raster_style import RasterHeightSurfaceStyle as RasterHeightSurfaceStyle, CategoricalRasterStyle as CategoricalRasterStyle, BivariateRasterStyle as BivariateRasterStyle, RasterStyleResult as RasterStyleResult
 from .map_plate import BBox, MapPlate, MapPlateConfig, PlateRegion
 from .publication import PublicationSource as PublicationSource, PublicationExtent as PublicationExtent, PublicationRecipe as PublicationRecipe
@@ -114,6 +115,7 @@ from .label_plan import (
     RejectedLabel,
 )
 from . import semantic_scale as semantic_scale
+from . import measured_sections as measured_sections
 from .map_scene import (
     RenderPassInput as RenderPassInput,
     RenderPassSpec as RenderPassSpec,

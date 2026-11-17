@@ -12,6 +12,7 @@ organized by workflow rather than by Rust module layout.
 | Raster overlays | `ViewerHandle.load_overlay` | `swiss_terrain_landcover_viewer.py`, `bosnia_terrain_landcover_viewer.py`, `belgium_bivariate_climate_map.py` |
 | Population and thematic rasters | `RasterHeightSurfaceStyle`, `CategoricalRasterStyle`, `BivariateRasterStyle` through `MapScene` | [Style contracts](thematic_raster_styles.md), `mapscene_thematic_rasters.py` |
 | Statistical raster relief | `ValueFaithfulRasterBinding` links prepared counts or densities to fixed colours, coverage and a registered inset | [C02 first-delivery guide](value_faithful_raster.md), `examples/c02_amsterdam_value_faithful.py` |
+| GPU normalized-difference rasters | `RasterRecipe` and `RasterRecipeSource` classify registered raster pairs for native terrain in `MapScene` | [GPU raster recipe guide](gpu_raster_recipes.md) |
 | Vector overlays and labels | `VectorLineLayer`, `ViewerHandle.add_vector_line`, `ViewerHandle.add_vector_overlay`, `ViewerHandle.add_label`, `ViewerHandle.add_labels`, `ViewerHandle.add_line_label`, `ViewerHandle.add_callout` | `vector_line_drape.py`, `luxembourg_rail_overlay.py`, `fuji_labels_demo.py` |
 | Picking and selection | `viewer_ipc` picking helpers | `picking_demo.py`, `picking_test_interactive.py` |
 | Point clouds | `ViewerHandle.load_point_cloud`, `forge3d.pointcloud` | `pointcloud_viewer_interactive.py` |
@@ -39,6 +40,8 @@ TAA depth reads do not require optional float32 texture filtering.
 | --- | --- | --- |
 | Map plates and cartographic furniture | `MapPlate`, `Legend`, `ScaleBar`, `NorthArrow` | `map_plate.ipynb`, GIS tutorial 03 |
 | Linked PNG publications | `PublicationRecipe`, reusable layouts with linked insets, extent/subject/C04-selected time series, camera-linked flyover frames and endpoint PNGs, style-derived legend and actual plan/flat-terrain perspective locator; perspective scale omitted | [C06 guide](linked_publication.md), `examples/c06_population_publication.py`, `examples/c06_time_publication.py`, `examples/c06_oblique_publication.py`, `examples/c06_flyover_publication.py`; per-route output limits declared, C04/C06 remain partial pending their acceptance |
+| Measured terrain transects | `measured_sections.sample_transect` and `render_section` produce audited WGS 84 samples and a linked map/profile still | [C08 first delivery](measured_sections.md) |
+| Fixed-camera observation maps | `observation_map.compile_observation_map` links observation selection and dated events to CHRONOS frames and replay | [Observation maps guide](observation_maps.md) |
 | Vector export | `export_svg`, `export_pdf`, `VectorScene` | gallery vector-export workflow |
 | Buildings | `add_buildings`, `add_buildings_cityjson`, `add_buildings_3dtiles` | `buildings_viewer_interactive.py`, GIS tutorial 04 |
 | Mapbox-style import | `style.load_style`, `style.apply_style` | `style_viewer_interactive.py` |

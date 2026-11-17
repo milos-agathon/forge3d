@@ -6,6 +6,13 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.50.0]
+
+### Added
+- Measured terrain transects sample a declared WGS 84 geodesic across a DEM and produce a linked map/profile PNG and CSV/JSON. Samples retain signed source heights and declared vertical reference, with missing values shown as gaps. This delivery covers stills (#306).
+- Fixed-camera observation maps compile prepared GeoTIFFs and timestamped vector events into CHRONOS frames with QA masks, source and age captions, indexed rendering, and replay. Observation frames use the MapScene furniture cache bypass (#304).
+- GPU-resident normalized-difference recipes classify two registered binary32 rasters with a validity mask and fixed thresholds. Threshold edits reuse GPU inputs and normalized values. The native terrain PNG route provides matching legends, samples, counts, and explicit raster export. It requires a physical GPU and a matching terrain grid. Local render evidence covers NVIDIA Vulkan. Scene caching, provenance, and signed certificates are outside this route (#307).
+
 ## [1.49.0]
 
 ### Added

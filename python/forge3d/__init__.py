@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.49.0"
+__version__ = "1.50.0"
 version = __version__
 
 import numpy as np
@@ -513,6 +513,7 @@ from .publication import (PublicationSource, PublicationExtent, PublicationRecip
                           PublicationInset, PublicationLayout, PublicationSubject, publication_output_support)
 from .value_faithful import ValueFaithfulRasterBinding
 from .legend import Legend, LegendConfig
+from .raster_recipe import RasterRecipe, RasterRecipeSource
 from .raster_style import RasterHeightSurfaceStyle, CategoricalRasterStyle, BivariateRasterStyle, RasterStyleResult
 from .scale_bar import ScaleBar, ScaleBarConfig
 from .north_arrow import NorthArrow, NorthArrowConfig
@@ -688,6 +689,7 @@ from .label_plan import (
 # Typed MapScene recipe contract
 # -----------------------------------------------------------------------------
 from . import semantic_scale
+from . import measured_sections
 from .map_scene import (
     RenderPassInput,
     RenderPassSpec,
@@ -747,6 +749,8 @@ from .precision import dd_harness, dd_jitter_demo, dd_selftest
 __all__ = [
     "RasterHeightSurfaceStyle",
     "CategoricalRasterStyle",
+    "RasterRecipe",
+    "RasterRecipeSource",
     "BivariateRasterStyle",
     "RasterStyleResult",
     "terrain",
@@ -1082,6 +1086,7 @@ __all__ = [
     "MapSceneTextLayoutError",
     "CompiledScenePlan",
     "semantic_scale",
+    "measured_sections",
     "SceneRecipe",
     "TerrainSource",
     "RasterOverlay",
