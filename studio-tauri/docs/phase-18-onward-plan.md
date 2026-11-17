@@ -129,7 +129,16 @@ is recorded in the service docstring, not hidden.
 Verified: service+mesh+camera 73/73, fast lane 760/760, studio-core 77,
 shell 25, fmt/clippy(0)/tsc/npm.
 
-19.3 (the Rendered viewport shows the same meshes) is still open.
+**19.3 lands with 19.2 — no second renderer was needed.** The Rendered
+viewport already calls the same `render_frame` command as a still (with a view
+override and preview quality), and the viewport re-renders on every scene
+revision, camera change and gizmo release. Wiring meshes into the shared render
+payload therefore makes them appear in the Rendered viewport as well as the
+still, with no new UI control. Verified by the off-aim test in
+`tests/test_studio_mesh_composite.py`: with a viewport-style orbit
+(phi 135, theta 35, fov 50) a mesh moved 3 viewport units east projects
+ measurably off-centre, while the ablation frame is identical. Phase 19 is
+ therefore complete; no separate viewport mesh path exists or is planned.
 
 ## Phase 20 — MapScene native layers (engine + Studio)
 

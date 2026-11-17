@@ -143,3 +143,49 @@ def test_node_scoped_mesh_is_reported_not_silently_rendered(tmp_path):
     reply = renderer.render(request)
     assert reply["meshReport"]["meshesRendered"] == 0
     assert reply["meshReport"]["meshesSkipped"] == ["one-node"]
+
+
+def test_rendered_viewport_path_shows_the_mesh_at_an_off_aim_transform(tmp_path):
+    """The viewport's preview-quality path uses the same service. A mesh moved
+    to a different viewport position must project away from the frame centre;
+    this proves the placement follows the object transform through the shared
+    path rather than accidentally landing at the aim every time."""
+    from test_gltf_import import _write_material_glb
+
+    service = _service()
+    glb = tmp_path / "quad.glb"
+    _write_material_glb(glb)
+    renderer = service.StudioRenderer(str(REPO / "assets" / "tif" / "Mount_Fuji_30m.tif"), z_scale=1.0)
+
+    center = _mesh_at_aim_placement(renderer, 256)
+    moved = np.asarray(center, dtype=np.float32).reshape(4, 4)
+    moved[0, 3] += 3.0 * (max(renderer.span_x, renderer.span_y) / 12.0)  # 3 viewport units east
+    request = {
+        "width": 256,
+        "height": 256,
+        # A viewport-style orbit (different from the still's default) with the
+        # frame kept at preview quality, as render_frame preview does.
+        "camera": {
+            "phiDeg": 135.0,
+            "thetaDeg": 35.0,
+            "radius": 26000.0,
+            "target": [0.0, 0.0, 0.0],
+            "fovDeg": 50.0,
+        },
+        "sun": {"azimuthDeg": 315.0, "elevationDeg": 30.0, "intensity": 3.0, "color": [1.0, 0.97, 0.92]},
+        "exposure": 1.35,
+        "quality": {"shadows": True},
+        "meshes": [{"path": str(glb), "transform": moved.reshape(16).tolist(), "node": None}],
+    }
+    reply = renderer.render(request)
+    assert reply["meshReport"]["meshesRendered"] == 1
+    image = _decode(service, reply)
+    # The terrain-only frame for the same camera is the ablation.
+    baseline_request = {key: value for key, value in request.items() if key != "meshes"}
+    baseline = _decode(service, renderer.render(baseline_request))
+    changed = np.abs(image - baseline).sum(axis=2) > 8
+    assert int(changed.sum()) > 20, "the moved mesh did not reach the preview frame"
+    ys, xs = np.nonzero(changed)
+    assert abs(float(xs.mean()) - 128.0) > 15.0 or abs(float(ys.mean()) - 128.0) > 15.0, (
+        "a mesh moved 3 viewport units still projects at the centre"
+    )
