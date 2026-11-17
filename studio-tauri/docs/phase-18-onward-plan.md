@@ -196,7 +196,7 @@ because its `source.path` is read as a glTF path.
 reports "supported" for what the studio actually renders (no validate/render
 contradiction); no Studio-side geometry reimplementation.
 
-**Status:** measured and scoped (`native-layers-findings.md` §3); not started.
+**Status: engine anchors landed; Studio layer kind still open.** measured and scoped (`native-layers-findings.md` §3); not started.
 
 ---
 
