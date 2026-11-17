@@ -456,6 +456,20 @@ fn spawn_stderr(stderr: impl std::io::Read + Send + 'static, shared: Arc<Shared>
 /// core so the animation export and the viewport agree on it by construction.
 pub use studio_core::workspace::RenderView;
 
+/// A visible imported mesh in the renderer's metre frame, with the placement
+/// the engine's instanced path consumes. The core's `mesh_render_matrix` is
+/// the one viewport -> render conversion; no consumer may invent another.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeshHandoff {
+    pub path: String,
+    /// Row-major 4x4 from `workspace::mesh_render_matrix`.
+    pub transform: [f32; 16],
+    /// A node-scoped selection cannot be expressed by the mesh path; the
+    /// service reports it instead of silently rendering the whole asset.
+    pub node: Option<String>,
+}
+
 /// Everything the shell needs for one frame, derived from the project.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -476,6 +490,8 @@ pub struct RenderRequest {
     pub z_scale: f64,
     /// The map's layer stack, in draw order (the first is drawn first).
     pub cartography: Vec<studio_core::workspace::CartographyLayerHandoff>,
+    /// Visible imported meshes, in scene order.
+    pub meshes: Vec<MeshHandoff>,
     pub exposure: f64,
     pub shadows: bool,
     /// Render the sky background; the project can turn it off for Rendered.
@@ -610,12 +626,18 @@ impl RenderRequest {
         self
     }
 
+    pub fn with_meshes(mut self, meshes: Vec<MeshHandoff>) -> Self {
+        self.meshes = meshes;
+        self
+    }
+
     pub fn to_payload(&self, quality: &str, output: Option<&str>) -> serde_json::Value {
         let final_quality = quality == "final";
         json!({
             "width": self.width,
             "height": self.height,
             "zScale": self.z_scale,
+            "meshes": self.meshes,
             "camera": {
                 "phiDeg": self.phi_deg,
                 "thetaDeg": self.theta_deg,
@@ -771,6 +793,7 @@ impl RenderRequest {
             z_scale: f64::from(terrain.z_scale),
             // The map's layer stack, in draw order.
             cartography: handoff.cartography.clone(),
+            meshes: Vec::new(),
             exposure: 1.35,
             shadows: true,
             sky: true,
@@ -837,6 +860,7 @@ mod tests {
             sun_color: [1.0, 0.97, 0.92],
             z_scale: 1.0,
             cartography: Vec::new(),
+            meshes: Vec::new(),
             exposure: 1.35,
             shadows: true,
             sky: true,

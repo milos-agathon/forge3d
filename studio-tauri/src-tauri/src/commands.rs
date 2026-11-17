@@ -1222,6 +1222,40 @@ pub fn raster_preview(
     ))
 }
 
+/// Visible imported meshes for the render payload. Primitives have no asset to
+/// import; invisible objects are not rendered. Placement is converted once,
+/// by the core's viewport -> render mapping, so the still and the Solid view
+/// cannot disagree about where a model sits.
+fn scene_meshes(project: &studio_core::Project) -> Vec<crate::render::MeshHandoff> {
+    let Some(terrain) = project.terrain_object().and_then(|object| object.terrain()) else {
+        return Vec::new();
+    };
+    project
+        .scene
+        .objects
+        .iter()
+        .filter(|object| object.visible && matches!(object.kind, ObjectKind::Mesh(_)))
+        .filter_map(|object| {
+            let ObjectKind::Mesh(mesh) = &object.kind else {
+                return None;
+            };
+            let studio_core::MeshSource::Gltf { asset, node } = &mesh.source else {
+                return None;
+            };
+            let path = project
+                .assets
+                .iter()
+                .find(|item| item.id == *asset)
+                .map(|item| item.path.clone())?;
+            Some(crate::render::MeshHandoff {
+                path,
+                transform: studio_core::workspace::mesh_render_matrix(&object.transform, terrain)?,
+                node: node.clone(),
+            })
+        })
+        .collect()
+}
+
 /// One render request from a handoff — the single place the payload's camera,
 /// sun and settings are assembled, so a still, a viewport frame and an exported
 /// sequence frame cannot drift apart.
@@ -1231,10 +1265,12 @@ fn build_request(
     width: u32,
     height: u32,
     view: Option<&RenderView>,
+    meshes: Vec<crate::render::MeshHandoff>,
 ) -> Result<RenderRequest, String> {
     Ok(RenderRequest::from_handoff(handoff, width, height)?
         .with_view(view)
-        .with_settings(settings))
+        .with_settings(settings)
+        .with_meshes(meshes))
 }
 
 #[tauri::command(async)]
@@ -1247,11 +1283,12 @@ pub fn render_frame(
     quality: Option<String>,
     view: Option<RenderView>,
 ) -> Result<RenderFrame, String> {
-    let (handoff, settings) = {
+    let (handoff, settings, meshes) = {
         let session = lock(&state)?;
         let snapshot = session
             .state()
             .ok_or_else(|| "no project is open".to_owned())?;
+        let meshes = scene_meshes(&snapshot.project);
         (
             studio_core::workspace::handoff(
                 &snapshot.project,
@@ -1259,6 +1296,7 @@ pub fn render_frame(
                 Workspace::Forge3d,
             ),
             snapshot.project.render,
+            meshes,
         )
     };
     let request = build_request(
@@ -1267,6 +1305,7 @@ pub fn render_frame(
         width.unwrap_or(960).clamp(64, 4096),
         height.unwrap_or(600).clamp(64, 4096),
         view.as_ref(),
+        meshes,
     )?;
     let python = forge.probe(false).python;
     let quality = quality.unwrap_or_else(|| "final".to_owned());
@@ -1288,11 +1327,12 @@ pub fn render_still(
     path: Option<String>,
     view: Option<RenderView>,
 ) -> Result<RenderFrame, String> {
-    let (handoff, settings, project_name, project_path) = {
+    let (handoff, settings, project_name, project_path, meshes) = {
         let session = lock(&state)?;
         let snapshot = session
             .state()
             .ok_or_else(|| "no project is open".to_owned())?;
+        let meshes = scene_meshes(&snapshot.project);
         (
             studio_core::workspace::handoff(
                 &snapshot.project,
@@ -1302,6 +1342,7 @@ pub fn render_still(
             snapshot.project.render,
             snapshot.project.name.clone(),
             snapshot.path.clone(),
+            meshes,
         )
     };
 
@@ -1341,6 +1382,7 @@ pub fn render_still(
         settings.width,
         settings.height,
         view.as_ref(),
+        meshes,
     )?;
     let python = forge.probe(false).python;
     let mut frame = render.render(
@@ -1415,6 +1457,7 @@ pub fn render_animation_frame(
         width.clamp(64, 4096),
         height.clamp(64, 4096),
         view.as_ref(),
+        scene_meshes(&project),
     )?;
 
     let target = std::path::PathBuf::from(&output);

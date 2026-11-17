@@ -87,6 +87,19 @@ impl Transform {
         )
     }
 
+    /// Row-major 4x4 (T * R * S) for handing a placement to a renderer that
+    /// consumes row-major instance matrices. Glam is column-major; transposing
+    /// once here means every consumer sees one convention.
+    pub fn row_major_matrix(&self) -> [f32; 16] {
+        glam::Mat4::from_scale_rotation_translation(
+            self.scale.geometry(),
+            self.rotation(),
+            self.translation.geometry(),
+        )
+        .transpose()
+        .to_cols_array()
+    }
+
     /// Local forward axis (`-Z`) in parent space.
     pub fn forward(&self) -> Vec3 {
         Vec3::from_geometry(self.rotation() * glam::Vec3::NEG_Z)

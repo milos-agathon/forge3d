@@ -325,10 +325,11 @@ def instance_mesh_gpu_render(
         remains legacy lighting. This entry point has no shadow-caster pass.
     camera : dict, optional
         ``{"eye": [x,y,z], "target": [x,y,z], "up": [x,y,z],
-        "fov_deg": 45, "aspect": width/height}``. Only ``eye`` is required;
-        the rest default to the renderer's original fixed camera. The engine
-        builds the view/projection with its own helpers, so the mesh and a
-        terrain frame can share one viewpoint.
+        "fov_deg": 45, "aspect": width/height, "near": 0.1, "far": 100}``.
+        Only ``eye`` is required; the rest default to the renderer's original
+        fixed camera. Terrain frames work in metres, so pass matching
+        ``near``/``far`` when compositing over a still. The engine builds the
+        matrices with its own helpers.
 
     Returns
     -------
@@ -375,7 +376,7 @@ def instance_mesh_gpu_render(
                 if value.shape != (3,) or not np.all(np.isfinite(value)):
                     raise ValueError(f"camera '{key}' must be a finite 3D vector")
                 payload_camera[key] = np.ascontiguousarray(value, dtype=np.float32)
-        for key in ("fov_deg", "aspect"):
+        for key in ("fov_deg", "aspect", "near", "far"):
             if key in camera:
                 value = float(camera[key])
                 if not np.isfinite(value) or value <= 0.0:

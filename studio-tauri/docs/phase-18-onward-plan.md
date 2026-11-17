@@ -105,37 +105,31 @@ supports `set_view_proj`, the Python entry point just never exposes it.
 **Gate:** the ablation is real; pixels move; no parallel renderer; the engine's
 feature inventory and contract tests stay green.
 
-**Status: increment 1 landed (2026-11-17).** `instance_mesh_gpu_render` now
-takes an orbit camera (`eye`, optional `target`/`up`/`fov_deg`/`aspect`); the
-engine builds view/projection with its own `look_at_rh` and `perspective_wgpu`,
-so callers never match a matrix convention. The original fixed (3, 2, 3) eye
-is unchanged when no camera is supplied. A failing test first proved the gap
-(`tests/test_mesh_gpu_camera.py`: two eye positions, different pixels; a
-malformed camera is rejected), then the wrapper and PyO3 entry point were
-wired. The two tracked `as f32` sites in `instancing.rs` were deliberately left
-byte-identical — the f32 ledger's digests include their enclosing statement,
-and moving them made 20 ledger tests fail until the original block was
-restored. Fast lane 760/760, camera+ledger 43/43.
+**Status: 19.1 and 19.2 landed (2026-11-17).** 19.1 added the orbit camera to
+`instance_mesh_gpu_render`; scoping 19.2 showed the terrain frame is in metres,
+so the camera contract also gained `near`/`far` (the renderer's defaults were
+0.1/100 — a 24 km scene was entirely beyond the far plane). The regression test
+first: `tests/test_mesh_gpu_camera.py` (two eye positions, different pixels).
+Both pass after the change; the f32 ledger stayed green because the original
+`as f32` statement was preserved byte-for-byte.
 
-Still open: 19.2 (the service composites imported meshes over the MapScene
-frame with the same camera, with an ablation gate) and 19.3 (Rendered viewport).
+19.2 completes the path: `Transform::row_major_matrix` and
+`workspace::mesh_render_matrix` in the core are the single viewport→render
+conversion `(vx, vy, vz) -> (vx*s, -vz*s, vy*s - half_relief)` with a unit test;
+the shell hands visible imported meshes to the service with render-space
+matrices; the service draws them through the engine's instanced path with the
+still's own camera and clip range, and composites non-black pixels over the
+MapScene frame. `tests/test_studio_mesh_composite.py` pins it end to end: a
+quad centred on the camera aim lands at the frame centre (131, 130 in 256²),
+the ablation is byte-identical, and a node-scoped mesh is reported instead of
+silently rendered. Known limit: the instanced renderer clears to opaque black,
+so a black-painted model cannot be distinguished from the clear colour; that
+is recorded in the service docstring, not hidden.
 
-**Why 19.2 is not a small follow-on (measured while scoping it).** A mesh
-object's transform is in the Studio viewport frame: Y up, terrain 12 units
-wide (`SCENE_TERRAIN_SIZE`), north at -Z. The MapScene still is in the
-renderer's metre frame: Z up, terrain centred on Z=0, and the camera handed
-over by `compute_render_view` already maps viewport units to metres with
-`scale = max_span / 12`. The conversion is therefore not a component swap —
-it is an affine transform
-`(vx, vy, vz) -> (vx*s, -vz*s, vy*s - half_relief)` with
-`half_relief = (high-low)*z_scale/2`, applied to the object's row-major matrix
-before instancing. A first pass added the mesh handoff to the shell payload
-but was reverted rather than shipped inert: placing the mesh incorrectly
-would be a silent mismatch between Solid and Rendered, which this project
-forbids. 19.2 needs that conversion pinned by a screen-position test (a cube
-at a known viewport position lands at a known pixel) before it ships.
+Verified: service+mesh+camera 73/73, fast lane 760/760, studio-core 77,
+shell 25, fmt/clippy(0)/tsc/npm.
 
----
+19.3 (the Rendered viewport shows the same meshes) is still open.
 
 ## Phase 20 — MapScene native layers (engine + Studio)
 

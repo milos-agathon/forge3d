@@ -576,6 +576,77 @@ class StudioRenderer:
             lut_handle=lut_handle,
         )
 
+    def _composite_meshes(
+        self,
+        rgb: np.ndarray,
+        camera: Mapping[str, Any],
+        target: Sequence[float],
+        radius: float,
+        meshes: Sequence[Mapping[str, Any]],
+        width: int,
+        height: int,
+        clip: Sequence[float],
+    ) -> tuple[np.ndarray, Dict[str, Any]]:
+        """Render the scene's imported meshes over the still with one camera.
+
+        The placements arrive from the core's viewport -> render conversion in
+        metres; the eye is derived from the same orbit the recipe was given,
+        with Z up (the terrain's `mesh:zup:north:dem` frame). The instanced
+        renderer clears to opaque black, so non-black pixels are the mesh
+        silhouette — a black-painted model is indistinguishable from the clear
+        colour and is not composited. Recorded, not hidden.
+        """
+        if not meshes:
+            return rgb, {"meshesRendered": 0, "meshesSkipped": []}
+        import forge3d as f3d
+        import forge3d.io as fio
+
+        azimuth = math.radians(float(camera.get("phiDeg", 90.0)))
+        # The request's theta is polar (0 = overhead); the orbit eye wants the
+        # elevation above the horizon.
+        elevation = math.radians(90.0 - float(camera.get("thetaDeg", 45.0)))
+        horizontal = radius * math.cos(elevation)
+        eye = (
+            float(target[0]) + horizontal * math.cos(azimuth),
+            float(target[1]) + horizontal * math.sin(azimuth),
+            float(target[2]) + radius * math.sin(elevation),
+        )
+        orbit = {
+            "eye": eye,
+            "target": tuple(float(value) for value in target),
+            "up": (0.0, 0.0, 1.0),
+            # The instanced renderer's default far plane is 100 units; the
+            # still is in metres. Share the terrain's own clip range.
+            "near": float(clip[0]),
+            "far": float(clip[1]),
+        }
+        out = rgb.copy()
+        rendered = 0
+        skipped: list[str] = []
+        for entry in meshes:
+            node = entry.get("node")
+            if node:
+                skipped.append(str(node))
+                continue
+            try:
+                mesh = fio.import_gltf(str(entry["path"]))
+                transforms = np.asarray(entry["transform"], dtype=np.float32).reshape(1, 16)
+                rgba = f3d.geometry.instance_mesh_gpu_render(
+                    mesh, transforms, width, height, camera=orbit
+                )
+            except Exception as exc:  # noqa: BLE001 - one bad asset must not kill the still
+                skipped.append(f"{entry.get('path')}: {exc}")
+                continue
+            mask = np.any(rgba[..., :3] != 0, axis=2)
+            if not mask.any():
+                skipped.append(f"{entry.get('path')}: nothing visible")
+                continue
+            region = out[mask].astype(np.float32)
+            src = rgba[..., :3][mask].astype(np.float32)
+            out[mask] = np.clip(src, 0, 255).astype(np.uint8)
+            rendered += 1
+        return out, {"meshesRendered": rendered, "meshesSkipped": skipped, "eye": list(eye)}
+
     def _mapscene_still(
         self,
         width: int,
@@ -971,6 +1042,11 @@ class StudioRenderer:
             self.dem_crs,
         )
         rgb = image[:, :, :3].astype(np.uint8)
+        mesh_report: Dict[str, Any] = {"meshesRendered": 0, "meshesSkipped": []}
+        if request.get("meshes"):
+            rgb, mesh_report = self._composite_meshes(
+                rgb, camera, target, radius, request["meshes"], width, height, params.clip
+            )
         # Neither AOVs nor the recipe carries the studio's numpy cartography:
         # the overlays are composited over the frame here. The recipe moved
         # the terrain pass into the engine; the vector/label/graticule
@@ -1117,6 +1193,7 @@ class StudioRenderer:
             "height": height,
             # Which engine path made the frame: always the recipe now.
             "renderPath": "mapscene",
+            "meshReport": mesh_report,
             # The recipe warms its temporal history like every still (three
             # frames, converged) unless AOVs/denoise were requested, in which
             # case the frame is a one-shot capture.

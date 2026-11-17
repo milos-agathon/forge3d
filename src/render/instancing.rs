@@ -263,9 +263,11 @@ pub fn geometry_instance_mesh_gpu_render_py(
         };
         let fov = scalar("fov_deg")?.unwrap_or(45.0);
         let aspect = scalar("aspect")?.unwrap_or(1.0);
+        let near = scalar("near")?.unwrap_or(0.1);
+        let far = scalar("far")?.unwrap_or(100.0);
         renderer.set_view_proj(
             Mat4::look_at_rh(eye, target, up),
-            crate::camera::perspective_wgpu(fov.to_radians(), aspect, 0.1, 100.0),
+            crate::camera::perspective_wgpu(fov.to_radians(), aspect, near, far),
         );
     }
     renderer.set_color([0.85, 0.85, 0.9, 1.0]);

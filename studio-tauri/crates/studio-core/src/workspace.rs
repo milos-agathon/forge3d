@@ -284,6 +284,70 @@ pub fn camera_render_view(project: &Project) -> Option<RenderView> {
     })
 }
 
+/// Metres per viewport unit: the terrain's long side is SCENE_TERRAIN_SIZE
+/// units across. Shared by camera mapping and mesh placement so the two can
+/// never drift apart.
+pub fn viewport_scale(terrain: &crate::scene::TerrainObject) -> Option<f64> {
+    let span = terrain.world_span_xz?;
+    let max_span = span[0].max(span[1]);
+    (max_span.is_finite() && max_span > 0.0)
+        .then(|| max_span / f64::from(crate::project::SCENE_TERRAIN_SIZE))
+}
+
+/// Multiply two row-major 4x4 matrices (`a` applied after `b`).
+fn mul_row_major(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
+    let mut out = [0.0f32; 16];
+    for row in 0..4 {
+        for col in 0..4 {
+            let mut sum = 0.0f32;
+            for k in 0..4 {
+                sum += a[row * 4 + k] * b[k * 4 + col];
+            }
+            out[row * 4 + col] = sum;
+        }
+    }
+    out
+}
+
+/// A mesh placement in viewport units -> the renderer's metre frame.
+///
+/// The viewport is Y up, north at -Z, with the terrain SCENE_TERRAIN_SIZE
+/// units across; the MapScene still is Z up, terrain centred on Z=0, with
+/// the camera already mapped by `compute_render_view`. The affine map is
+/// `(vx, vy, vz) -> (vx*s, -vz*s, vy*s - half_relief)`, composed with the
+/// object's own transform. One source of truth: a mesh that disagrees with
+/// the terrain by a unit would be a silent mismatch.
+pub fn mesh_render_matrix(
+    transform: &crate::math::Transform,
+    terrain: &crate::scene::TerrainObject,
+) -> Option<[f32; 16]> {
+    let s = viewport_scale(terrain)? as f32;
+    let [low, high] = terrain.elevation_range.unwrap_or([0.0, 0.0]);
+    let half_relief = ((high - low) as f64 * f64::from(terrain.z_scale) / 2.0) as f32;
+    let viewport_to_render = [
+        s,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -s,
+        0.0,
+        0.0,
+        s,
+        0.0,
+        -half_relief,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ];
+    Some(mul_row_major(
+        &viewport_to_render,
+        &transform.row_major_matrix(),
+    ))
+}
+
 /// A DEM handed to the viewer's terrain pipeline.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1203,6 +1267,41 @@ mod tests {
                 overlay: None,
             }),
         )
+    }
+
+    #[test]
+    fn mesh_render_matrix_maps_viewport_units_to_the_still_frame() {
+        let project = terrain_project();
+        let terrain = project.terrain_object().unwrap().terrain().unwrap();
+        // 4000 m long side / 12 viewport units; the relief comes from the
+        // terrain object itself, so this pins the conversion, not the seed.
+        let s = 4000.0f64 / 12.0;
+        let [low, high] = terrain.elevation_range.unwrap();
+        let half_relief = (f64::from(high) - f64::from(low)) * f64::from(terrain.z_scale) / 2.0;
+        assert!((viewport_scale(terrain).unwrap() - s).abs() < 1e-9);
+
+        // Row-major affine: translation lives in the last COLUMN (3, 7, 11).
+        let identity = mesh_render_matrix(&crate::math::Transform::default(), terrain).unwrap();
+        assert!((identity[3] - 0.0).abs() < 1e-3, "{identity:?}");
+        assert!((identity[7] - 0.0).abs() < 1e-3, "{identity:?}");
+        assert!(
+            (identity[11] - (-half_relief as f32)).abs() < 1e-2,
+            "{identity:?}"
+        );
+
+        // A viewport point (1, 1, 1) maps to (s, -s, s - half_relief).
+        let moved = crate::math::Transform {
+            translation: crate::math::Vec3::new(1.0, 1.0, 1.0),
+            rotation_deg: crate::math::Vec3::ZERO,
+            scale: crate::math::Vec3::ONE,
+        };
+        let m = mesh_render_matrix(&moved, terrain).unwrap();
+        assert!((m[3] - s as f32).abs() < 1e-2, "{m:?}");
+        assert!((m[7] - (-s as f32)).abs() < 1e-2, "{m:?}");
+        assert!(
+            (m[11] - (s as f32 - half_relief as f32)).abs() < 1e-2,
+            "{m:?}"
+        );
     }
 
     #[test]
