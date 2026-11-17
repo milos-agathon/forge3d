@@ -435,14 +435,22 @@ pub fn check_assets(
     let snapshot = lock(&state)?
         .state()
         .ok_or_else(|| "no project is open".to_owned())?;
-    Ok(studio_core::asset_integrity(
-        &snapshot.project,
-        |path| match std::fs::metadata(path) {
+    Ok(studio_core::asset_integrity(&snapshot.project, |path| {
+        // A remote DEM's path is a URL: there is no local file to stat. The
+        // engine's range reader validated it at open and revalidates at every
+        // render, so reporting it as missing would be a false alarm.
+        if path.starts_with("http://")
+            || path.starts_with("https://")
+            || path.starts_with("file://")
+        {
+            return Ok(0);
+        }
+        match std::fs::metadata(path) {
             Ok(metadata) if metadata.is_file() => Ok(metadata.len()),
             Ok(_) => Err(format!("{path} is not a file")),
             Err(error) => Err(format!("{path}: {error}")),
-        },
-    ))
+        }
+    }))
 }
 
 /// Place the directional light from the engine's ephemeris.

@@ -441,17 +441,40 @@ impl Forge3dState {
         preset: Option<&str>,
     ) -> Result<Option<studio_core::TerrainSeed>, String> {
         if let Some(url) = preset.and_then(|id| id.strip_prefix("url:")) {
+            // Phase 18.3: open without a whole-file download. The engine's
+            // range reader supplies the metadata (one HEAD + one coarse
+            // overview); the still streams the tiles it needs later.
             let python = self.probe(false).python;
-            let cache_dir = std::env::temp_dir().join("forge3d-cog-cache");
-            let cache = cache_dir.to_string_lossy().into_owned();
+            let info = remote_cog_info(&python, url)?;
+            let overview = remote_cog_preview(&python, url, 64)?;
             let trimmed = url.trim_end_matches('/');
             let title = trimmed
                 .rsplit('/')
                 .next()
                 .map(str::to_owned)
-                .filter(|s| !s.is_empty());
-            let (path, _bytes, _cached) = url_fetch(&python, url, &cache)?;
-            return Ok(self.seed_for_absolute(PathBuf::from(path), title));
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "remote-dem".to_owned());
+            let dimensions = info
+                .levels
+                .first()
+                .map(|level| [level.width, level.height])
+                .filter(|pair| pair[0] > 0 && pair[1] > 0);
+            let elevation_range = overview
+                .get("minElevation")
+                .and_then(|low| low.as_f64())
+                .zip(overview.get("maxElevation").and_then(|high| high.as_f64()))
+                .map(|(low, high)| [low as f32, high as f32]);
+            return Ok(Some(studio_core::TerrainSeed {
+                title: Some(title.clone()),
+                name: title,
+                path: url.to_owned(),
+                byte_size: 0,
+                overlay: None,
+                dimensions,
+                elevation_range,
+                world_origin_xz: None,
+                world_span_xz: None,
+            }));
         }
         if let Some(name) = preset.and_then(|id| id.strip_prefix("dataset:")) {
             let python = self.probe(false).python;
@@ -1465,30 +1488,6 @@ pub fn remote_cog_preview(
 
 /// Download a remote DEM to the studio cache. `url` must be http(s) or
 /// `file://`; the engine already validated it via `remote_cog_info`.
-const URL_FETCH_SCRIPT: &str = r#"
-import hashlib, json, sys, urllib.request
-url = sys.argv[1]
-cache = sys.argv[2]
-key = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
-name = url.rstrip("/").rsplit("/", 1)[-1] or "remote.tif"
-if "." not in name:
-    name = name + ".tif"
-dest = cache + "/cog-" + key + ".tif"
-import os
-try:
-    os.makedirs(cache, exist_ok=True)
-    if os.path.isfile(dest) and os.path.getsize(dest) > 0:
-        print(json.dumps({"ok": True, "path": dest, "cached": True, "bytes": os.path.getsize(dest)}))
-        raise SystemExit(0)
-    with urllib.request.urlopen(url) as response:
-        data = response.read()
-    with open(dest, "wb") as out:
-        out.write(data)
-    print(json.dumps({"ok": True, "path": dest, "cached": False, "bytes": len(data)}))
-except Exception as exc:
-    print(json.dumps({"ok": False, "detail": str(exc)}))
-"#;
-
 /// Remote-DEM probe: what `remote_cog_info` returns to the gallery dialog.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1600,46 +1599,6 @@ pub fn remote_cog_info(python: &str, url: &str) -> Result<RemoteCogInfo, String>
             .and_then(|v| v.as_u64())
             .unwrap_or(0),
     })
-}
-
-/// Materialize a remote DEM into the studio cache; returns its path and size.
-/// The hash of the URL keys the cache, so reopening the same remote DEM
-/// costs no download.
-pub fn url_fetch(python: &str, url: &str, cache_dir: &str) -> Result<(String, u64, bool), String> {
-    validate_remote_url(url)?;
-    // The engine probe must pass first: we only download what the reader can open.
-    remote_cog_info(python, url)?;
-    let cache = cache_dir.to_owned();
-    let (stdout, stderr) = run_script(
-        python,
-        URL_FETCH_SCRIPT,
-        &[url.to_owned(), cache],
-        Duration::from_secs(600),
-    )?;
-    let line = stdout
-        .lines()
-        .find(|line| line.trim_start().starts_with('{'))
-        .ok_or_else(|| format!("the fetch produced no output: {}", stderr.trim()))?;
-    let value: serde_json::Value = serde_json::from_str(line.trim())
-        .map_err(|error| format!("the fetch returned invalid JSON: {error}"))?;
-    if value.get("ok").and_then(|ok| ok.as_bool()) != Some(true) {
-        return Err(value
-            .get("detail")
-            .and_then(|detail| detail.as_str())
-            .unwrap_or("the download failed")
-            .to_owned());
-    }
-    let path = value
-        .get("path")
-        .and_then(|p| p.as_str())
-        .ok_or_else(|| "the fetch returned no path".to_owned())?
-        .to_owned();
-    let bytes = value.get("bytes").and_then(|b| b.as_u64()).unwrap_or(0);
-    let cached = value
-        .get("cached")
-        .and_then(|b| b.as_bool())
-        .unwrap_or(false);
-    Ok((path, bytes, cached))
 }
 
 /// Labelled interpreter candidates, most specific first.

@@ -178,6 +178,76 @@ def load_dem(path: str):
     )
 
 
+def is_remote_dem(path: str) -> bool:
+    """A DEM path that is a URL must be streamed, not opened from disk."""
+    return isinstance(path, str) and path.startswith(("http://", "https://", "file://"))
+
+
+def load_remote_dem(url: str, resolution: int = 1024):
+    """Assemble a DEM from the engine's COG range reader — no whole-file copy.
+
+    The engine picks the overview level: the coarsest one still carrying the
+    requested resolution. Only the tiles of that level are fetched; the DEM
+    the renderer sees is the same array shape `load_dem` returns. Degree bounds
+    are reprojected to a local UTM zone for the metric span with the engine's
+    own `forge3d.gis`, exactly as the local loader does.
+    """
+    import forge3d.cog as cog
+    from forge3d import gis
+
+    ds = cog.open_cog(url)
+    levels = max(1, int(ds.overview_count))
+    level = levels - 1
+    for candidate in range(levels):
+        info = ds.ifd_info(candidate)
+        if info.width >= resolution and info.height >= resolution:
+            level = candidate
+    info = ds.ifd_info(level)
+    width, height = int(info.width), int(info.height)
+    grid = np.zeros((height, width), dtype=np.float64)
+    for ty in range(int(info.tiles_down)):
+        for tx in range(int(info.tiles_across)):
+            tile = np.asarray(ds.read_tile(tx, ty, level), dtype=np.float64)
+            if tile.ndim != 2 or tile.size == 0:
+                continue
+            th, tw = tile.shape[:2]
+            y0 = ty * int(info.tile_height)
+            x0 = tx * int(info.tile_width)
+            y1, x1 = min(height, y0 + th), min(width, x0 + tw)
+            if y1 > y0 and x1 > x0:
+                grid[y0:y1, x0:x1] = tile[: y1 - y0, : x1 - x0]
+
+    valid = np.isfinite(grid)
+    if not valid.any():
+        raise RuntimeError("the remote DEM contains no valid elevation samples")
+    low, high = np.percentile(grid[valid], [0.01, 99.99])
+    heights = np.where(valid, np.clip(np.nan_to_num(grid, nan=low), low, high), low)
+
+    bounds = tuple(float(value) for value in ds.bounds) if ds.bounds else None
+    crs = ""
+    span_x = span_y = 0.0
+    if bounds is not None and len(bounds) == 4:
+        geographic = (
+            -180.0 <= bounds[0] <= 180.0 and -180.0 <= bounds[2] <= 180.0
+            and -90.0 <= bounds[1] <= 90.0 and -90.0 <= bounds[3] <= 90.0
+        )
+        if geographic:
+            crs = "EPSG:4326"
+            local = gis.estimate_local_utm(bounds)["crs"]
+            left, bottom, right, top = gis.transform_bounds(crs, local, bounds, densify=21)
+            span_x, span_y = abs(right - left), abs(top - bottom)
+    if span_x <= 0.0 or span_y <= 0.0:
+        span_x, span_y = float(width), float(height)
+    return (
+        heights.astype(np.float32),
+        span_x,
+        span_y,
+        (float(low), float(high)),
+        bounds,
+        crs,
+    )
+
+
 class StudioRenderer:
     def __init__(self, dem_path: str, z_scale: float = 1.0) -> None:
         import forge3d as f3d
@@ -190,7 +260,9 @@ class StudioRenderer:
             self.range,
             self.dem_bounds,
             self.dem_crs,
-        ) = load_dem(dem_path)
+        ) = (
+            load_remote_dem(dem_path, 1024) if is_remote_dem(dem_path) else load_dem(dem_path)
+        )
         self.dem_path = dem_path
         # The renderer rejects view coordinates beyond +/-65,536 units, so a
         # country-scale DEM is scaled into that budget (proportions preserved).

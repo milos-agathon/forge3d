@@ -88,7 +88,19 @@ windows, measured at 132,911 B for both — so the test pins the level and the
 returned heightfield size instead, and the earlier overview test pins the
 fraction-of-file claim.
 
-Still open in Phase 18: 18.1 (remote DEM asset kind) and 18.3 (streaming still).
+**18.3 landed as well.** A `url:` project now opens from the engine's probe
+plus one coarse overview — no whole-file download — and the still assembles
+the DEM from the engine's COG tiles through `open_cog`/`read_tile`, using the
+engine's own GIS helpers for the metric span. `url_fetch` and its script were
+deleted (dead after streaming replaced materialization). The range-server test
+runs the render in a child process, as the shell does, and verifies that the
+still fetches under half of a 2048² COG and produces a non-flat mapscene frame.
+The engine's native HTTP reader cannot be driven from the pytest process, so
+the test matches the shipped process shape rather than working around it.
+
+Phase 18 is now functionally complete for open → preview → still; 18.1's
+separate `RemoteDem` asset kind is still open as a schema improvement (a URL
+currently lives in `Asset.path` and is detected by prefix).
 
 ---
 

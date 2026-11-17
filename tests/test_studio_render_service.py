@@ -1703,3 +1703,75 @@ def test_the_remote_preview_ladder_selects_finer_overviews(tmp_path):
     assert fine["level"] < coarse["level"], (coarse["level"], fine["level"])
     assert len(coarse["heights"]) == 64 * 64
     assert len(fine["heights"]) == 256 * 256
+
+
+def test_a_remote_dem_streams_into_the_still_without_a_local_copy(tmp_path):
+    """18.3: a URL-backed DEM is read through the engine's range reader at
+    render time — the project never materializes the whole file, and the still
+    fetches a fraction of its bytes.
+
+    The service runs as a child process of the shell in production. Run it
+    that way here too: the engine's native HTTP reader cannot be driven from
+    the pytest process (a tokio-runtime interaction), but the shipped path is
+    a fresh interpreter, which works.
+    """
+    import json
+    import os
+    import subprocess
+    import sys
+
+    sys.path.insert(0, str(REPO / "tests"))
+    from _cog_http_fixtures import _clear_cog_cache, _serve_range
+
+    cog_path = tmp_path / "stream.cog.tif"
+    body = _write_cog_with_overviews(cog_path, size=2048, random=True)
+    server, url, served = _serve_range(body)
+    script = r"""
+import base64, json, sys
+sys.path.insert(0, sys.argv[1] + "/studio-tauri/src-tauri/src")
+import studio_render as sr
+request = {
+    "width": 256, "height": 256,
+    "camera": {"phiDeg": 90.0, "thetaDeg": 45.0, "radius": 24000.0, "target": [0,0,0], "fovDeg": 45.0},
+    "sun": {"azimuthDeg": 315.0, "elevationDeg": 30.0, "intensity": 3.0, "color": [1.0,0.97,0.92]},
+    "exposure": 1.35, "quality": {"shadows": True},
+}
+renderer = sr.StudioRenderer(sys.argv[2], z_scale=1.0)
+reply = renderer.render(request)
+print(json.dumps({"ok": True, "span": renderer.span_x, "path": renderer.dem_path,
+                  "renderPath": reply["renderPath"], "png": reply["png"]}))
+"""
+    try:
+        _clear_cog_cache()
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(REPO), url],
+            capture_output=True, text=True, timeout=600,
+            env={"PATH": "/usr/bin:/bin", "HOME": str(Path.home()), "PYTHONPATH": str(REPO / "python")},
+        )
+        assert result.returncode == 0, result.stderr[-1200:]
+        reply = json.loads(result.stdout.strip().splitlines()[-1])
+    finally:
+        server.shutdown()
+
+    assert reply["ok"] and reply["renderPath"] == "mapscene" and reply["span"] > 0
+    assert reply["path"] == url
+    import base64
+    import io
+    from PIL import Image
+    image = np.asarray(
+        Image.open(io.BytesIO(base64.b64decode(reply["png"]))).convert("RGB"), dtype=np.int32
+    )
+    assert float(image.std()) > 1.0, "the streamed DEM produced a flat frame"
+    assert served["bytes"] < len(body) // 2, (
+        f"the still fetched {served['bytes']} B of a {len(body)} B COG"
+    )
+
+def _render_reply_reply_image(service, reply):
+    import base64
+    import io
+
+    from PIL import Image
+
+    return np.asarray(
+        Image.open(io.BytesIO(base64.b64decode(reply["png"]))).convert("RGB"), dtype=np.int32
+    )
