@@ -27,6 +27,7 @@ import {
   loadAssetScene,
 } from "./assets";
 import { viewStore } from "./viewStore";
+import { isRemoteDemPath, previewResolutionForDistance } from "../state/terrainLadder";
 import {
   graticuleLayers,
   labelLayers,
@@ -839,6 +840,7 @@ function sunVisionConfig(project: Project | null | undefined): { toward: [number
 function contentSignature(
   object: SceneObject,
   terrainResolution: number,
+  ladderRung: number,
   ramp: string,
   imagery: { asset: string; opacity: number } | null,
   sunVision: string | null,
@@ -852,7 +854,7 @@ function contentSignature(
       // what used to be ignored.
       // The elevation ramp is baked into the mesh's vertex colours, so a
       // colormap change is a rebuild — not just a shading swap.
-      return `terrain:${object.kind.asset}:${object.kind.zScale}:${terrainResolution}:${imagery?.asset ?? "none"}:${imagery?.opacity ?? ""}:${ramp}:${sunVision ?? ""}`;
+      return `terrain:${object.kind.asset}:${object.kind.zScale}:${terrainResolution}:${ladderRung}:${imagery?.asset ?? "none"}:${imagery?.opacity ?? ""}:${ramp}:${sunVision ?? ""}`;
     case "camera":
       return `camera:${object.kind.fovDeg}`;
     case "light":
@@ -955,6 +957,7 @@ export function Viewport3D() {
     flyMode,
     setCameraView,
   } = useSession();
+  const [ladderRung, setLadderRung] = useState(96);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const runtimeRef = useRef<Runtime | null>(null);
@@ -1082,12 +1085,36 @@ export function Viewport3D() {
 
   const terrainCache = useRef(new Map<string, Promise<TerrainPreview>>());
   const readTerrain = useCallback(
-    (path: string): Promise<TerrainPreview> => {
+    (path: string, spanMetres?: readonly number[] | null): Promise<TerrainPreview> => {
+      // A remote DEM is read at a rung chosen from the camera distance: the
+      // engine's COG reader picks the coarsest overview that still carries the
+      // requested resolution, so a far orbit costs fewer bytes. Local DEMs
+      // keep the session's fixed resolution — they are already on disk.
+      const remote = isRemoteDemPath(path);
+      const span = spanMetres && spanMetres.length === 2 ? Math.max(spanMetres[0], spanMetres[1]) : null;
+      const resolution = remote
+        ? previewResolutionForDistance(viewStore.current?.radius ?? null, span)
+        : terrainResolution;
       const cache = terrainCache.current;
-      const key = `${path}:${terrainResolution}`;
+      const key = `${path}:${resolution}`;
       let pending = cache.get(key);
       if (!pending) {
-        pending = bridge.terrainPreview(path, terrainResolution);
+        pending = remote
+          ? bridge.remoteCogPreview(path, resolution).then((preview) => ({
+              ok: preview.ok,
+              width: preview.width,
+              height: preview.height,
+              resolution: preview.resolution,
+              minElevation: preview.minElevation,
+              maxElevation: preview.maxElevation,
+              heights: preview.heights,
+              // The engine reader has no CRS accessor; the project's measured
+              // DEM span (from the probe/materialization) is authoritative.
+              extentMeters: spanMetres ? [spanMetres[0], spanMetres[1]] : [preview.levelWidth, preview.levelHeight],
+              spanXz: spanMetres ? [spanMetres[0], spanMetres[1]] : [preview.levelWidth, preview.levelHeight],
+              originXz: [0, 0],
+            }))
+          : bridge.terrainPreview(path, resolution);
         cache.set(key, pending);
         pending.catch(() => cache.delete(key));
       }
@@ -1329,6 +1356,18 @@ export function Viewport3D() {
     // a drag does not queue frames it cannot finish.
     let lastRenderRequest = 0;
     orbit.addEventListener("change", () => {
+      // A remote DEM's preview rung follows the orbit distance. Crossing a
+      // rung changes the terrain signature below, which rebuilds the mesh
+      // from the engine's next overview level.
+      const terrain = stateRef.current?.project.scene.objects.find(
+        (object) => object.kind.type === "terrain",
+      );
+      const span = terrain?.kind.type === "terrain" ? terrain.kind.worldSpanXz : null;
+      const rung = previewResolutionForDistance(
+        viewStore.current?.radius ?? null,
+        span ? Math.max(span[0], span[1]) : null,
+      );
+      setLadderRung((previous) => (previous === rung ? previous : rung));
       if (!modeRef.current) return;
       const now = performance.now();
       if (now - lastRenderRequest < 120) return;
@@ -1717,7 +1756,7 @@ export function Viewport3D() {
       const rampStrength = ramp?.strength ?? 1;
       const rampKey = rampName ? `${rampName}:${rampStrength}` : "none";
       const sunVision = sunVisionKey(project);
-      const signature = contentSignature(object, terrainResolution, rampKey, {
+      const signature = contentSignature(object, terrainResolution, ladderRung, rampKey, {
         asset: topImagery(project)?.asset ?? "",
         opacity: topImagery(project)?.opacity ?? 0,
       }, sunVision);
@@ -1803,7 +1842,7 @@ export function Viewport3D() {
         const expected = signature;
         const zScale = terrainKind.zScale;
         Promise.all([
-          readTerrain(asset.path),
+          readTerrain(asset.path, terrainKind.worldSpanXz),
           rampName
             ? loadColormapStops(rampName).then((stops) => ({
                 stops,
@@ -2065,7 +2104,7 @@ export function Viewport3D() {
       let preview: TerrainPreview;
       try {
         // Shares the terrain cache with the mesh build — one read per DEM.
-        preview = await readTerrain(terrainAsset.path);
+        preview = await readTerrain(terrainAsset.path, terrainKind.worldSpanXz);
       } catch {
         // The terrain's own error path already reports this one.
         return;

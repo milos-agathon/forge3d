@@ -9,7 +9,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "check": "tsc --noEmit",
-    "test": "node --experimental-strip-types src/state/datasets.test.ts && node --experimental-strip-types src/state/recipes.test.ts && node --experimental-strip-types src/viewport/viewMath.test.ts && node --experimental-strip-types src/viewport/cartography.test.ts && node --experimental-strip-types src/viewport/lighting.test.ts && node --experimental-strip-types src/viewport/colormap.test.ts && node --experimental-strip-types src/state/playback.test.ts && node --experimental-strip-types src/state/animationReach.test.ts && node --experimental-strip-types src/viewport/datasetThumb.test.ts && node --experimental-strip-types src/viewport/sunVisibility.test.ts && node --experimental-strip-types src/state/renderQueue.test.ts",
+    "test": "node --experimental-strip-types src/state/terrainLadder.test.ts && node --experimental-strip-types src/state/datasets.test.ts && node --experimental-strip-types src/state/recipes.test.ts && node --experimental-strip-types src/viewport/viewMath.test.ts && node --experimental-strip-types src/viewport/cartography.test.ts && node --experimental-strip-types src/viewport/lighting.test.ts && node --experimental-strip-types src/viewport/colormap.test.ts && node --experimental-strip-types src/state/playback.test.ts && node --experimental-strip-types src/state/animationReach.test.ts && node --experimental-strip-types src/viewport/datasetThumb.test.ts && node --experimental-strip-types src/viewport/sunVisibility.test.ts && node --experimental-strip-types src/state/renderQueue.test.ts",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",

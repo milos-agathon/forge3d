@@ -1562,30 +1562,43 @@ def _remote_preview_script() -> str:
     return match.group(1)
 
 
-def _write_cog_with_overviews(path: Path, size: int = 1024) -> bytes:
-    """A real Cloud Optimized GeoTIFF with a 2/4 pyramid (GDAL's COG driver)."""
+def _write_cog_with_overviews(path: Path, size: int = 1024, random: bool = False) -> bytes:
+    """A tiled GeoTIFF with a five-level pyramid down to 64 px."""
     import rasterio
     from rasterio.transform import from_origin
 
-    data = (np.arange(size * size, dtype=np.uint16).reshape(size, size) % 9000).astype(
-        "uint16"
-    )
+    if random:
+        # Incompressible data so tile bytes, not IFD headers, dominate the
+        # range-read byte counts the ladder test compares.
+        data = np.random.default_rng(7).integers(0, 65535, size=(size, size), dtype=np.uint16)
+    else:
+        data = (np.arange(size * size, dtype=np.uint16).reshape(size, size) % 9000).astype(
+            "uint16"
+        )
+    # A tiled GTiff with an explicit five-level pyramid (down to 64 px). The
+    # native COG reader accepts it over file:// and its range path, and the
+    # extra levels are what make the viewport's rung choice observable.
+    from rasterio.enums import Resampling
+
     with rasterio.open(
         path,
         "w",
-        driver="COG",
+        driver="GTiff",
         height=size,
         width=size,
         count=1,
         dtype="uint16",
-        blocksize=256,
+        tiled=True,
+        blockxsize=256,
+        blockysize=256,
         compress="DEFLATE",
-        overview_resampling="average",
-        num_threads="ALL_CPUS",
+        predictor=2,
         crs="EPSG:4326",
         transform=from_origin(138.6, 35.5, 0.0002, 0.0002),
     ) as dst:
         dst.write(data, 1)
+        dst.build_overviews([2, 4, 8, 16], Resampling.average)
+        dst.update_tags(ns="rio_overview", resampling="average")
     return path.read_bytes()
 
 
@@ -1659,3 +1672,34 @@ def test_the_remote_dem_preview_reads_the_overview_through_the_range_reader(tmp_
     assert float(drift.max()) <= 0.05 * span, (
         f"the remote preview drifted from the local one by {float(drift.max())} of {span}"
     )
+
+
+def test_the_remote_preview_ladder_selects_finer_overviews(tmp_path):
+    """18.2: the viewport picks a resolution from camera distance. The engine
+    reader must actually select a finer overview for the larger request —
+    otherwise the rung is only a number in the UI.
+
+    Byte counts are deliberately NOT asserted here: the range reader fetches
+    block-aligned ~128 KiB windows, and on this fixture both rungs land in the
+    same window (measured: 132,911 B for each). The separate overview test
+    already pins that a remote preview costs a fraction of the whole file.
+    """
+    import sys
+
+    sys.path.insert(0, str(REPO / "tests"))
+    from _cog_http_fixtures import _clear_cog_cache, _serve_range
+
+    cog_path = tmp_path / "ladder.cog.tif"
+    body = _write_cog_with_overviews(cog_path)
+    server, url, _served = _serve_range(body)
+    try:
+        _clear_cog_cache()
+        coarse = _run_remote_preview(url, 64)
+        _clear_cog_cache()
+        fine = _run_remote_preview(url, 256)
+    finally:
+        server.shutdown()
+
+    assert fine["level"] < coarse["level"], (coarse["level"], fine["level"])
+    assert len(coarse["heights"]) == 64 * 64
+    assert len(fine["heights"]) == 256 * 256

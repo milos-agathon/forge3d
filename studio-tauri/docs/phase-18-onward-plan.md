@@ -74,7 +74,21 @@ nothing is missing engine-side.
 quoted and justified); the cache respects its byte budget; `npm test`, fast
 lane, service tests, fmt/clippy green.
 
-**Status:** not started; rung 1 shipped (`ef9df55a`).
+**Status: rungs 1 and 2 shipped** (`ef9df55a`, this increment). Rung 1 read
+the coarsest overview through the engine's range reader for the dialog.
+Rung 2 adds a camera-driven resolution ladder in the viewport: three rungs
+(96/160/256) chosen from orbit distance over the DEM's measured span
+(`src/state/terrainLadder.ts`, node-tested), remote DEM previews routed through
+`remoteCogPreview` at that resolution, and a debounced mesh rebuild when the
+camera crosses a rung. The engine reader's own level selection makes the
+choice real: a 64-px request selects overview level 4, a 256-px request level 3
+(`test_the_remote_preview_ladder_selects_finer_overviews`). Byte counts do NOT
+distinguish these rungs — the range reader fetches block-aligned ~128 KiB
+windows, measured at 132,911 B for both — so the test pins the level and the
+returned heightfield size instead, and the earlier overview test pins the
+fraction-of-file claim.
+
+Still open in Phase 18: 18.1 (remote DEM asset kind) and 18.3 (streaming still).
 
 ---
 
