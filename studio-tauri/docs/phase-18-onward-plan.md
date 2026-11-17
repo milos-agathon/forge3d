@@ -120,6 +120,21 @@ restored. Fast lane 760/760, camera+ledger 43/43.
 Still open: 19.2 (the service composites imported meshes over the MapScene
 frame with the same camera, with an ablation gate) and 19.3 (Rendered viewport).
 
+**Why 19.2 is not a small follow-on (measured while scoping it).** A mesh
+object's transform is in the Studio viewport frame: Y up, terrain 12 units
+wide (`SCENE_TERRAIN_SIZE`), north at -Z. The MapScene still is in the
+renderer's metre frame: Z up, terrain centred on Z=0, and the camera handed
+over by `compute_render_view` already maps viewport units to metres with
+`scale = max_span / 12`. The conversion is therefore not a component swap —
+it is an affine transform
+`(vx, vy, vz) -> (vx*s, -vz*s, vy*s - half_relief)` with
+`half_relief = (high-low)*z_scale/2`, applied to the object's row-major matrix
+before instancing. A first pass added the mesh handoff to the shell payload
+but was reverted rather than shipped inert: placing the mesh incorrectly
+would be a silent mismatch between Solid and Rendered, which this project
+forbids. 19.2 needs that conversion pinned by a screen-position test (a cube
+at a known viewport position lands at a known pixel) before it ships.
+
 ---
 
 ## Phase 20 — MapScene native layers (engine + Studio)
