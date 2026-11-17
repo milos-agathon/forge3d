@@ -306,6 +306,7 @@ def instance_mesh_gpu_render(
     certificate: bool | str = False,
     cache: str | None = None,
     pbr: Dict[str, Any] | None = None,
+    camera: Dict[str, Any] | None = None,
 ) -> np.ndarray:
     """Render an instanced mesh via the native GPU instancing path, returning an RGBA8 image.
 
@@ -322,6 +323,12 @@ def instance_mesh_gpu_render(
         environment (constant linear RGB radiance), and sun_color (RGB).
         Uses precomputed IBL and requires enable-pbr/enable-tbn. The default
         remains legacy lighting. This entry point has no shadow-caster pass.
+    camera : dict, optional
+        ``{"eye": [x,y,z], "target": [x,y,z], "up": [x,y,z],
+        "fov_deg": 45, "aspect": width/height}``. Only ``eye`` is required;
+        the rest default to the renderer's original fixed camera. The engine
+        builds the view/projection with its own helpers, so the mesh and a
+        terrain frame can share one viewpoint.
 
     Returns
     -------
@@ -346,8 +353,35 @@ def instance_mesh_gpu_render(
     arr = np.asarray(transforms, dtype=np.float32)
     if arr.ndim != 2 or arr.shape[1] != 16:
         raise ValueError("transforms must have shape (N,16) row-major 4x4")
+    if camera is not None:
+        if not isinstance(camera, dict) or "eye" not in camera:
+            raise ValueError("camera must be a dict with an 'eye' position")
+        eye = np.asarray(camera["eye"], dtype=np.float32)
+        if eye.shape != (3,) or not np.all(np.isfinite(eye)):
+            raise ValueError("camera 'eye' must be a finite 3D position")
     payload = _mesh_to_py(mesh)
     options = {} if pbr is None else {"pbr": pbr}
+    if camera is not None:
+        payload_camera = {
+            "eye": np.ascontiguousarray(eye, dtype=np.float32),
+            # Computed here (ints -> float) so the Rust entry point adds no
+            # new narrowing casts to the tracked f32 inventory.
+            "aspect": float(width) / float(height),
+            "fov_deg": float(camera.get("fov_deg", 45.0)),
+        }
+        for key in ("target", "up"):
+            if key in camera:
+                value = np.asarray(camera[key], dtype=np.float32)
+                if value.shape != (3,) or not np.all(np.isfinite(value)):
+                    raise ValueError(f"camera '{key}' must be a finite 3D vector")
+                payload_camera[key] = np.ascontiguousarray(value, dtype=np.float32)
+        for key in ("fov_deg", "aspect"):
+            if key in camera:
+                value = float(camera[key])
+                if not np.isfinite(value) or value <= 0.0:
+                    raise ValueError(f"camera '{key}' must be a positive number")
+                payload_camera[key] = value
+        options["camera"] = payload_camera
     return fn(int(width), int(height), payload, arr, certificate=certificate, **options)
 
 

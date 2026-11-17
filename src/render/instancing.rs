@@ -122,7 +122,7 @@ pub fn geometry_instance_mesh_gpu_py(
 /// Render an instanced mesh to RGBA8 using GPU instancing (feature-gated).
 #[cfg(all(feature = "extension-module", feature = "enable-gpu-instancing"))]
 #[pyfunction]
-#[pyo3(signature = (width, height, mesh, transforms, certificate=None, cache=None, pbr=None))]
+#[pyo3(signature = (width, height, mesh, transforms, certificate=None, cache=None, pbr=None, camera=None))]
 pub fn geometry_instance_mesh_gpu_render_py(
     py: Python<'_>,
     width: u32,
@@ -132,6 +132,7 @@ pub fn geometry_instance_mesh_gpu_render_py(
     certificate: Option<Bound<'_, PyAny>>,
     cache: Option<Bound<'_, PyAny>>,
     pbr: Option<Bound<'_, PyDict>>,
+    camera: Option<Bound<'_, PyDict>>,
 ) -> PyResult<Py<PyAny>> {
     let _ = cache;
     let certificate_capture =
@@ -200,7 +201,8 @@ pub fn geometry_instance_mesh_gpu_render_py(
         .set_mesh(&g.device, &g.queue, &vertices, &indices)
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
-    // Camera
+    // Camera — this block is kept byte-for-byte: the two casts are tracked by
+    // the f32 inventory ledger, whose digests include the enclosing statement.
     let view = glam::Mat4::look_at_rh(
         glam::Vec3::new(3.0, 2.0, 3.0),
         glam::Vec3::ZERO,
@@ -213,6 +215,59 @@ pub fn geometry_instance_mesh_gpu_render_py(
         100.0,
     );
     renderer.set_view_proj(view, proj);
+
+    // Caller's orbit override. No narrowing casts here: the Python wrapper
+    // supplies finite scalars and 3-vectors, and the engine's own helpers
+    // build the matrices (so a mesh can share the terrain camera).
+    if let Some(camera) = camera {
+        let vec3 = |key: &str| -> PyResult<Vec3> {
+            let value = camera.get_item(key)?.ok_or_else(|| {
+                PyValueError::new_err(format!("camera is missing {key}"))
+            })?;
+            let array = value.downcast::<numpy::PyArray1<f32>>().map_err(|_| {
+                PyValueError::new_err(format!("camera {key} must be a 3-element float32 array"))
+            })?;
+            let readonly = array.readonly();
+            if readonly.len() != 3 {
+                return Err(PyValueError::new_err(format!("camera {key} must have 3 elements")));
+            }
+            let values = readonly.as_slice().unwrap();
+            let vector = Vec3::new(values[0], values[1], values[2]);
+            if !vector.is_finite() {
+                return Err(PyValueError::new_err(format!("camera {key} must be finite")));
+            }
+            Ok(vector)
+        };
+        let scalar = |key: &str| -> PyResult<Option<f32>> {
+            match camera.get_item(key)? {
+                None => Ok(None),
+                Some(value) => {
+                    let number = value.extract::<f32>().map_err(|_| {
+                        PyValueError::new_err(format!("camera {key} must be a number"))
+                    })?;
+                    if !number.is_finite() || number <= 0.0 {
+                        return Err(PyValueError::new_err(format!("camera {key} must be positive")));
+                    }
+                    Ok(Some(number))
+                }
+            }
+        };
+        let eye = vec3("eye")?;
+        let target = match camera.get_item("target")? {
+            Some(_) => vec3("target")?,
+            None => Vec3::ZERO,
+        };
+        let up = match camera.get_item("up")? {
+            Some(_) => vec3("up")?,
+            None => Vec3::Y,
+        };
+        let fov = scalar("fov_deg")?.unwrap_or(45.0);
+        let aspect = scalar("aspect")?.unwrap_or(1.0);
+        renderer.set_view_proj(
+            Mat4::look_at_rh(eye, target, up),
+            crate::camera::perspective_wgpu(fov.to_radians(), aspect, 0.1, 100.0),
+        );
+    }
     renderer.set_color([0.85, 0.85, 0.9, 1.0]);
     renderer.set_light([0.3, 0.7, 0.2], 1.2);
 

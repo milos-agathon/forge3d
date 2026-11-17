@@ -105,7 +105,20 @@ supports `set_view_proj`, the Python entry point just never exposes it.
 **Gate:** the ablation is real; pixels move; no parallel renderer; the engine's
 feature inventory and contract tests stay green.
 
-**Status:** measured and scoped (`native-layers-findings.md` §1); not started.
+**Status: increment 1 landed (2026-11-17).** `instance_mesh_gpu_render` now
+takes an orbit camera (`eye`, optional `target`/`up`/`fov_deg`/`aspect`); the
+engine builds view/projection with its own `look_at_rh` and `perspective_wgpu`,
+so callers never match a matrix convention. The original fixed (3, 2, 3) eye
+is unchanged when no camera is supplied. A failing test first proved the gap
+(`tests/test_mesh_gpu_camera.py`: two eye positions, different pixels; a
+malformed camera is rejected), then the wrapper and PyO3 entry point were
+wired. The two tracked `as f32` sites in `instancing.rs` were deliberately left
+byte-identical — the f32 ledger's digests include their enclosing statement,
+and moving them made 20 ledger tests fail until the original block was
+restored. Fast lane 760/760, camera+ledger 43/43.
+
+Still open: 19.2 (the service composites imported meshes over the MapScene
+frame with the same camera, with an ablation gate) and 19.3 (Rendered viewport).
 
 ---
 
