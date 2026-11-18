@@ -490,7 +490,12 @@ impl ViewerTerrainScene {
         let overlay_view = overlay_stack
             .composite_view()
             .expect("overlay composite_view should exist after ensure_fallback_texture");
-        let overlay_sampler = if self.pbr_config.overlay.preserve_colors {
+        // FORGE3D_TERRAIN_DRAPE_LINEAR=1 keeps the overlay's bilinear sampler in the
+        // preserve-colours path (antialiased class edges; default stays nearest).
+        let drape_linear = std::env::var("FORGE3D_TERRAIN_DRAPE_LINEAR")
+            .map(|v| matches!(v.trim(), "1" | "true" | "on"))
+            .unwrap_or(false);
+        let overlay_sampler = if self.pbr_config.overlay.preserve_colors && !drape_linear {
             &sampler
         } else {
             overlay_stack.sampler()

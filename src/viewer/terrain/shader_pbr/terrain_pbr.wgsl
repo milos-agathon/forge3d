@@ -153,8 +153,55 @@ fn vs_main(@location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOut
     return out;
 }
 
+// Load-time switches. The host replaces these two lines (see
+// shader_pbr::terrain_pbr_shader_source) from FORGE3D_TERRAIN_SMOOTH_NORMALS /
+// FORGE3D_TERRAIN_RIDGE_GAIN; the defaults keep the legacy look.
+const SMOOTH_NORMALS: bool = false;
+const RIDGE_GAIN: f32 = 1.0;
+
+// Central-difference height gradient (dh/dx, dh/dz in world units) at one texel.
+fn texel_gradient(t: vec2<i32>, max_texel: vec2<i32>, step_x: f32, step_z: f32) -> vec2<f32> {
+    let tc = clamp(t, vec2<i32>(0, 0), max_texel);
+    let h_l = height_to_world_y(textureLoad(heightmap, vec2<i32>(max(tc.x - 1, 0), tc.y), 0).r);
+    let h_r = height_to_world_y(textureLoad(heightmap, vec2<i32>(min(tc.x + 1, max_texel.x), tc.y), 0).r);
+    let h_d = height_to_world_y(textureLoad(heightmap, vec2<i32>(tc.x, max(tc.y - 1, 0)), 0).r);
+    let h_u = height_to_world_y(textureLoad(heightmap, vec2<i32>(tc.x, min(tc.y + 1, max_texel.y)), 0).r);
+    return vec2<f32>((h_r - h_l) / (2.0 * step_x), (h_u - h_d) / (2.0 * step_z));
+}
+
+// Smooth-shaded normal: the per-texel gradients blended bilinearly across the
+// cell, so a wall's shade varies continuously along it instead of stepping
+// once per texel (each step reads as a vertical streak up a tall wall).
+fn compute_normal_smooth(uv: vec2<f32>) -> vec3<f32> {
+    let dims_u = textureDimensions(heightmap);
+    let max_texel = vec2<i32>(i32(dims_u.x) - 1, i32(dims_u.y) - 1);
+    let step_x = u.render_span_xz.x / max(f32(dims_u.x) - 1.0, 1.0);
+    let step_z = u.render_span_xz.y / max(f32(dims_u.y) - 1.0, 1.0);
+    let p = clamp(
+        uv * vec2<f32>(max(f32(dims_u.x) - 1.0, 0.0), max(f32(dims_u.y) - 1.0, 0.0)),
+        vec2<f32>(0.0, 0.0),
+        vec2<f32>(f32(max_texel.x), f32(max_texel.y)),
+    );
+    let i0 = vec2<i32>(floor(p));
+    let f = p - floor(p);
+    let g00 = texel_gradient(i0, max_texel, step_x, step_z);
+    let g10 = texel_gradient(i0 + vec2<i32>(1, 0), max_texel, step_x, step_z);
+    let g01 = texel_gradient(i0 + vec2<i32>(0, 1), max_texel, step_x, step_z);
+    let g11 = texel_gradient(i0 + vec2<i32>(1, 1), max_texel, step_x, step_z);
+    let g = mix(mix(g00, g10, f.x), mix(g01, g11, f.x), f.y);
+    let strength = u.pbr_params.y;
+    // Same orientation as compute_normal: cross(tangent_z, tangent_x).
+    var n = normalize(vec3<f32>(-g.x, 1.0, -g.y));
+    n.x *= strength;
+    n.z *= strength;
+    return normalize(n);
+}
+
 // Improved normal calculation from height gradient
 fn compute_normal(uv: vec2<f32>) -> vec3<f32> {
+    if SMOOTH_NORMALS {
+        return compute_normal_smooth(uv);
+    }
     let dims_u = textureDimensions(heightmap);
     let dims = vec2<f32>(f32(dims_u.x), f32(dims_u.y));
     let max_texel = vec2<i32>(i32(dims_u.x) - 1, i32(dims_u.y) - 1);
@@ -268,7 +315,7 @@ fn preserve_overlay_lighting(
     // Local ridge structure from screen-space normal variation.
     let dndx = dpdx(normal);
     let dndy = dpdy(normal);
-    let normal_gradient = length(dndx) + length(dndy);
+    let normal_gradient = (length(dndx) + length(dndy)) * RIDGE_GAIN;
     let edge_signal = clamp(
         mountain_weight * 0.24 + normal_gradient * (8.5 + 1.2 * normal_gain),
         0.0,

@@ -196,7 +196,7 @@ impl ViewerTerrainScene {
         let shader = crate::core::shader_registry::create_labeled_shader_module(
             &self.device,
             "terrain_viewer_pbr.shader",
-            crate::viewer::terrain::shader_pbr::TERRAIN_PBR_SHADER,
+            &crate::viewer::terrain::shader_pbr::terrain_pbr_shader_source(),
         );
 
         let pipeline_layout = self
