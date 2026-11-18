@@ -2370,13 +2370,21 @@ class PreparedCartography:
     def composite_overlays(self, rgb: "np.ndarray") -> "np.ndarray":
         """The cartography over a frame (the plain path's compositing)."""
         import forge3d as f3d
+        import numpy as np
+
+        frame = np.asarray(rgb)
+        input_channels = int(frame.shape[2]) if frame.ndim == 3 else 0
 
         for overlay in self.vector_overlays:
             rgb = composite_overlay(rgb, overlay)
         for layer, plan in self.label_plans:
+            # The public compositor returns RGBA for an RGB input; Studio's
+            # frame is RGB, so crop back once at this boundary.
             rgb, _rendered = f3d.composite_label_layers(
                 rgb, [layer], {layer.layer_id: plan}
             )
+        if input_channels == 3:
+            rgb = np.ascontiguousarray(np.asarray(rgb)[..., :3])
         return rgb
 
 

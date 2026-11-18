@@ -49,12 +49,16 @@ def test_native_label_layers_guard_uses_its_own_parameters():
     assert (out is base) and drawn is False
 
 
-def test_public_compositor_accepts_rgb_and_returns_three_channels():
+def test_public_compositor_accepts_rgb_and_returns_rgba():
     base = _frame(3)
-    # No layers/plans: the compositor returns the frame unchanged in shape.
+    # No layers/plans: the frame is padded to RGBA with an opaque alpha. The
+    # public contract is RGBA out; a caller that needs RGB crops at its own
+    # boundary (Studio does this in composite_overlays).
     out, drawn = map_scene.composite_label_layers(base, [], {})
     assert drawn is False
-    assert out.shape == base.shape
+    assert out.shape == base.shape[:2] + (4,)
+    assert np.array_equal(out[..., :3], base)
+    assert (out[..., 3] == 255).all()
 
 
 def test_public_compositor_rejects_an_unexpected_channel_count():

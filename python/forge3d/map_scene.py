@@ -3532,18 +3532,33 @@ def _label_batches_for_layers(
 def _composite_native_label_batches(
     base: Any, batches: Sequence[Mapping[str, Any]], *, scene_factory: Any | None = None,
 ) -> tuple[Any, bool]:
-    """Draw the glyph batches over `base` with the engine's text compositor."""
+    """Draw the glyph batches over `base` with the engine's text compositor.
+
+    The compositor works in RGBA. An RGB frame is padded here, once, so both
+    the public entry and MapScene's own path return the same four-channel
+    image; passing RGB straight through produced vertical stripes.
+    """
+    import numpy as np
+
+    frame = np.asarray(base)
+    if frame.ndim != 3 or frame.shape[2] not in (3, 4):
+        raise ValueError(
+            f"base must be HxWx3 or HxWx4, got shape {tuple(frame.shape)}"
+        )
+    if frame.shape[2] == 3:
+        alpha = np.full(frame.shape[:2] + (1,), 255, dtype=np.uint8)
+        frame = np.concatenate([frame, alpha], axis=2)
+    frame = np.ascontiguousarray(frame, dtype=np.uint8)
     if not batches:
         # No accepted label, no native scene: a scene without labels must not
         # reach for the legacy compositor at all.
-        return base, False
+        return frame, False
     scene_cls = _native_scene_class()
     if scene_cls is None:
-        return base, False
-    import numpy as np
+        return frame, False
 
-    height, width = base.shape[:2]
-    composited = np.ascontiguousarray(base, dtype=np.uint8)
+    height, width = frame.shape[:2]
+    composited = frame
     rendered_any = False
     required = ("set_raster_overlay", "set_native_text_atlas", "enable_native_text",
                 "add_native_text_rect_uv_halo", "render_rgba")
@@ -3619,28 +3634,15 @@ def composite_label_layers(
     composited image and whether any glyph was drawn.
 
     `base` may be RGB (H x W x 3) or RGBA. The native compositor works in
-    RGBA, so an RGB frame is padded for the draw and cropped back on the way
-    out — passing RGB straight through produced vertical stripes.
+    RGBA, so an RGB frame is padded with an opaque alpha channel and the
+    result is always RGBA. A caller that needs its original channel count
+    slices the result at its own boundary.
     """
     import numpy as np
 
-    frame = np.asarray(base)
-    if frame.ndim != 3 or frame.shape[2] not in (3, 4):
-        raise ValueError(
-            f"base must be HxWx3 or HxWx4, got shape {tuple(frame.shape)}"
-        )
-    channels = int(frame.shape[2])
-    if channels == 4:
-        rgba = np.ascontiguousarray(frame, dtype=np.uint8)
-    else:
-        alpha = np.full(frame.shape[:2] + (1,), 255, dtype=np.uint8)
-        rgba = np.ascontiguousarray(np.concatenate([frame, alpha], axis=2), dtype=np.uint8)
-    height, width = rgba.shape[:2]
+    height, width = np.asarray(base).shape[:2]
     batches = _label_batches_for_layers(layers, plans, int(width), int(height))
-    composited, drawn = _composite_native_label_batches(rgba, batches)
-    if channels == 3:
-        composited = np.ascontiguousarray(np.asarray(composited)[..., :3])
-    return composited, drawn
+    return _composite_native_label_batches(base, batches)
 
 
 def _needs_native_vector_composite(recipe: "SceneRecipe") -> bool:
