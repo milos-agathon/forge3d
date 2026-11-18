@@ -114,6 +114,7 @@ from .label_plan import (
     RejectedLabel,
 )
 from . import semantic_scale as semantic_scale
+from . import measured_sections as measured_sections
 from .map_scene import (
     RenderPassInput as RenderPassInput,
     RenderPassSpec as RenderPassSpec,
