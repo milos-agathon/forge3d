@@ -1,4 +1,5 @@
 import { useSession } from "../state/session-context";
+import { engineLabel } from "../state/engineLabel";
 
 function time(unixMs: number | null | undefined): string {
   if (!unixMs) return "—";
@@ -32,17 +33,7 @@ export function StatusBar() {
           .filter(Boolean)
           .join("\n") ?? "Probing for the Forge3D engine…"}
       >
-        {engine
-          ? engine.available
-            ? `forge3d ${engine.packageVersion ?? "?"}${
-                engine.backend ? ` · ${engine.backend}` : ""
-              }${
-                engine.adapter
-                  ? ` · ${engine.adapter.replace(/^NVIDIA GeForce\s*/, "").slice(0, 44)}`
-                  : ""
-              }${engine.software ? " · software" : ""}`
-            : "engine unavailable"
-          : "probing engine…"}
+        {engineLabel(engine)}
       </span>
       {state ? (
         <>

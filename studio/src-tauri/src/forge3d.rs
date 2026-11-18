@@ -169,7 +169,13 @@ def main():
     except Exception as exc:
         print(json.dumps({"ok": False, "detail": "import forge3d failed: %s" % (exc,)}))
         return
-    version = getattr(forge3d, "__version__", "unknown")
+    version = getattr(forge3d, "__version__", None)
+    if not version or str(version).strip().lower() in ("", "unknown"):
+        try:
+            from importlib.metadata import version as _package_version
+            version = _package_version("forge3d")
+        except Exception:
+            version = "unknown"
     backend = adapter = None
     software = False
     try:
@@ -1169,9 +1175,9 @@ fn run_vector_preview(
     dem_path: &str,
     tail: &[String],
 ) -> Result<serde_json::Value, String> {
-    let service = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src")
-        .join("studio_render.py");
+    // `sys.path` takes directories: passing the .py file itself made
+    // `import studio_render` fail with "No module named 'studio_render'".
+    let service = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut args = vec![
         kind.to_owned(),
         dem_path.to_owned(),
@@ -1785,7 +1791,15 @@ fn print_engine_check_remedies() {
 /// An empty user value is treated as unset.
 fn merge_python_path(path: String, existing: Option<String>) -> String {
     match existing {
-        Some(existing) if !existing.trim().is_empty() => format!("{path}:{existing}"),
+        Some(existing) if !existing.trim().is_empty() => {
+            // ':' is the POSIX separator; Windows uses ';'. `join_paths` picks
+            // the platform's, and reports a path that cannot be represented
+            // (it contains the separator) instead of producing a broken value.
+            match std::env::join_paths([path.as_str(), existing.as_str()]) {
+                Ok(joined) => joined.to_string_lossy().into_owned(),
+                Err(_) => path,
+            }
+        }
         _ => path,
     }
 }

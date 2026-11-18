@@ -3537,8 +3537,6 @@ def _composite_native_label_batches(
         # No accepted label, no native scene: a scene without labels must not
         # reach for the legacy compositor at all.
         return base, False
-    if not _needs_native_label_composite(recipe, plans):
-        return base, False
     scene_cls = _native_scene_class()
     if scene_cls is None:
         return base, False
@@ -3576,6 +3574,11 @@ def _composite_native_label_layers(
     scene_factory: Any | None = None,
     atlas_data: Mapping[str, tuple[Any, Mapping[str, Any]]] | None = None,
 ) -> tuple[Any, bool]:
+    # A scene with no accepted labels must not reach for the legacy
+    # compositor. This guard needs the recipe and the plans, which only exist
+    # here — putting it in `_composite_native_label_batches` raised NameError.
+    if not _needs_native_label_composite(recipe, plans):
+        return base, False
     height, width = base.shape[:2]
     batches = _mapscene_native_label_batches(
         recipe, plans, int(width), int(height),
@@ -3614,10 +3617,30 @@ def composite_label_layers(
     `layers` are `LabelLayer` objects (the plans are keyed by layer id) and
     `plans` maps each layer id to its compiled `LabelPlan`. The result is the
     composited image and whether any glyph was drawn.
+
+    `base` may be RGB (H x W x 3) or RGBA. The native compositor works in
+    RGBA, so an RGB frame is padded for the draw and cropped back on the way
+    out — passing RGB straight through produced vertical stripes.
     """
-    height, width = base.shape[:2]
+    import numpy as np
+
+    frame = np.asarray(base)
+    if frame.ndim != 3 or frame.shape[2] not in (3, 4):
+        raise ValueError(
+            f"base must be HxWx3 or HxWx4, got shape {tuple(frame.shape)}"
+        )
+    channels = int(frame.shape[2])
+    if channels == 4:
+        rgba = np.ascontiguousarray(frame, dtype=np.uint8)
+    else:
+        alpha = np.full(frame.shape[:2] + (1,), 255, dtype=np.uint8)
+        rgba = np.ascontiguousarray(np.concatenate([frame, alpha], axis=2), dtype=np.uint8)
+    height, width = rgba.shape[:2]
     batches = _label_batches_for_layers(layers, plans, int(width), int(height))
-    return _composite_native_label_batches(base, batches)
+    composited, drawn = _composite_native_label_batches(rgba, batches)
+    if channels == 3:
+        composited = np.ascontiguousarray(np.asarray(composited)[..., :3])
+    return composited, drawn
 
 
 def _needs_native_vector_composite(recipe: "SceneRecipe") -> bool:
