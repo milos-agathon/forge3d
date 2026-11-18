@@ -3734,12 +3734,45 @@ def _append_roof_geometry(
             _append_roof_triangle(positions, normals, indices, corners[3], ridge[1], corners[2])
 
 
+def _building_terrain_scale(recipe: "SceneRecipe") -> tuple[tuple[float, ...] | None, float | None]:
+    """Terrain bounds and measured metric span, used to place and size buildings."""
+    metadata = _metadata_dict(recipe.terrain.metadata)
+    bounds = metadata.get("bounds")
+    if not (isinstance(bounds, Sequence)
+            and not isinstance(bounds, (str, bytes))
+            and len(bounds) == 4):
+        bounds = None
+    span = metadata.get("terrain_span")
+    return (
+        tuple(float(value) for value in bounds) if bounds is not None else None,
+        float(span) if span is not None else None,
+    )
+
+
 def _native_building_mesh_batches_for_layers(
     layers: Sequence["BuildingLayer"],
+    terrain_bounds: Sequence[float] | None = None,
+    metric_span: float | None = None,
 ) -> list[dict[str, Any]] | None:
-    bounds = _building_scene_bounds(layers)
+    # Prefer the terrain's own bounds: normalizing a city footprint by its
+    # own bbox stretches it over an entire country DEM (measured: 0 changed
+    # pixels). The layer bbox remains the fallback for synthetic scenes.
+    bounds = (
+        tuple(float(value) for value in terrain_bounds)
+        if terrain_bounds is not None and len(terrain_bounds) == 4
+        else _building_scene_bounds(layers)
+    )
     if bounds is None:
         return None
+    # Height is given in metres; `metric_span` is the terrain's measured long
+    # side in metres. Bounds may be degrees, so they cannot set the height
+    # scale — only the placement. Without a measured span, fall back to the
+    # old city-scale rule rather than inventing one.
+    units_per_extent = (
+        1.7 / float(metric_span)
+        if metric_span is not None and float(metric_span) > 0.0
+        else 1.0 / 45.0
+    )
     try:
         import numpy as np
         from .geometry import extrude_polygon
@@ -3757,7 +3790,7 @@ def _native_building_mesh_batches_for_layers(
                 properties = feature["properties"]  # type: ignore[assignment]
             fill = _render_building_fill_color(properties)
             color = (fill[0] / 255.0, fill[1] / 255.0, fill[2] / 255.0, fill[3] / 255.0)
-            wall_height = max(0.08, min(1.4, _render_building_height(properties) / 45.0))
+            wall_height = min(1.4, max(1e-5, _render_building_height(properties) * units_per_extent))
             roof_type = _render_building_roof_type(properties)
             feature_id = str(
                 feature.get("id")
@@ -3812,7 +3845,10 @@ def _terrain_scatter_building_batches_for_recipe(
     building_layers = [layer for layer in recipe.layers if isinstance(layer, BuildingLayer)]
     if not building_layers:
         return None
-    batches = _native_building_mesh_batches_for_layers(building_layers)
+    terrain_bounds, metric_span = _building_terrain_scale(recipe)
+    batches = _native_building_mesh_batches_for_layers(
+        building_layers, terrain_bounds, metric_span,
+    )
     if not batches:
         return None
 
@@ -3989,7 +4025,10 @@ def _composite_native_building_layers(base: Any, recipe: "SceneRecipe") -> tuple
     scene_cls = _native_scene_class()
     if scene_cls is None:
         return base, False, {}
-    batches = _native_building_mesh_batches_for_layers(building_layers)
+    terrain_bounds, metric_span = _building_terrain_scale(recipe)
+    batches = _native_building_mesh_batches_for_layers(
+        building_layers, terrain_bounds, metric_span,
+    )
     if not batches:
         return base, False, {}
 
@@ -4086,7 +4125,16 @@ def _building_gltf_path(layer: "BuildingLayer") -> str | None:
             return str(value)
     if isinstance(layer.source, Mapping):
         value = layer.source.get("path") or layer.source.get("gltf_path") or layer.source.get("glb_path")
-        return str(value) if value else None
+        if not value:
+            return None
+        # A GeoJSON/CityJSON building layer carries its source path too. It
+        # is footprint data, not textured world geometry — refusing it as
+        # "world-space textured geometry" when TAA is on contradicts
+        # validate(), which reports the layer as supported.
+        fmt = str(layer.source.get("source_format", "")).lower()
+        if fmt and fmt not in {"mesh", "gltf", "glb"}:
+            return None
+        return str(value) if str(value).lower().endswith((".gltf", ".glb")) or fmt in {"mesh", "gltf", "glb"} else None
     if layer.source is not None:
         return str(layer.source)
     return None
