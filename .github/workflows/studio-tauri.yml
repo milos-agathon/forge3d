@@ -6,12 +6,12 @@ name: Studio Tauri
 on:
   pull_request:
     paths:
-      - "studio-tauri/**"
+      - "studio/**"
       - ".github/workflows/studio-tauri.yml"
   push:
     branches: [main]
     paths:
-      - "studio-tauri/**"
+      - "studio/**"
       - ".github/workflows/studio-tauri.yml"
 
 jobs:
@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: studio-tauri
+        working-directory: studio
     steps:
       - uses: actions/checkout@v4
 
@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: studio-tauri
+        working-directory: studio
     steps:
       - uses: actions/checkout@v4
 
@@ -137,7 +137,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: studio-tauri
+        working-directory: studio
     steps:
       - uses: actions/checkout@v4
 
@@ -160,4 +160,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: forge3d-studio-deb
-          path: studio-tauri/src-tauri/target/release/bundle/deb/*.deb
+          path: studio/src-tauri/target/release/bundle/deb/*.deb

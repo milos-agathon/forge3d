@@ -22,7 +22,7 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 SERVICE = (
     REPO
-    / "studio-tauri"
+    / "studio"
     / "src-tauri"
     / "src"
     / "studio_render.py"
@@ -1552,7 +1552,7 @@ def _remote_preview_script() -> str:
     """The shell's remote-preview script, extracted from the Rust source."""
     import re
 
-    source = (REPO / "studio-tauri" / "src-tauri" / "src" / "forge3d.rs").read_text(
+    source = (REPO / "studio" / "src-tauri" / "src" / "forge3d.rs").read_text(
         encoding="utf-8"
     )
     match = re.search(
@@ -1728,7 +1728,7 @@ def test_a_remote_dem_streams_into_the_still_without_a_local_copy(tmp_path):
     server, url, served = _serve_range(body)
     script = r"""
 import base64, json, sys
-sys.path.insert(0, sys.argv[1] + "/studio-tauri/src-tauri/src")
+sys.path.insert(0, sys.argv[1] + "/studio/src-tauri/src")
 import studio_render as sr
 request = {
     "width": 256, "height": 256,

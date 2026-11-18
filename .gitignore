@@ -289,7 +289,7 @@ __pycache__/
 !docs/assets/splat-fused-map.webp
 
 # The Studio HDRI sample environment: two shipped .studio3d samples resolve it.
-!studio-tauri/samples/media/*.hdr
+!studio/samples/media/*.hdr
 !tests/golden/
 !tests/golden/terrain/
 !tests/golden/terrain/*.png

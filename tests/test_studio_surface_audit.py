@@ -23,10 +23,10 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CORE = ROOT / "studio-tauri/crates/studio-core/src/project.rs"
-RENDER = ROOT / "studio-tauri/src-tauri/src/render.rs"
-COMMANDS = ROOT / "studio-tauri/src-tauri/src/commands.rs"
-SERVICE = ROOT / "studio-tauri/src-tauri/src/studio_render.py"
+CORE = ROOT / "studio/crates/studio-core/src/project.rs"
+RENDER = ROOT / "studio/src-tauri/src/render.rs"
+COMMANDS = ROOT / "studio/src-tauri/src/commands.rs"
+SERVICE = ROOT / "studio/src-tauri/src/studio_render.py"
 
 #: Engine parameters measured to change **0** channel samples through Studio's
 #: render path. They are engine features, not shell bugs — the shell must not
@@ -146,7 +146,7 @@ def test_the_model_carries_no_parameter_the_engine_ignores() -> None:
 # Python and Rust, not a compiled library), so it looks for a *reference*
 # rather than proving a call.
 
-SHELL = ROOT / "studio-tauri"
+SHELL = ROOT / "studio"
 
 
 def _shell_sources() -> list[Path]:

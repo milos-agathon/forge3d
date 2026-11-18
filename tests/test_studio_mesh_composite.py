@@ -29,7 +29,7 @@ sys.path.insert(0, str(REPO / "python"))
 def _service():
     import importlib.util
 
-    path = REPO / "studio-tauri" / "src-tauri" / "src" / "studio_render.py"
+    path = REPO / "studio" / "src-tauri" / "src" / "studio_render.py"
     spec = importlib.util.spec_from_file_location("studio_render_service", path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None

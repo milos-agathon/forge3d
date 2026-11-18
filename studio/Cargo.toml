@@ -1,10 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-    "crates/studio-project",
-    "crates/studio-engine",
-    "crates/forge3d-studio",
-]
+members = ["crates/studio-core", "src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -15,31 +11,5 @@ license = "Apache-2.0 OR MIT"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
-log = "0.4"
-env_logger = "0.11"
-image = { version = "0.25", default-features = false, features = ["png"] }
-
-# eframe 0.27 is pinned because its `wgpu` renderer feature uses wgpu 0.19 —
-# the exact same wgpu version the forge3d engine is built against. Sharing the
-# wgpu version keeps a single wgpu/naga build in the tree and leaves the door
-# open for true GPU-side viewport sharing later (see GUI.md milestone 5).
-eframe = { version = "0.27", default-features = false, features = [
-    "default_fonts",
-    "wgpu",
-    "wayland",
-    "x11",
-] }
-egui = "0.27"
-rfd = "0.14"
-resvg = "0.45"
-
-# The engine lives in the parent repository checkout. We enable its
-# `extension-module` feature — the exact configuration the Python wheel is
-# built with — because the native terrain renderer tree (terrain::renderer)
-# is only compiled under that feature. The Studio binary embeds libpython
-# symbols (linked in crates/forge3d-studio/build.rs) but never initializes
-# the interpreter: it drives TerrainScene, a plain Rust API.
-forge3d = { path = "..", features = ["extension-module"] }
-
-studio-project = { path = "crates/studio-project" }
-studio-engine = { path = "crates/studio-engine" }
+uuid = { version = "1", features = ["v4", "serde"] }
+studio-core = { path = "crates/studio-core" }

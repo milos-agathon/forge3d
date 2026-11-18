@@ -1,1 +1,16 @@
-/target
+# Frontend
+node_modules/
+dist/
+*.log
+
+# Rust
+target/
+src-tauri/gen/
+
+# Local preview artefacts
+.preview/
+
+# App icons ship with the bundle; the repository ignores *.png globally, so
+# re-include them (deeper .gitignore rules win).
+!src-tauri/icons/
+!src-tauri/icons/*.png
