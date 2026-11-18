@@ -513,6 +513,7 @@ from .publication import (PublicationSource, PublicationExtent, PublicationRecip
                           PublicationInset, PublicationLayout, PublicationSubject, publication_output_support)
 from .value_faithful import ValueFaithfulRasterBinding
 from .legend import Legend, LegendConfig
+from .raster_recipe import RasterRecipe, RasterRecipeSource
 from .raster_style import RasterHeightSurfaceStyle, CategoricalRasterStyle, BivariateRasterStyle, RasterStyleResult
 from .scale_bar import ScaleBar, ScaleBarConfig
 from .north_arrow import NorthArrow, NorthArrowConfig
@@ -747,6 +748,8 @@ from .precision import dd_harness, dd_jitter_demo, dd_selftest
 __all__ = [
     "RasterHeightSurfaceStyle",
     "CategoricalRasterStyle",
+    "RasterRecipe",
+    "RasterRecipeSource",
     "BivariateRasterStyle",
     "RasterStyleResult",
     "terrain",

@@ -112,6 +112,7 @@ class TestNativeModuleSymbols:
         "MaterialSet",
         "IBL",
         "OverlayLayer",
+        "_ResidentRasterRecipe",
         "TerrainRenderParams",
         "TerrainRenderer",
         "Medium",

@@ -95,15 +95,7 @@ impl OverlayLayer {
             &data,
         )
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        Ok(Self {
-            source: OverlaySource::Raster {
-                lut: std::sync::Arc::new(lut),
-            },
-            strength,
-            offset: 0.0,
-            domain: (0.0, 1.0),
-            blend_mode: OverlayBlendMode::Alpha,
-        })
+        Ok(Self::from_raster_lut(lut, strength))
     }
 
     /// Create an overlay sourced from a 1D colormap.
@@ -197,6 +189,18 @@ impl OverlayLayer {
 
 #[cfg(feature = "extension-module")]
 impl OverlayLayer {
+    pub(crate) fn from_raster_lut(lut: crate::terrain::ColormapLUT, strength: f32) -> Self {
+        Self {
+            source: OverlaySource::Raster {
+                lut: std::sync::Arc::new(lut),
+            },
+            strength,
+            offset: 0.0,
+            domain: (0.0, 1.0),
+            blend_mode: OverlayBlendMode::Alpha,
+        }
+    }
+
     pub fn strength_value(&self) -> f32 {
         self.strength
     }
