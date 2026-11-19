@@ -15,7 +15,7 @@ organized by workflow rather than by Rust module layout.
 | Vector overlays and labels | `VectorLineLayer`, `ViewerHandle.add_vector_line`, `ViewerHandle.add_vector_overlay`, `ViewerHandle.add_label`, `ViewerHandle.add_labels`, `ViewerHandle.add_line_label`, `ViewerHandle.add_callout` | `vector_line_drape.py`, `luxembourg_rail_overlay.py`, `fuji_labels_demo.py` |
 | Picking and selection | `viewer_ipc` picking helpers | `picking_demo.py`, `picking_test_interactive.py` |
 | Point clouds | `ViewerHandle.load_point_cloud`, `forge3d.pointcloud` | `pointcloud_viewer_interactive.py` |
-| Camera automation | `forge3d.animation`, `forge3d.camera_rigs` | `camera_animation_demo.py`, `terrain_camera_rigs_demo.py` |
+| Camera automation | `forge3d.animation`, `forge3d.camera_rigs`, `[forge3d.cinema](../api/cinema.md)` | `camera_animation_demo.py`, `terrain_camera_rigs_demo.py`, `autochiron_reveal_orbit.py` |
 | Subject-led terrain reveals | [`compile_subject_shot`](subject_story.md), `SubjectFeature`, `StoryObstacle`, `StoryAnnotation` | `c07_grindelwald_eiger.py` |
 | Terrain quality controls | `terrain_params`, `presets`, `terrain_scatter` | `terrain_atmosphere_path_demo.py`, `pnoa_river_showcase_video.py` |
 | Caller-driven water surfaces and optics | `WaterOpticsSettings` through `TerrainRenderer` | [Water optics](water_optics.md), `terrain_water_optics.py` |

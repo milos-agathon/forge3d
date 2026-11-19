@@ -583,9 +583,24 @@ def _complete_conversion_inventory():
     return sites
 
 
-def _scanned_conversion_inventory():
+def _scanned_with_autochiron():
     """The scanned inventory, excluding the exact lossless DD split."""
     return [site for site in _complete_conversion_inventory() if site not in SANCTIONED_DD_SPLITS]
+
+
+def _undo_autochiron_transition(sites):
+    transition = _ledger_data()["autochiron"]
+    added = set(map(tuple, transition["added"]))
+    assert len(transition["added"]) == len(added) == 18
+    assert transition["removed"] == []
+    for site in added:
+        assert sites.count(site) == 1, f"AUTOCHIRON conversion missing or duplicated: {site}"
+    return [site for site in sites if site not in added]
+
+
+def _scanned_conversion_inventory():
+    """Restore the main inventory used by the historical freezes below."""
+    return _undo_autochiron_transition(_scanned_with_autochiron())
 
 
 def _undo_viewer_terrain_grid_axes_transition(sites):
@@ -1988,3 +2003,29 @@ def test_latest_main_integration_rejects_missing_duplicate_changed_and_extra_sit
                             sites[:i] + [changed] + sites[i+1:], sites + [changed]):
                 with pytest.raises(AssertionError):
                     _undo_latest_main_integration(mutated, side)
+
+
+def test_autochiron_inventory_transition_is_exact():
+    ledger = _ledger_data()
+    approved = ledger["autochiron"]
+    assert approved["review"]
+    assert (approved["base_count"], approved["base_digest"]) == (
+        1832, "757d9c40e9f4dde8935f45dd6bab69b81c6d82f8d51dfc327c06fd7e21de01f9",
+    )
+    assert (approved["result_count"], approved["result_digest"]) == (
+        1850, "9e7a23747ae95ed6d259bf6d387a3bfb7e7eefdbb38671fe1ad7f87d9e587087",
+    )
+
+    transition = ledger["autochiron_main_integration"]
+    main = ledger["viewer_terrain_clip_planes"]
+    assert (transition["base_count"], transition["base_digest"]) == (
+        main["result_count"], main["result_digest"],
+    )
+    sites = _scanned_with_autochiron()
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    base = _undo_autochiron_transition(sites)
+    assert (len(base), _inventory_digest(base)) == (
+        transition["base_count"], transition["base_digest"],
+    )

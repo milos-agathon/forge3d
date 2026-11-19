@@ -50,6 +50,7 @@ data loading, cartography, export, and the runnable examples in ``examples/``.
 
    api/media
    api/api_reference
+   api/cinema
 
 Where To Start
 --------------
