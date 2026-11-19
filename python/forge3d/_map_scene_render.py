@@ -1503,8 +1503,9 @@ def _compose_furniture(image: Any, recipe: Any) -> None:
     graticule = _config_mapping(getattr(furniture, "graticule", None))
     if graticule:
         _draw_graticule(image, recipe, graticule)
+    observation = (furniture.metadata or {}).get("observation_map")
     legend = _config_mapping(getattr(furniture, "legend", None))
-    if legend:
+    if legend and not observation:
         _draw_simple_legend(image, legend)
     scale_bar = _config_mapping(getattr(furniture, "scale_bar", None))
     if scale_bar:
@@ -1512,7 +1513,50 @@ def _compose_furniture(image: Any, recipe: Any) -> None:
     north_arrow = _config_mapping(getattr(furniture, "north_arrow", None))
     if north_arrow:
         _compose_north_arrow(image, recipe, north_arrow)
-    _draw_title(image, str(getattr(furniture, "title", "") or ""))
+    if not observation:
+        _draw_title(image, str(getattr(furniture, "title", "") or ""))
     locator = (furniture.metadata or {}).get("semantic_scale_locator")
     if locator:
         _compose_semantic_scale_locator(image, locator)
+    if observation:
+        _draw_observation_captions(image, furniture.title, observation, legend)
+
+
+def _draw_observation_captions(
+    image: Any, title: str | None, observation: Mapping[str, Any], legend: Mapping[str, Any]
+) -> None:
+    """Keep time, state and source readable over both missing and observed pixels."""
+    height, width = image.shape[:2]
+    padding, font_size = 12, 14
+    ink, paper = (244, 245, 241, 255), (27, 32, 33, 255)
+    state = observation["raster_selection"]["state"]
+    state_color = {"observed": (160, 223, 201, 255), "held": (255, 213, 140, 255),
+                   "missing": (255, 178, 161, 255)}[state]
+    rows = ([(title, ink)] if title else []) + [
+        (line, state_color if i == 1 else ink) for i, line in enumerate(observation["captions"])
+    ]
+    # All frames reserve the same viewport. Reject captions which cannot fit at
+    # the authored size rather than resizing the map on a caption transition.
+    if any(_text_outline_metrics(line, font_size)[0] > width - 2 * padding for line, _ in rows):
+        raise ValueError("Observation captions require a wider output")
+    line_height = font_size + 4
+    header = 2 * padding + line_height * len(rows)
+    items = legend.get("entries") or legend.get("items") or legend.get("labels") or ()
+    legend_line = int(np.ceil(float(legend.get("font_size", 12)) * 1.5))
+    # Reserve the existing legend's vertical extent, including outer margins.
+    footer = legend_line * len(items) + 40 if items else 0
+    map_height = height - header - footer
+    if map_height <= 0:
+        raise ValueError("Observation captions leave no room for the map")
+    map_width = max(1, int(round(width * map_height / height)))
+    x = (width - map_width) // 2
+    from .map_scene import _resize_nearest_rgba
+
+    mapped = _resize_nearest_rgba(image, (map_height, map_width))
+    image[...] = paper
+    image[header:header + map_height, x:x + map_width] = mapped
+    for i, (line, color) in enumerate(rows):
+        _draw_text(image, line, (padding, padding + i * line_height), color=color,
+                   halo=(0, 0, 0, 0), halo_width_px=0, font_size=font_size)
+    if items:
+        _draw_simple_legend(image, legend)

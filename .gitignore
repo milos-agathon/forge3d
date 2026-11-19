@@ -403,6 +403,8 @@ examples/.cache/
 examples/out/
 examples/output/
 examples/**/*.py
+!examples/dixie_observation_map.py
+!examples/dixie_observation_qgis.py
 !examples/c06_population_publication.py
 !examples/c02_amsterdam_value_faithful.py
 !examples/moon_south_pole.py
