@@ -515,6 +515,7 @@ from .publication import (PublicationSource, PublicationExtent, PublicationRecip
                           PublicationInset, PublicationLayout, PublicationSubject, publication_output_support)
 from .value_faithful import ValueFaithfulRasterBinding
 from .legend import Legend, LegendConfig
+from .raster_recipe import RasterRecipe, RasterRecipeSource
 from .raster_style import RasterHeightSurfaceStyle, CategoricalRasterStyle, BivariateRasterStyle, RasterStyleResult
 from .scale_bar import ScaleBar, ScaleBarConfig
 from .north_arrow import NorthArrow, NorthArrowConfig
@@ -690,6 +691,7 @@ from .label_plan import (
 # Typed MapScene recipe contract
 # -----------------------------------------------------------------------------
 from . import semantic_scale
+from . import measured_sections
 from .map_scene import (
     RenderPassInput,
     RenderPassSpec,
@@ -752,6 +754,8 @@ __all__ = [
     "cinema", "Subject", "FramingSpec", "Shot", "ShotPlan", "CinemaInfeasible", "CinemaNativeUnavailable", "plan_shots",
     "RasterHeightSurfaceStyle",
     "CategoricalRasterStyle",
+    "RasterRecipe",
+    "RasterRecipeSource",
     "BivariateRasterStyle",
     "RasterStyleResult",
     "terrain",
@@ -1087,6 +1091,7 @@ __all__ = [
     "MapSceneTextLayoutError",
     "CompiledScenePlan",
     "semantic_scale",
+    "measured_sections",
     "SceneRecipe",
     "TerrainSource",
     "RasterOverlay",

@@ -609,6 +609,15 @@ class FlythroughManifest:
             )
         return provenance
 
+    def replay_observation_frame(self, frame_index: int, out_path: str | Path) -> Mapping[str, Any]:
+        """Replay a stored observation recipe using its retained scene assets."""
+        canonical = str(self.frame_record(frame_index)["compiled_frame"])
+        recipe = json.loads(canonical)["scene"]["scene"]
+        furniture = recipe.get("map_furniture") or {}
+        if "observation_map" not in (furniture.get("metadata") or {}):
+            raise ValueError("Stored frame is not an observation map")
+        return self.replay_frame(MapScene(MapScene._recipe_from_dict(recipe)), frame_index, out_path)
+
 
 def render_flythrough(
     camera_path: Sequence[MapScene] | Mapping[int, MapScene],
@@ -682,14 +691,20 @@ def render_flythrough(
 
     compiled_by_index: dict[int, Any] = {}
     for index in sorted_indices:
+        furniture = frame_scenes[index].recipe.map_furniture
+        observation = furniture is not None and "observation_map" in (furniture.metadata or {})
+        # Observation frames are independently addressable. Keep even their
+        # static map labels independent of the selected render subset.
+        label_events = (
+            dict.fromkeys(per_frame_keys[index], (None, None)) if observation else
+            {key: events[key].get(index, (None, None)) for key in all_keys}
+        )
         compiled_by_index[index] = _prepare_frozen_frame(
             frame_scenes[index],
             index,
             int(base_seed),
             int(samples),
-            label_events={
-                key: events[key].get(index, (None, None)) for key in all_keys
-            },
+            label_events=label_events,
             label_fade_frames=label_fade_frames,
         )
 

@@ -67,9 +67,12 @@ _CACHE_OWNERS = {
 }
 _CACHE_DELEGATES = {
     ("__init__.py", "render_triangle_png", "self.render_triangle_rgba"),
+    ("_measured_section_plate.py", "render_section_plate", "scene.render"),
     ("chronos.py", "render_flythrough", "_render_frames"),
     ("map_scene.py", "render", "render_sequence"),
     ("map_scene.py", "render_passes", "self.render"),
+    ("measured_sections.py", "render_section", "render_section_plate"),
+    ("observation_map.py", "render", "render_flythrough"),
     ("path_tracing.py", "render_terrain_poster", "hybrid_render_terrain_reference"),
     ("publication.py", "render_series", "self._render_layout_series"),
     ("publication.py", "render_flyover", "_render_publication_flyover"),

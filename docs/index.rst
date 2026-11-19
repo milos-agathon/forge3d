@@ -32,6 +32,10 @@ data loading, cartography, export, and the runnable examples in ``examples/``.
    guides/data_and_scene_workflows
    guides/data_to_scene
    guides/c05_real_data
+   guides/measured_sections
+   guides/measured_sections_evidence
+   guides/observation_maps
+   guides/gpu_raster_recipes
    guides/rendering_and_analysis
    terrain/offline-render-quality
    guides/output_and_integration
