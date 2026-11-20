@@ -65,6 +65,8 @@ jobs:
       - name: Install reviewed Rust toolchain for full-suite subprocesses
         if: inputs.test_mode == 'full'
         uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: rustfmt
 
       - name: Prove exact-head checkout
         shell: python
