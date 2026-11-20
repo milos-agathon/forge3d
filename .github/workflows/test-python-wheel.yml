@@ -63,10 +63,22 @@ jobs:
       # The full Python suite also invokes Cargo for its Unicode and VT-store
       # contracts. Use the same reviewed compiler as the Rust acceptance lane.
       - name: Install reviewed Rust toolchain for full-suite subprocesses
-        if: inputs.test_mode == 'full'
+        if: inputs.test_mode == 'full' && runner.os != 'Windows'
         uses: dtolnay/rust-toolchain@1.97.1
         with:
           components: rustfmt
+
+      # The physical runner's bash resolves to WSL, which cannot open the
+      # Windows script path passed by composite actions. Use native PowerShell.
+      - name: Install reviewed Rust toolchain for Windows full-suite subprocesses
+        if: inputs.test_mode == 'full' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal --component rustfmt --no-self-update
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          'RUSTUP_TOOLCHAIN=1.97.1' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          rustup run 1.97.1 rustfmt --version
+          exit $LASTEXITCODE
 
       - name: Prove exact-head checkout
         shell: python
