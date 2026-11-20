@@ -864,6 +864,17 @@ def test_publish_requires_full_ci_before_every_other_job() -> None:
     assert "!(github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true')" in jobs["release-assets"]["if"]
 
 
+def test_wheels_use_the_reviewed_full_ci_rust_toolchain() -> None:
+    rust = _workflow_data("ci.yml")["jobs"]["test-rust"]
+    reviewed = next(step["uses"].split("@", 1)[1] for step in rust["steps"]
+                    if step.get("name") == "Install Rust toolchain")
+    for workflow, job in (("publish.yml", "build-wheels"), ("build-wheel.yml", "build")):
+        steps = _workflow_data(workflow)["jobs"][job]["steps"]
+        build = next(step for step in steps
+                     if step.get("uses") == "PyO3/maturin-action@v1")
+        assert build["with"]["rust-toolchain"] == reviewed == "1.97.1"
+
+
 def test_full_dispatch_scope_is_recorded_in_summary_metadata() -> None:
     job = _workflow_data("ci.yml")["jobs"]["full-acceptance-summary"]
     step = job["steps"][0]

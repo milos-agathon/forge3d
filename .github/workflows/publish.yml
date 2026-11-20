@@ -79,6 +79,8 @@ jobs:
           # ring's aarch64 assembly expects this macro under the manylinux cross compiler.
           CFLAGS_aarch64_unknown_linux_gnu: ${{ matrix.platform.target == 'aarch64-unknown-linux-gnu' && '-D__ARM_ARCH=8' || '' }}
         with:
+          # Match the reviewed full-CI toolchain; newer runner defaults fail objc2.
+          rust-toolchain: '1.97.1'
           target: ${{ matrix.platform.target }}
           args: ${{ matrix.platform.maturin_args }}
           manylinux: auto

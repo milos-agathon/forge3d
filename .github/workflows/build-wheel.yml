@@ -52,6 +52,8 @@ jobs:
           # ring's aarch64 assembly expects this macro under the manylinux cross compiler.
           CFLAGS_aarch64_unknown_linux_gnu: ${{ inputs.target == 'aarch64-unknown-linux-gnu' && '-D__ARM_ARCH=8' || '' }}
         with:
+          # Keep candidate and release builds on the reviewed full-CI toolchain.
+          rust-toolchain: '1.97.1'
           target: ${{ inputs.target }}
           args: ${{ inputs.maturin_args }}
           manylinux: ${{ inputs.manylinux }}
