@@ -111,6 +111,10 @@ def test_country_scale_building_height_is_anchored_to_the_dem(tmp_path):
     assert 0.0 < batches[0]["wall_height"] < 0.01, batches[0]["wall_height"]
 
 
+@pytest.mark.xfail(
+    reason="needs the scatter draw from engine PRs 1-2; remove once they land",
+    strict=True,
+)
 def test_country_scale_buildings_move_real_pixels(tmp_path):
     from PIL import Image
 
