@@ -14,6 +14,7 @@ from forge3d.legend import Legend
 from forge3d.lighting import RestirDI
 from forge3d.map_scene import MapScene
 from forge3d.map_plate import MapPlate
+from forge3d.measured_sections import render_section
 from forge3d.north_arrow import NorthArrow
 from forge3d.offline import render_offline
 from forge3d.scale_bar import ScaleBar
@@ -82,6 +83,7 @@ RENDER_ENTRYPOINTS = {
     "Renderer.render_triangle_rgba": f3d.Renderer.render_triangle_rgba,
     "Renderer.render_triangle_png": f3d.Renderer.render_triangle_png,
     "MapScene.render": MapScene.render,
+    "measured_sections.render_section": render_section,
     "CompiledSubjectShot.render": f3d.CompiledSubjectShot.render,
     "render_offline": render_offline,
     "render_flythrough": f3d.render_flythrough,

@@ -106,6 +106,14 @@ class PublicationSource:
         return result
 
 
+def _check_observation_source(source: PublicationSource, selection: ObservationSelection) -> None:
+    if (selection.record is None or
+            selection.record.to_dict()["payload"].get("source") != source.description()):
+        raise ValueError("Publication source must be the C04 selected record's source")
+    if source.year.strip() != selection.record.observation_year:
+        raise ValueError("Publication source year must match the observation year in its declared timezone")
+
+
 @dataclass(frozen=True)
 class PublicationExtent:
     """An exact, source-grid-aligned extent; its ID is a safe PNG basename."""
@@ -253,11 +261,7 @@ class PublicationRecipe:
 
     @staticmethod
     def _check_selection_source(source, selection):
-        if (selection.record is None or
-                selection.record.to_dict()["payload"].get("source") != source.description()):
-            raise ValueError("Publication source must be the C04 selected record's source")
-        if source.year.strip() != selection.record.observation_year:
-            raise ValueError("Publication source year must match the observation year in its declared timezone")
+        _check_observation_source(source, selection)
 
     def _missing_pages(self, pages, directory, selection):
         cfg = self.layout.config if self.layout is not None else self.config

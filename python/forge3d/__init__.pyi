@@ -8,6 +8,11 @@ from typing import Tuple, Optional, Sequence, Any, Dict, List, Literal, Mapping,
 import os
 import numpy as np
 from . import gis
+from . import cinema as cinema
+from .cinema import Subject as Subject, FramingSpec as FramingSpec, Shot as Shot, ShotPlan as ShotPlan, CinemaInfeasible as CinemaInfeasible, CinemaNativeUnavailable as CinemaNativeUnavailable, plan as plan_shots
+
+def cinema_solve(spec_json: str, heights: list[float], width: int, height: int, terrain_width: float) -> str: ...
+def cinema_validate(spec_json: str, solution_json: str, keyframes_json: str, heights: list[float], width: int, height: int, terrain_width: float, time_offset: float) -> str: ...
 from . import geo as geo
 from . import terrain as terrain
 from . import codec as codec
@@ -21,6 +26,7 @@ from .atmosphere import AtmosphereSettings, SUN_ELEVATION_SWEEP_DEG
 from .precision import dd_harness, dd_jitter_demo, dd_selftest
 from .graticule import GraticuleSpec, generate_graticule
 from .legend import Legend, LegendConfig
+from .raster_recipe import RasterRecipe as RasterRecipe, RasterRecipeSource as RasterRecipeSource
 from .raster_style import RasterHeightSurfaceStyle as RasterHeightSurfaceStyle, CategoricalRasterStyle as CategoricalRasterStyle, BivariateRasterStyle as BivariateRasterStyle, RasterStyleResult as RasterStyleResult
 from .map_plate import BBox, MapPlate, MapPlateConfig, PlateRegion
 from .publication import PublicationSource as PublicationSource, PublicationExtent as PublicationExtent, PublicationRecipe as PublicationRecipe
@@ -114,6 +120,7 @@ from .label_plan import (
     RejectedLabel,
 )
 from . import semantic_scale as semantic_scale
+from . import measured_sections as measured_sections
 from .map_scene import (
     RenderPassInput as RenderPassInput,
     RenderPassSpec as RenderPassSpec,

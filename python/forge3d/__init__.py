@@ -19,7 +19,7 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
-__version__ = "1.49.0"
+__version__ = "1.51.0"
 version = __version__
 
 import numpy as np
@@ -60,6 +60,8 @@ _NATIVE_MODULE = _get_native_module()
 # Native exports (when available)
 # -----------------------------------------------------------------------------
 _NATIVE_ONLY_EXPORTS = (
+        "cinema_solve",
+        "cinema_validate",
         "Scene",
         "Session",
         "Colormap1D",
@@ -513,6 +515,7 @@ from .publication import (PublicationSource, PublicationExtent, PublicationRecip
                           PublicationInset, PublicationLayout, PublicationSubject, publication_output_support)
 from .value_faithful import ValueFaithfulRasterBinding
 from .legend import Legend, LegendConfig
+from .raster_recipe import RasterRecipe, RasterRecipeSource
 from .raster_style import RasterHeightSurfaceStyle, CategoricalRasterStyle, BivariateRasterStyle, RasterStyleResult
 from .scale_bar import ScaleBar, ScaleBarConfig
 from .north_arrow import NorthArrow, NorthArrowConfig
@@ -688,6 +691,7 @@ from .label_plan import (
 # Typed MapScene recipe contract
 # -----------------------------------------------------------------------------
 from . import semantic_scale
+from . import measured_sections
 from .map_scene import (
     RenderPassInput,
     RenderPassSpec,
@@ -721,6 +725,8 @@ from .landscape import LandscapeLayout, export_landscape, verify_landscape_impor
 from .chronos import FlythroughManifest, render_flythrough
 from .subject_story import (CompiledSubjectShot, StoryAnnotation, StoryObstacle, SubjectFeature,
                             SubjectShotInfeasible, compile_subject_shot)
+from . import cinema as cinema
+from .cinema import Subject, FramingSpec, Shot, ShotPlan, CinemaInfeasible, CinemaNativeUnavailable, plan as plan_shots
 from .alignment import (
     alignment_report,
     alignment_residual,
@@ -745,8 +751,11 @@ from .precision import dd_harness, dd_jitter_demo, dd_selftest
 # Public API
 # -----------------------------------------------------------------------------
 __all__ = [
+    "cinema", "Subject", "FramingSpec", "Shot", "ShotPlan", "CinemaInfeasible", "CinemaNativeUnavailable", "plan_shots",
     "RasterHeightSurfaceStyle",
     "CategoricalRasterStyle",
+    "RasterRecipe",
+    "RasterRecipeSource",
     "BivariateRasterStyle",
     "RasterStyleResult",
     "terrain",
@@ -1082,6 +1091,7 @@ __all__ = [
     "MapSceneTextLayoutError",
     "CompiledScenePlan",
     "semantic_scale",
+    "measured_sections",
     "SceneRecipe",
     "TerrainSource",
     "RasterOverlay",
@@ -1163,3 +1173,4 @@ __all__ = [
     "material_from_name",
 ]
 __all__.extend(_AVAILABLE_BUNDLE_EXPORTS)
+__all__.extend(name for name in ("cinema_solve", "cinema_validate") if name in globals())

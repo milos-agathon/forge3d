@@ -1,0 +1,521 @@
+{
+  "crs": "EPSG:32610",
+  "bounds": [
+    630000,
+    4434000,
+    678000,
+    4472400
+  ],
+  "size": [
+    1200,
+    960
+  ],
+  "terrain_source": {
+    "tiles": [
+      {
+        "id": "Copernicus_DSM_COG_10_N40_00_W122_00_DEM",
+        "uri": "https://elevationeuwest.blob.core.windows.net/copernicus-dem/COP30_hh/Copernicus_DSM_COG_10_N40_00_W122_00_DEM.tif",
+        "sha256": "300c00bd6ce3e44f545dc9b8cbd5f8934714f77b2f1592e74b9d86fde8e4d6be",
+        "catalog_sha256": "07d619e0368e041d79611d8dd508dc26d7d2a67fee4018d5e4308c26c6f4e844",
+        "crs": "EPSG:4326",
+        "geotransform": [
+          -122.00013888888888,
+          0.0002777777777777778,
+          0.0,
+          41.00013888888889,
+          0.0,
+          -0.0002777777777777778
+        ]
+      },
+      {
+        "id": "Copernicus_DSM_COG_10_N40_00_W121_00_DEM",
+        "uri": "https://elevationeuwest.blob.core.windows.net/copernicus-dem/COP30_hh/Copernicus_DSM_COG_10_N40_00_W121_00_DEM.tif",
+        "sha256": "f3bfb4b3af77a07e66f8c26f2a5d03a663f1b25b6e44c2dbd01c512da81e6e38",
+        "catalog_sha256": "db60ccc57b8c1b5b4a756d3d95ecba7526cbec05a2c6334d7946f329e368208c",
+        "crs": "EPSG:4326",
+        "geotransform": [
+          -121.00013888888888,
+          0.0002777777777777778,
+          0.0,
+          41.00013888888889,
+          0.0,
+          -0.0002777777777777778
+        ]
+      }
+    ],
+    "prepared_sha256": "933f98aa6e7130e2f37063de807f5eb1c1d54e4f0b7b3d5ce7d00eb58c855e4a",
+    "context_sha256": "0fa6f9bc830106f2205118974bddd8ff1d33fb8ab143bedb28fa1b0e38bbf896"
+  },
+  "rasters": [
+    {
+      "record_id": "LC08_L2SP_044032_20210711_20210720_02_T1",
+      "observed_at": "2021-07-11T18:45:11.493695Z",
+      "valid_from": "2021-07-11T18:45:11.493695Z",
+      "valid_until": "2021-07-13T18:45:11.493695Z",
+      "payload": {
+        "source": {
+          "path": "LC08_L2SP_044032_20210711_02_T1.tif",
+          "name": "Landsat 8",
+          "year": "2021",
+          "edition": "LC08_L2SP_044032_20210711_20210720_02_T1",
+          "uri": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2/items/LC08_L2SP_044032_20210711_02_T1",
+          "units": "unitless surface reflectance",
+          "missing_label": "QA excluded / unavailable",
+          "provenance": {
+            "sha256": "15d70c9c9a720bfa6b69a3d3f1168dd9e220943b74da530233768bb0885d9823",
+            "stac_sha256": "9bdf8beba1d17230eebc5f7c0506d7d2f3f02f4d1b7cd5e44d4510c5d9cfb789",
+            "bands": {
+              "red": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210711_20210720_02_T1/LC08_L2SP_044032_20210711_20210720_02_T1_SR_B4.TIF",
+                "sha256": "261e8ef0be8fe57899561b1633d53e95d36e1b46e20562886b7e3765e821efe4",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536985.0,
+                  30.0,
+                  0.0,
+                  4582215.0,
+                  0.0,
+                  -30.0
+                ]
+              },
+              "green": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210711_20210720_02_T1/LC08_L2SP_044032_20210711_20210720_02_T1_SR_B3.TIF",
+                "sha256": "adf97be9d94ebd6266bdeea6368ad89f8a4243a6afbd2552b70e3bbf8e7bbc83",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536985.0,
+                  30.0,
+                  0.0,
+                  4582215.0,
+                  0.0,
+                  -30.0
+                ]
+              },
+              "blue": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210711_20210720_02_T1/LC08_L2SP_044032_20210711_20210720_02_T1_SR_B2.TIF",
+                "sha256": "e1820649cc206591f4a5ebae4e6e3ca1304481a218ee2d606e830fc765603fea",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536985.0,
+                  30.0,
+                  0.0,
+                  4582215.0,
+                  0.0,
+                  -30.0
+                ]
+              },
+              "qa_pixel": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210711_20210720_02_T1/LC08_L2SP_044032_20210711_20210720_02_T1_QA_PIXEL.TIF",
+                "sha256": "beb1919c3c568479ce90468c4500b089393764190bce1b742e8a6f5a03b1ba78",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536985.0,
+                  30.0,
+                  0.0,
+                  4582215.0,
+                  0.0,
+                  -30.0
+                ]
+              },
+              "qa_radsat": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210711_20210720_02_T1/LC08_L2SP_044032_20210711_20210720_02_T1_QA_RADSAT.TIF",
+                "sha256": "88585fd82d26f056be614a0229941f635fcb589bd39b0053b99b24a353973a84",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536985.0,
+                  30.0,
+                  0.0,
+                  4582215.0,
+                  0.0,
+                  -30.0
+                ]
+              }
+            },
+            "qa_pixel_excluded_bits": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5
+            ],
+            "qa_radsat_required": 0,
+            "resampling": "nearest",
+            "catalog_id": "LC08_L2SP_044032_20210711_02_T1"
+          }
+        }
+      }
+    },
+    {
+      "record_id": "LC08_L2SP_044032_20210727_20210804_02_T2",
+      "observed_at": "2021-07-27T18:45:18.288170Z",
+      "valid_from": "2021-07-27T18:45:18.288170Z",
+      "valid_until": "2021-07-29T18:45:18.288170Z",
+      "payload": {
+        "source": {
+          "path": "LC08_L2SP_044032_20210727_02_T2.tif",
+          "name": "Landsat 8",
+          "year": "2021",
+          "edition": "LC08_L2SP_044032_20210727_20210804_02_T2",
+          "uri": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2/items/LC08_L2SP_044032_20210727_02_T2",
+          "units": "unitless surface reflectance",
+          "missing_label": "QA excluded / unavailable",
+          "provenance": {
+            "sha256": "5303fde4a52267a3ecc3188c22912e74e9b8069c0261f6e0067e453cf5e493f8",
+            "stac_sha256": "68ea3942528fa62a6230734a53653b7cbe8bf9334536013545a0c9d7de05ae07",
+            "bands": {
+              "red": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210727_20210804_02_T2/LC08_L2SP_044032_20210727_20210804_02_T2_SR_B4.TIF",
+                "sha256": "ef3335c6a858917e2954b7a8ebb3e3842608efbb688713819dda9796826487e8",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536985.0,
+                  30.0,
+                  0.0,
+                  4582215.0,
+                  0.0,
+                  -30.0
+                ]
+              },
+              "green": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210727_20210804_02_T2/LC08_L2SP_044032_20210727_20210804_02_T2_SR_B3.TIF",
+                "sha256": "87e63bc9a7af23d91f8a331cdc7789de01414678c18c7230bfd7e0a55984169e",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536985.0,
+                  30.0,
+                  0.0,
+                  4582215.0,
+                  0.0,
+                  -30.0
+                ]
+              },
+              "blue": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210727_20210804_02_T2/LC08_L2SP_044032_20210727_20210804_02_T2_SR_B2.TIF",
+                "sha256": "258562cc4be09ee9c97a506ba8c2de5582c26510505b8851754ae99f16f2f182",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536985.0,
+                  30.0,
+                  0.0,
+                  4582215.0,
+                  0.0,
+                  -30.0
+                ]
+              },
+              "qa_pixel": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210727_20210804_02_T2/LC08_L2SP_044032_20210727_20210804_02_T2_QA_PIXEL.TIF",
+                "sha256": "f41a2a457452465a5adb8a038b47705702d0f83cc69037f7e7e043f5778aef69",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536985.0,
+                  30.0,
+                  0.0,
+                  4582215.0,
+                  0.0,
+                  -30.0
+                ]
+              },
+              "qa_radsat": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210727_20210804_02_T2/LC08_L2SP_044032_20210727_20210804_02_T2_QA_RADSAT.TIF",
+                "sha256": "cd65f9c2a646d49271caab42fb2c10af361450a084f720e37de4e03c4940c762",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536985.0,
+                  30.0,
+                  0.0,
+                  4582215.0,
+                  0.0,
+                  -30.0
+                ]
+              }
+            },
+            "qa_pixel_excluded_bits": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5
+            ],
+            "qa_radsat_required": 0,
+            "resampling": "nearest",
+            "catalog_id": "LC08_L2SP_044032_20210727_02_T2"
+          }
+        }
+      }
+    },
+    {
+      "record_id": "LC08_L2SP_044032_20210812_20210819_02_T1",
+      "observed_at": "2021-08-12T18:45:24.905913Z",
+      "valid_from": "2021-08-12T18:45:24.905913Z",
+      "valid_until": "2021-08-14T18:45:24.905913Z",
+      "payload": {
+        "source": {
+          "path": "LC08_L2SP_044032_20210812_02_T1.tif",
+          "name": "Landsat 8",
+          "year": "2021",
+          "edition": "LC08_L2SP_044032_20210812_20210819_02_T1",
+          "uri": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2/items/LC08_L2SP_044032_20210812_02_T1",
+          "units": "unitless surface reflectance",
+          "missing_label": "QA excluded / unavailable",
+          "provenance": {
+            "sha256": "d8c76865f17aeec0f59f522999b10be0066b4b18cc04aa03da10873267b06f0c",
+            "stac_sha256": "aef95716ecaf0af8925ccd2f5c6c36c4e111420d70d272bd72f40d3d5f84f693",
+            "bands": {
+              "red": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210812_20210819_02_T1/LC08_L2SP_044032_20210812_20210819_02_T1_SR_B4.TIF",
+                "sha256": "e5f97df6706a2bf6d063d16f1a71c57e5d696358f01b1346a15de995fea02da8",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536385.0,
+                  30.0,
+                  0.0,
+                  4582215.0,
+                  0.0,
+                  -30.0
+                ]
+              },
+              "green": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210812_20210819_02_T1/LC08_L2SP_044032_20210812_20210819_02_T1_SR_B3.TIF",
+                "sha256": "039a3aea20ff66b21f4a83a1221088a74668de18cde1a9524b3dacd9dd62c434",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536385.0,
+                  30.0,
+                  0.0,
+                  4582215.0,
+                  0.0,
+                  -30.0
+                ]
+              },
+              "blue": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210812_20210819_02_T1/LC08_L2SP_044032_20210812_20210819_02_T1_SR_B2.TIF",
+                "sha256": "b2a7b6552104f95c62e01226bbee12f7486f3f4986393e3736004144daef2500",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536385.0,
+                  30.0,
+                  0.0,
+                  4582215.0,
+                  0.0,
+                  -30.0
+                ]
+              },
+              "qa_pixel": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210812_20210819_02_T1/LC08_L2SP_044032_20210812_20210819_02_T1_QA_PIXEL.TIF",
+                "sha256": "ac18aed1fddc7397d3e5bf55adad2595a4c92b63f720bcde0571c791b6592c85",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536385.0,
+                  30.0,
+                  0.0,
+                  4582215.0,
+                  0.0,
+                  -30.0
+                ]
+              },
+              "qa_radsat": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210812_20210819_02_T1/LC08_L2SP_044032_20210812_20210819_02_T1_QA_RADSAT.TIF",
+                "sha256": "30e5dd578d58fc7a3dcf11ad2d81c0306618702884a36f870f093925d99d509d",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536385.0,
+                  30.0,
+                  0.0,
+                  4582215.0,
+                  0.0,
+                  -30.0
+                ]
+              }
+            },
+            "qa_pixel_excluded_bits": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5
+            ],
+            "qa_radsat_required": 0,
+            "resampling": "nearest",
+            "catalog_id": "LC08_L2SP_044032_20210812_02_T1"
+          }
+        }
+      }
+    },
+    {
+      "record_id": "LC08_L2SP_044032_20210828_20210901_02_T1",
+      "observed_at": "2021-08-28T18:45:29.398003Z",
+      "valid_from": "2021-08-28T18:45:29.398003Z",
+      "valid_until": "2021-08-30T18:45:29.398003Z",
+      "payload": {
+        "source": {
+          "path": "LC08_L2SP_044032_20210828_02_T1.tif",
+          "name": "Landsat 8",
+          "year": "2021",
+          "edition": "LC08_L2SP_044032_20210828_20210901_02_T1",
+          "uri": "https://planetarycomputer.microsoft.com/api/stac/v1/collections/landsat-c2-l2/items/LC08_L2SP_044032_20210828_02_T1",
+          "units": "unitless surface reflectance",
+          "missing_label": "QA excluded / unavailable",
+          "provenance": {
+            "sha256": "95af5784466104258e0517cfe9946bf79e4db30f7e25dfb43a10ec0a335c63fb",
+            "stac_sha256": "0a8082efde4ecece4feab30e595aa113943221891d4885209f981555ef8f0e97",
+            "bands": {
+              "red": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210828_20210901_02_T1/LC08_L2SP_044032_20210828_20210901_02_T1_SR_B4.TIF",
+                "sha256": "195b2e3662b69d2f15ed3ddc85ef1d6073eabde4a0403b77f6564c22b36cbc1e",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536685.0,
+                  30.0,
+                  0.0,
+                  4582515.0,
+                  0.0,
+                  -30.0
+                ]
+              },
+              "green": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210828_20210901_02_T1/LC08_L2SP_044032_20210828_20210901_02_T1_SR_B3.TIF",
+                "sha256": "ca02b287219a666cf7570d13c343a3472a3e9c59b7b53034095e54351297a371",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536685.0,
+                  30.0,
+                  0.0,
+                  4582515.0,
+                  0.0,
+                  -30.0
+                ]
+              },
+              "blue": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210828_20210901_02_T1/LC08_L2SP_044032_20210828_20210901_02_T1_SR_B2.TIF",
+                "sha256": "eecd9eee76b858b80ae9f83e9b3d31b06a95bc5d0f94564d57ac5df07b7934a1",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536685.0,
+                  30.0,
+                  0.0,
+                  4582515.0,
+                  0.0,
+                  -30.0
+                ]
+              },
+              "qa_pixel": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210828_20210901_02_T1/LC08_L2SP_044032_20210828_20210901_02_T1_QA_PIXEL.TIF",
+                "sha256": "4ff08de5e0f26f3b093b2fcf9f5c34aef5e0225bc49e44699681f0697ec52206",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536685.0,
+                  30.0,
+                  0.0,
+                  4582515.0,
+                  0.0,
+                  -30.0
+                ]
+              },
+              "qa_radsat": {
+                "uri": "https://landsateuwest.blob.core.windows.net/landsat-c2/level-2/standard/oli-tirs/2021/044/032/LC08_L2SP_044032_20210828_20210901_02_T1/LC08_L2SP_044032_20210828_20210901_02_T1_QA_RADSAT.TIF",
+                "sha256": "dfb89cb07d931a2f74e80daf8fc3e0710a467e08e6c2ae73df216eda01b59d12",
+                "crs": "EPSG:32610",
+                "geotransform": [
+                  536685.0,
+                  30.0,
+                  0.0,
+                  4582515.0,
+                  0.0,
+                  -30.0
+                ]
+              }
+            },
+            "qa_pixel_excluded_bits": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              5
+            ],
+            "qa_radsat_required": 0,
+            "resampling": "nearest",
+            "catalog_id": "LC08_L2SP_044032_20210828_02_T1"
+          }
+        }
+      }
+    }
+  ],
+  "viirs_source": {
+    "id": "viirs-snpp_2021_United_States.csv",
+    "uri": "https://firms.modaps.eosdis.nasa.gov/data/country/viirs-snpp/2021/viirs-snpp_2021_United_States.csv",
+    "sha256": "4130c8ce327424bb9b1a54e09667f56fbe52d20649a09dcdd8f64d5e5689b9a9",
+    "input_crs": "EPSG:4326",
+    "prepared_crs": "EPSG:32610",
+    "interval_utc": [
+      "2021-07-10T00:00:00Z",
+      "2021-08-29T00:00:00Z"
+    ]
+  },
+  "rgb_domain": [
+    0.0,
+    0.35
+  ],
+  "title": "Dixie Fire 2021  |  Landsat 8 surface reflectance",
+  "legend": [
+    "RGB stretch 0.00 to 0.35 reflectance",
+    {
+      "label": "Terrain context / reflectance unavailable",
+      "color": "#929ca4"
+    },
+    {
+      "label": "VIIRS active-fire report (point)",
+      "color": "#ff683d"
+    }
+  ],
+  "point_color": "#ff683d",
+  "point_width": 6,
+  "lookback_seconds": 86400,
+  "policy": "hold",
+  "screen_seconds_per_frame": 1,
+  "variants": {
+    "original": {
+      "times": [
+        "2021-07-11T18:45:11Z",
+        "2021-07-11T18:45:11.493695Z",
+        "2021-07-14T19:00:00Z",
+        "2021-07-20T20:00:00Z",
+        "2021-07-27T18:45:18.288170Z",
+        "2021-08-05T20:00:00Z",
+        "2021-08-12T18:45:24.905913Z"
+      ],
+      "rasters": [
+        "LC08_L2SP_044032_20210711_02_T1",
+        "LC08_L2SP_044032_20210727_02_T2",
+        "LC08_L2SP_044032_20210812_02_T1"
+      ],
+      "interventions": []
+    },
+    "revised": {
+      "times": [
+        "2021-07-11T18:45:11Z",
+        "2021-07-11T18:45:11.493695Z",
+        "2021-07-14T19:00:00Z",
+        "2021-07-20T20:00:00Z",
+        "2021-07-28T20:00:00Z",
+        "2021-08-06T20:00:00Z",
+        "2021-08-28T18:45:29.398002Z",
+        "2021-08-28T18:45:29.398003Z"
+      ],
+      "rasters": [
+        "LC08_L2SP_044032_20210711_02_T1",
+        "LC08_L2SP_044032_20210727_02_T2",
+        "LC08_L2SP_044032_20210828_02_T1"
+      ],
+      "interventions": [
+        "Replace the 12 August acquisition with 28 August.",
+        "Retime the 27 July and 5 August presentations to 28 July and 6 August.",
+        "Inspect the final acquisition immediately before and at its acquisition instant."
+      ]
+    }
+  },
+  "events_in_frozen_geographic_and_date_subset": 16925
+}

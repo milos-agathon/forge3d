@@ -112,6 +112,7 @@ class TestNativeModuleSymbols:
         "MaterialSet",
         "IBL",
         "OverlayLayer",
+        "_ResidentRasterRecipe",
         "TerrainRenderParams",
         "TerrainRenderer",
         "Medium",
@@ -172,6 +173,8 @@ class TestNativeModuleSymbols:
     EXPECTED_FUNCTIONS = [
         "_render_volumetric_reference",
         "_nephele_physical_samples",
+        "cinema_solve",
+        "cinema_validate",
         "open_viewer",
         "open_terrain_viewer",
         "enumerate_adapters",
