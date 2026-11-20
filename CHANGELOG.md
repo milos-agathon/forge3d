@@ -6,6 +6,12 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.51.1]
+
+### Fixed
+
+- CI and release wheel builds use the reviewed Rust 1.97.1 toolchain, avoiding the macOS `objc2` compilation failure under newer runner defaults. The 1.51.0 tag remains available; its package publication did not complete.
+
 ## [1.51.0]
 
 ### Added
