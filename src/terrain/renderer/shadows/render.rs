@@ -20,7 +20,6 @@ impl TerrainScene {
         far_plane: f32,
         height_curve: [f32; 4],
         y_up: bool,
-        shared_frame: bool,
     ) -> Result<wgpu::BindGroup> {
         let light_dir = sun_direction.normalize();
         let vertical = if y_up { glam::Vec3::Y } else { glam::Vec3::Z };
@@ -32,16 +31,11 @@ impl TerrainScene {
 
         let half_spacing = terrain_spacing * 0.5;
         let height_extent = (height_max - height_min).max(1e-6) * height_exag;
-        let shadow_z_min = if shared_frame {
-            -0.5 * height_extent
-        } else {
-            0.0
-        };
-        let shadow_z_max = if shared_frame {
-            0.5 * height_extent
-        } else {
-            height_exag
-        };
+        // Mesh slab extent: the depth geometry is centred on zero over the
+        // metre relief (see terrain_shadow_depth.wgsl), so the light frustum
+        // fits the same box. y-up keeps its absolute-elevation slab.
+        let shadow_z_min = -0.5 * height_extent;
+        let shadow_z_max = 0.5 * height_extent;
 
         let (terrain_min, terrain_max) = if y_up {
             (
@@ -201,27 +195,10 @@ impl TerrainScene {
             let cascade = &self.csm_renderer.uniforms.cascades[cascade_idx as usize];
             let stored_light_view_proj = cascade.light_view_proj;
             let shadow_uniforms = ShadowPassUniforms {
-                light_view_proj: if shared_frame {
-                    (glam::Mat4::from_cols_array_2d(&stored_light_view_proj)
-                        * glam::Mat4::from_translation(glam::Vec3::new(
-                            0.0,
-                            0.0,
-                            -0.5 * height_extent,
-                        )))
-                    .to_cols_array_2d()
-                } else {
-                    stored_light_view_proj
-                },
-                terrain_params: [
-                    terrain_spacing,
-                    if shared_frame {
-                        height_extent
-                    } else {
-                        height_exag
-                    },
-                    height_min,
-                    height_max,
-                ],
+                // The depth geometry is centred on zero in shader code now;
+                // no frame translation belongs on the projection.
+                light_view_proj: stored_light_view_proj,
+                terrain_params: [terrain_spacing, height_exag, height_min, height_max],
                 grid_params: [
                     SHADOW_GRID_RES as f32,
                     if y_up { 1.0 } else { 0.0 },

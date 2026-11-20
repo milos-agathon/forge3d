@@ -238,22 +238,24 @@ impl TerrainScene {
             .min(shadow_settings.max_distance)
             .max(params.clip.0);
 
+        // Cascades follow a λ=0.75 log/linear blend over [clip.0, shadow_far].
+        // The old absolute table ([50, 200, 800, 3000] m) put any kilometre-
+        // scale terrain entirely beyond the last cascade, so whole scenes
+        // rendered without a single shadow. The blend is the standard practical
+        // scheme and behaves at every scale; near/far come from the frustum,
+        // not the scene extent, keeping tiny scenes sane too.
+        const LAMBDA: f32 = 0.75;
+        let near = params.clip.0;
         let mut cascade_splits: Vec<f32> = Vec::with_capacity(cascade_count as usize + 1);
-        cascade_splits.push(params.clip.0);
-        for split in TERRAIN_DEFAULT_CASCADE_SPLITS
-            .iter()
-            .take(cascade_count.saturating_sub(1) as usize)
-        {
-            let clamped = (*split).min(shadow_far);
-            if clamped > *cascade_splits.last().unwrap_or(&params.clip.0) {
-                cascade_splits.push(clamped);
+        cascade_splits.push(near);
+        for i in 1..=cascade_count {
+            let t = i as f32 / cascade_count as f32;
+            let log_split = near * (shadow_far / near).powf(t);
+            let linear_split = near + (shadow_far - near) * t;
+            let split = (LAMBDA * log_split + (1.0 - LAMBDA) * linear_split).min(shadow_far);
+            if split > *cascade_splits.last().unwrap_or(&near) {
+                cascade_splits.push(split);
             }
-        }
-        while cascade_splits.len() < cascade_count as usize {
-            let last = *cascade_splits.last().unwrap_or(&params.clip.0);
-            let remaining = cascade_count as usize + 1 - cascade_splits.len();
-            let step = (shadow_far - last) / remaining.max(1) as f32;
-            cascade_splits.push((last + step).min(shadow_far));
         }
         if cascade_splits.len() == cascade_count as usize {
             cascade_splits.push(shadow_far);
@@ -346,7 +348,6 @@ impl TerrainScene {
                 shadow_far,
                 height_curve,
                 is_yup_camera_mode(&params.camera_mode),
-                shared_frame,
             )?;
 
             self.generate_shadow_moments(encoder)?;
