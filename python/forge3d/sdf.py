@@ -494,7 +494,7 @@ class HybridRenderer:
                 warnings.warn(f"Native rendering failed: {e}, falling back to CPU")
             else:
                 if certificate:
-                    _certificate.emit_render_certificate(certificate)
+                    _certificate._emit_current_render_certificate(certificate)
                 return image
 
         # CPU fallback implementation. Capture at the point the fallback is
@@ -510,7 +510,7 @@ class HybridRenderer:
             )
             image = self._render_cpu_fallback(scene, spheres or [])
         if certificate:
-            _certificate.emit_render_certificate(certificate)
+            _certificate._emit_current_render_certificate(certificate)
         return image
 
     def _render_native(self, scene: SdfScene, spheres: List) -> np.ndarray:

@@ -1,7 +1,7 @@
 // src/py_functions/path_tracing/terrain_reference.rs
 // PROMETHEUS Python seam: GPU-backed converged terrain path-traced reference
 // rooted in HybridPathTracer::render_terrain_reference. This is the honest
-// GPU entry point — the legacy `hybrid_render` stays a CPU/SDF compatibility
+// GPU entry point â€” the legacy `hybrid_render` stays a CPU/SDF compatibility
 // wrapper and never claimed to reach the GPU path.
 // RELEVANT FILES: src/path_tracing/hybrid_compute/render_terrain.rs,
 //                 python/forge3d/path_tracing.py
@@ -208,6 +208,16 @@ fn extract_atmosphere_lut_handle(
         })
 }
 
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn _terrain_checkpoint_runtime(py: Python<'_>) -> PyResult<Py<PyAny>> {
+    let identity = PyDict::new_bound(py);
+    for (name, digest) in crate::path_tracing::hybrid_compute::checkpoint_runtime()? {
+        identity.set_item(name, crate::core::provenance::to_hex(&digest))?;
+    }
+    Ok(identity.into_py(py))
+}
+
 /// Render a converged path-traced reference of a real DEM under sun + IBL,
 /// optionally mixed with mesh geometry (terrain stays a first-class primitive
 /// of the shared hybrid traversal).
@@ -217,9 +227,9 @@ fn extract_atmosphere_lut_handle(
 ///   radiance (H,W,3) f32 linear mean radiance, luminance_variance (H,W) f32
 ///   per-pixel estimated variance of the mean frame luminance
 ///   (Welford M2/(N*(N-1)) over all accumulated frames),
-///   frames: int, variance: float (max of luminance_variance — the scalar
+///   frames: int, variance: float (max of luminance_variance â€” the scalar
 ///   convergence metric named by `convergence_metric`), converged: bool
-///   (always True — non-convergence raises), traversal: dict of measured
+///   (always True â€” non-convergence raises), traversal: dict of measured
 ///   last-frame descent counters (frame_index, mip_count, primary/shadow
 ///   lanes node_visits/minmax_loads/height_loads/rays), and
 ///   peak_host_visible_bytes / minmax_pyramid_bytes / gpu_resource_bytes
@@ -268,6 +278,7 @@ fn extract_atmosphere_lut_handle(
     temperature_c = 15.0,
     atmosphere = None,
     sdf_scene = None,
+    *, _on_progress = None, _checkpoint = None,
 ))]
 pub(crate) fn hybrid_render_terrain_reference(
     py: Python<'_>,
@@ -311,10 +322,13 @@ pub(crate) fn hybrid_render_terrain_reference(
     temperature_c: f64,
     atmosphere: Option<Bound<'_, PyAny>>,
     sdf_scene: Option<PyRef<'_, crate::sdf::py::PySdfScene>>,
+    _on_progress: Option<Bound<'_, PyAny>>,
+    _checkpoint: Option<(std::path::PathBuf, Option<u32>, bool)>,
 ) -> PyResult<Py<PyAny>> {
     let _ = cache;
     use crate::path_tracing::hybrid_compute::{
-        AlbedoSampling, CameraModel, HybridPathTracer, TerrainReferenceDesc,
+        AlbedoSampling, CameraModel, FrameProgress, HybridPathTracer, TerrainCheckpointOptions,
+        TerrainReferenceDesc,
     };
     use numpy::PyArray1;
 
@@ -626,8 +640,54 @@ pub(crate) fn hybrid_render_terrain_reference(
     let owner = crate::core::resource_tracker::AllocationOwner::new();
     let _owner_guard = owner.activate();
     let owner_capture = crate::core::resource_tracker::begin_owner_capture(owner.id());
-    let tracer = HybridPathTracer::new()?;
-    let out = tracer.render_terrain_reference(&desc)?;
+    let recoverable = _on_progress.is_some() || _checkpoint.is_some();
+    let (out, dispatch) = if recoverable {
+        let options = if let Some((path, every, resume)) = _checkpoint {
+            Some(TerrainCheckpointOptions {
+                path,
+                every,
+                resume,
+                runtime: crate::path_tracing::hybrid_compute::checkpoint_runtime()?,
+            })
+        } else {
+            None
+        };
+        let call_progress = _on_progress.as_ref()
+            .map(|_| py.import_bound("forge3d.certificate")?.getattr("_call_render_progress"))
+            .transpose()?;
+        let mut callback_error = None;
+        let mut on_frame = |progress: FrameProgress, published| {
+            let result = (|| -> PyResult<()> {
+                py.check_signals()?;
+                if let Some((call, callback)) = call_progress.as_ref().zip(_on_progress.as_ref()) {
+                    call.call1((callback, (
+                        progress.frames,
+                        progress.variance_at,
+                        progress.variance,
+                        progress.converged,
+                        published,
+                    )))?;
+                }
+                Ok(())
+            })();
+            result.map_err(|error| {
+                callback_error = Some(error);
+                crate::core::error::RenderError::render("terrain progress callback aborted")
+            })
+        };
+        let rendering =
+            HybridPathTracer::render_terrain_reference_recoverable(&desc, options, &mut on_frame);
+        if let Some(error) = callback_error {
+            return Err(error);
+        }
+        let (out, dispatch) = rendering?;
+        (out, Some(dispatch))
+    } else {
+        (
+            HybridPathTracer::new()?.render_terrain_reference(&desc)?,
+            None,
+        )
+    };
     let owner_report = owner_capture.finish();
     if owner_report.peak_host_visible_bytes > 512 * 1024 * 1024 {
         return Err(PyRuntimeError::new_err(format!(
@@ -684,6 +744,11 @@ pub(crate) fn hybrid_render_terrain_reference(
     }
     d.set_item("traversal", traversal)?;
     d.set_item("frames", out.frames)?;
+    if let Some((resume_frame, frames_dispatched)) = dispatch {
+        d.set_item("resumed", resume_frame > 0)?;
+        d.set_item("resume_frame", resume_frame)?;
+        d.set_item("frames_dispatched", frames_dispatched)?;
+    }
     d.set_item("variance", out.variance)?;
     d.set_item("converged", out.converged)?;
     d.set_item(

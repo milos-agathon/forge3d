@@ -125,7 +125,7 @@ def render_offline(
             water_mask=water_mask,
         )
     if certificate:
-        sha = _certificate.emit_render_certificate(certificate)
+        sha = _certificate._emit_current_render_certificate(certificate)
         if sha is not None:
             result.metadata["certificate_payload_sha256"] = sha
     return result

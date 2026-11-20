@@ -308,6 +308,8 @@ from .path_tracing import (
     hybrid_render_terrain_reference,
     make_camera,
     render_terrain_poster,
+    TerrainRenderCancelled,
+    TerrainRenderProgress,
 )
 from .inverse import (
     InverseSolveUnavailable,
@@ -780,6 +782,8 @@ __all__ = [
     "ExperimentalSyntheticOutput",
     "make_camera",
     "render_terrain_poster",
+    "TerrainRenderCancelled",
+    "TerrainRenderProgress",
     # Native types (when available)
     "Scene",
     "Session",

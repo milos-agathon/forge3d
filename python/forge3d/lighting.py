@@ -416,7 +416,7 @@ class RestirDI:
                 output_format
             )
         if certificate:
-            _certificate.emit_render_certificate(certificate)
+            _certificate._emit_current_render_certificate(certificate)
         return result
 
     def calculate_variance_reduction(self,

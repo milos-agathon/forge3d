@@ -442,6 +442,16 @@ pub(crate) fn render_execution_report() -> PyResult<String> {
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
+pub(crate) fn _calling_thread_execution_report() -> PyResult<String> {
+    Ok(crate::core::certificate::calling_thread_execution_report_json()?)
+}
+
+#[cfg(feature = "extension-module")]
+type PosterCheckpointProvenance = (String, String, [f32; 3], std::collections::BTreeMap<String, String>);
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+#[pyo3(signature = (camera_model, albedo_map_sha256, albedo_sampling, poster_full_width, poster_full_height, tile_columns, tile_rows, *, _recovery = None, _provenance = None))]
 pub(crate) fn _record_terrain_poster_certificate_inputs(
     camera_model: &str,
     albedo_map_sha256: &str,
@@ -450,6 +460,8 @@ pub(crate) fn _record_terrain_poster_certificate_inputs(
     poster_full_height: u32,
     tile_columns: u32,
     tile_rows: u32,
+    _recovery: Option<(u64, u64, u64)>,
+    _provenance: Option<PosterCheckpointProvenance>,
 ) -> PyResult<()> {
     if !matches!(camera_model, "pinhole" | "off_axis" | "orthographic") {
         return Err(PyValueError::new_err("invalid camera_model"));
@@ -483,6 +495,30 @@ pub(crate) fn _record_terrain_poster_certificate_inputs(
         "poster_tile_layout",
         format!("{tile_columns}x{tile_rows}"),
     );
+    if let Some((manifest, rgba, [r, g, b], runtime)) = _provenance {
+        use crate::core::certificate::record_input;
+        let info = crate::core::gpu::try_ctx()?.adapter.get_info();
+        record_input("albedo", format!("{r},{g},{b}"));
+        record_input("continua_manifest_sha256", manifest);
+        record_input("continua_rgba_sha256", rgba);
+        record_input("continua_source_adapter_name", info.name);
+        record_input("continua_source_driver_version", info.driver_info);
+        for (field, digest) in runtime {
+            record_input(format!("continua_source_{field}"), digest);
+        }
+    }
+    if let Some((recovered, resumed, dispatched)) = _recovery {
+        crate::core::certificate::record_input(
+            "continua_resumed",
+            (recovered > 0 || resumed > 0).to_string(),
+        );
+        crate::core::certificate::record_input("continua_recovered_tiles", recovered.to_string());
+        crate::core::certificate::record_input("continua_resumed_tiles", resumed.to_string());
+        crate::core::certificate::record_input(
+            "continua_frames_dispatched",
+            dispatched.to_string(),
+        );
+    }
     Ok(())
 }
 
@@ -505,6 +541,17 @@ pub(crate) fn finish_render_execution_capture(pass_label: &str, draw_calls: u32)
 #[pyfunction]
 pub(crate) fn abort_render_execution_capture() {
     crate::core::certificate::abort_external_render_capture();
+}
+
+#[cfg(feature = "extension-module")]
+#[pyfunction]
+pub(crate) fn _call_render_progress(
+    callback: &Bound<'_, PyAny>,
+    args: &Bound<'_, pyo3::types::PyTuple>,
+) -> PyResult<Py<PyAny>> {
+    crate::core::certificate::with_render_capture_suspended(|| {
+        Ok(callback.call1(args)?.unbind())
+    })
 }
 
 /// Sign a canonical RenderCertificate SHA256 digest with `ed25519-dalek`.

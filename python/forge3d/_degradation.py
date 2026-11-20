@@ -2,8 +2,7 @@
 # CENSOR Task 10: pure-Python degradation sink, mirroring the Rust one in
 # src/core/degradation.rs. Every Python-side fallback / placeholder /
 # absent-capability path records a structured entry here; the RenderCertificate
-# (forge3d.diagnostics.render_certificate) drains it and merges it with the
-# native sink.
+# captures it with the native render's records.
 # RELEVANT FILES: src/core/degradation.rs, python/forge3d/diagnostics.py,
 # python/forge3d/certificate.py
 
@@ -24,8 +23,7 @@ from typing import Dict, List, Tuple
 # the recorded consequence is stable regardless of how many times a per-frame
 # fallback fires.
 _SINK: Dict[Tuple[str, str], str] = {}
-_ACTIVE_CAPTURE: Dict[Tuple[str, str], str] | None = None
-_LAST_CAPTURE: Dict[Tuple[str, str], str] = {}
+_CAPTURE = threading.local()
 _LOCK = threading.Lock()
 
 
@@ -36,12 +34,12 @@ def record(kind: str, name: str, consequence: str) -> None:
     later calls with the same key are ignored (mirrors the Rust sink).
     """
     key = (str(kind), str(name))
-    global _ACTIVE_CAPTURE
+    value = str(consequence)
     with _LOCK:
-        if key not in _SINK:
-            _SINK[key] = str(consequence)
-        if _ACTIVE_CAPTURE is not None and key not in _ACTIVE_CAPTURE:
-            _ACTIVE_CAPTURE[key] = str(consequence)
+        _SINK.setdefault(key, value)
+    active = getattr(_CAPTURE, "active", None)
+    if active is not None:
+        active.setdefault(key, value)
 
 
 def snapshot() -> List[Dict[str, str]]:
@@ -55,41 +53,36 @@ def snapshot() -> List[Dict[str, str]]:
 
 
 def begin_capture() -> None:
-    """Start a fresh render-local capture."""
-    global _ACTIVE_CAPTURE
-    with _LOCK:
-        _ACTIVE_CAPTURE = {}
+    """Start a fresh capture on the rendering thread."""
+    _CAPTURE.active = {}
 
 
-def finish_capture() -> None:
-    """Freeze the active render-local capture for certificate assembly."""
-    global _ACTIVE_CAPTURE, _LAST_CAPTURE
-    with _LOCK:
-        _LAST_CAPTURE = dict(_ACTIVE_CAPTURE or {})
-        _ACTIVE_CAPTURE = None
-
-
-def capture_snapshot() -> List[Dict[str, str]]:
-    """Return the last completed render's Python degradations."""
-    with _LOCK:
-        items = sorted(_LAST_CAPTURE.items())
+def finish_capture() -> List[Tuple[str, str, str]]:
+    """Return this render's Python degradations to native certificate capture."""
+    active = _suspend_capture()
     return [
-        {"kind": kind, "name": name, "consequence": consequence}
-        for (kind, name), consequence in items
+        (kind, name, consequence)
+        for (kind, name), consequence in (active or {}).items()
     ]
 
 
 def abort_capture() -> None:
-    """Discard an incomplete render-local capture."""
-    global _ACTIVE_CAPTURE
-    with _LOCK:
-        _ACTIVE_CAPTURE = None
+    """Discard the rendering thread's unfinished capture."""
+    _CAPTURE.active = None
+
+
+def _suspend_capture():
+    previous = getattr(_CAPTURE, "active", None)
+    _CAPTURE.active = None
+    return previous
+
+
+def _restore_capture(previous):
+    _CAPTURE.active = previous
 
 
 def clear() -> None:
-    """Reset the sink. Exposed so tests and callers can isolate renders."""
-    global _ACTIVE_CAPTURE, _LAST_CAPTURE
+    """Reset the process sink and the calling thread's capture."""
     with _LOCK:
         _SINK.clear()
-        _ACTIVE_CAPTURE = None
-        _LAST_CAPTURE = {}
+    abort_capture()
