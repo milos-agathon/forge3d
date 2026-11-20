@@ -1,5 +1,5 @@
 use super::value::device_delta;
-use super::PositioningGlyph;
+use super::{PositionMode, PositioningGlyph};
 use ttf_parser::gpos::Anchor as GposAnchor;
 use ttf_parser::Face;
 
@@ -11,8 +11,40 @@ pub(super) fn attach(
     mark_anchor: GposAnchor<'_>,
     parent_anchor: GposAnchor<'_>,
     component: Option<u16>,
+    mode: PositionMode,
 ) -> Result<(), super::TextError> {
     let overflow = || super::TextError::MalformedOpenType("GPOS positioning overflow");
+    let parent_anchor_x = i32::from(parent_anchor.x)
+        .checked_add(device_delta(face, parent_anchor.x_device)?)
+        .ok_or_else(overflow)?;
+    let parent_anchor_y = i32::from(parent_anchor.y)
+        .checked_add(device_delta(face, parent_anchor.y_device)?)
+        .ok_or_else(overflow)?;
+    let mark_anchor_x = i32::from(mark_anchor.x)
+        .checked_add(device_delta(face, mark_anchor.x_device)?)
+        .ok_or_else(overflow)?;
+    let mark_anchor_y = i32::from(mark_anchor.y)
+        .checked_add(device_delta(face, mark_anchor.y_device)?)
+        .ok_or_else(overflow)?;
+    let anchor_delta_x = mode.scale(
+        parent_anchor_x
+            .checked_sub(mark_anchor_x)
+            .ok_or_else(overflow)?,
+    )?;
+    let anchor_delta_y = mode.scale(
+        parent_anchor_y
+            .checked_sub(mark_anchor_y)
+            .ok_or_else(overflow)?,
+    )?;
+    if mode.backward {
+        buffer[mark].x_offset = anchor_delta_x;
+        buffer[mark].y_offset = anchor_delta_y;
+        buffer[mark].x_advance = 0;
+        buffer[mark].y_advance = 0;
+        buffer[mark].attached_to = Some(parent);
+        buffer[mark].ligature_component = component;
+        return Ok(());
+    }
     let origin = |end: usize, offset: i32, vertical: bool| {
         buffer[..end].iter().try_fold(offset, |sum, glyph| {
             sum.checked_add(if vertical {
@@ -27,27 +59,13 @@ pub(super) fn attach(
     let parent_y = origin(parent, buffer[parent].y_offset, true)?;
     let mark_x = origin(mark, buffer[mark].x_offset, false)?;
     let mark_y = origin(mark, buffer[mark].y_offset, true)?;
-    let parent_anchor_x = i32::from(parent_anchor.x)
-        .checked_add(device_delta(face, parent_anchor.x_device)?)
-        .ok_or_else(overflow)?;
-    let parent_anchor_y = i32::from(parent_anchor.y)
-        .checked_add(device_delta(face, parent_anchor.y_device)?)
-        .ok_or_else(overflow)?;
-    let mark_anchor_x = i32::from(mark_anchor.x)
-        .checked_add(device_delta(face, mark_anchor.x_device)?)
-        .ok_or_else(overflow)?;
-    let mark_anchor_y = i32::from(mark_anchor.y)
-        .checked_add(device_delta(face, mark_anchor.y_device)?)
-        .ok_or_else(overflow)?;
     let x_delta = parent_x
-        .checked_add(parent_anchor_x)
+        .checked_add(anchor_delta_x)
         .and_then(|value| value.checked_sub(mark_x))
-        .and_then(|value| value.checked_sub(mark_anchor_x))
         .ok_or_else(overflow)?;
     let y_delta = parent_y
-        .checked_add(parent_anchor_y)
+        .checked_add(anchor_delta_y)
         .and_then(|value| value.checked_sub(mark_y))
-        .and_then(|value| value.checked_sub(mark_anchor_y))
         .ok_or_else(overflow)?;
     buffer[mark].x_offset = buffer[mark]
         .x_offset

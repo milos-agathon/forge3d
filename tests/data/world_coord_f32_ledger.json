@@ -6473,5 +6473,433 @@
     "result_count": 1942,
     "result_digest": "9edcc6da84f3a5570286e2d44cd3efd8324c5be35ce7822f61f744d858796b09",
     "review": "PR 299: ViewerTerrainData::clip_planes pushes the terrain camera's near plane out to half the eye's distance from the terrain bounding box (a fixed near <= 1.0 z-fought steep walls under a long lens). The one cast narrows that scalar f64 distance to the f32 near plane; it is never a world position, which still crosses f64 -> f32 only through Anchor."
+  },
+  "littera_delivery": {
+    "raw_base_count": 1942,
+    "raw_base_digest": "9edcc6da84f3a5570286e2d44cd3efd8324c5be35ce7822f61f744d858796b09",
+    "raw_candidate_count": 1929,
+    "raw_candidate_digest": "7c135e951f18f9bff394c9ca8b2897372ec80c173fdcb98d1fdf68a9bc529b39",
+    "base_rows_by_affected_path": {
+      "src/core/text_overlay.rs": [
+        [
+          "src/core/text_overlay.rs",
+          "set_resolution",
+          "as_f32",
+          1,
+          "self.uniforms.resolution = [w as f32, h as f32]"
+        ],
+        [
+          "src/core/text_overlay.rs",
+          "set_resolution",
+          "as_f32",
+          2,
+          "self.uniforms.resolution = [w as f32, h as f32]"
+        ]
+      ],
+      "src/labels/msdf/atlas.rs": [
+        [
+          "src/labels/msdf/atlas.rs",
+          "prepare_glyph",
+          "as_f32",
+          1,
+          "font_index, glyph_id, })? as f32 * scale"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "pixel_coverage",
+          "as_f32",
+          1,
+          "let point = Point::new( pixel_x as f32 + (sx as f32 + 0.5) / SUBPIXELS as f32, pixel_y as f32 + (sy as f32 + 0.5) / SUBPIXELS as f32, )"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "pixel_coverage",
+          "as_f32",
+          2,
+          "let point = Point::new( pixel_x as f32 + (sx as f32 + 0.5) / SUBPIXELS as f32, pixel_y as f32 + (sy as f32 + 0.5) / SUBPIXELS as f32, )"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "pixel_coverage",
+          "as_f32",
+          3,
+          "let point = Point::new( pixel_x as f32 + (sx as f32 + 0.5) / SUBPIXELS as f32, pixel_y as f32 + (sy as f32 + 0.5) / SUBPIXELS as f32, )"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "pixel_coverage",
+          "as_f32",
+          4,
+          "let point = Point::new( pixel_x as f32 + (sx as f32 + 0.5) / SUBPIXELS as f32, pixel_y as f32 + (sy as f32 + 0.5) / SUBPIXELS as f32, )"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "pixel_coverage",
+          "as_f32",
+          5,
+          "let point = Point::new( pixel_x as f32 + (sx as f32 + 0.5) / SUBPIXELS as f32, pixel_y as f32 + (sy as f32 + 0.5) / SUBPIXELS as f32, )"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "pixel_coverage",
+          "as_f32",
+          6,
+          "let point = Point::new( pixel_x as f32 + (sx as f32 + 0.5) / SUBPIXELS as f32, pixel_y as f32 + (sy as f32 + 0.5) / SUBPIXELS as f32, )"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "pixel_coverage",
+          "as_f32",
+          7,
+          "} } } covered as f32 / (SUBPIXELS * SUBPIXELS) as f32"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "pixel_coverage",
+          "as_f32",
+          8,
+          "} } } covered as f32 / (SUBPIXELS * SUBPIXELS) as f32"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          1,
+          "let offset_x = glyph.bounds[0].floor() - margin as f32"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          2,
+          "let offset_y = glyph.bounds[1].floor() - margin as f32"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          3,
+          "let contours = translated( &glyph.contours, Point::new(x as f32 - offset_x, y as f32 - offset_y), )"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          4,
+          "let contours = translated( &glyph.contours, Point::new(x as f32 - offset_x, y as f32 - offset_y), )"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          5,
+          "let sample = Point::new(pixel_x as f32 + 0.5, pixel_y as f32 + 0.5)"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          6,
+          "let sample = Point::new(pixel_x as f32 + 0.5, pixel_y as f32 + 0.5)"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          7,
+          "} } let corrections = collision_mask( &contours, &edges, &fields, cell_width as usize, cell_height as usize, Point::new(x as f32, y as f32), )"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          8,
+          "} } let corrections = collision_mask( &contours, &edges, &fields, cell_width as usize, cell_height as usize, Point::new(x as f32, y as f32), )"
+        ]
+      ],
+      "src/labels/positioned.rs": [],
+      "src/labels/raster.rs": [
+        [
+          "src/labels/raster.rs",
+          "rasterize",
+          "as_f32",
+          1,
+          "let x1 = bounds[2].ceil().min(width as f32) as usize"
+        ],
+        [
+          "src/labels/raster.rs",
+          "rasterize",
+          "as_f32",
+          2,
+          "let y1 = bounds[3].ceil().min(height as f32) as usize"
+        ],
+        [
+          "src/labels/raster.rs",
+          "rasterize",
+          "as_f32",
+          3,
+          "let point = Point::new( x as f32 + (sx as f32 + 0.5) / SUBPIXELS as f32, y as f32 + (sy as f32 + 0.5) / SUBPIXELS as f32, )"
+        ],
+        [
+          "src/labels/raster.rs",
+          "rasterize",
+          "as_f32",
+          4,
+          "let point = Point::new( x as f32 + (sx as f32 + 0.5) / SUBPIXELS as f32, y as f32 + (sy as f32 + 0.5) / SUBPIXELS as f32, )"
+        ],
+        [
+          "src/labels/raster.rs",
+          "rasterize",
+          "as_f32",
+          5,
+          "let point = Point::new( x as f32 + (sx as f32 + 0.5) / SUBPIXELS as f32, y as f32 + (sy as f32 + 0.5) / SUBPIXELS as f32, )"
+        ],
+        [
+          "src/labels/raster.rs",
+          "rasterize",
+          "as_f32",
+          6,
+          "let point = Point::new( x as f32 + (sx as f32 + 0.5) / SUBPIXELS as f32, y as f32 + (sy as f32 + 0.5) / SUBPIXELS as f32, )"
+        ],
+        [
+          "src/labels/raster.rs",
+          "rasterize",
+          "as_f32",
+          7,
+          "let point = Point::new( x as f32 + (sx as f32 + 0.5) / SUBPIXELS as f32, y as f32 + (sy as f32 + 0.5) / SUBPIXELS as f32, )"
+        ],
+        [
+          "src/labels/raster.rs",
+          "rasterize",
+          "as_f32",
+          8,
+          "let point = Point::new( x as f32 + (sx as f32 + 0.5) / SUBPIXELS as f32, y as f32 + (sy as f32 + 0.5) / SUBPIXELS as f32, )"
+        ],
+        [
+          "src/labels/raster.rs",
+          "rasterize",
+          "as_f32",
+          9,
+          "} } } output[(y, x)] = covered as f32 / (SUBPIXELS * SUBPIXELS) as f32"
+        ],
+        [
+          "src/labels/raster.rs",
+          "rasterize",
+          "as_f32",
+          10,
+          "} } } output[(y, x)] = covered as f32 / (SUBPIXELS * SUBPIXELS) as f32"
+        ]
+      ],
+      "src/py_functions/labels.rs": [
+        [
+          "src/py_functions/labels.rs",
+          "screen_path_sample",
+          "as_f32",
+          1,
+          "let t = ((distance as f64 - traversed) / length) as f32"
+        ],
+        [
+          "src/py_functions/labels.rs",
+          "<module>",
+          "as_f32",
+          1,
+          "let max_start = (path_length - text_width).max(0.0) as f32"
+        ],
+        [
+          "src/py_functions/labels.rs",
+          "<module>",
+          "as_f32",
+          2,
+          "let start_offset = ((fraction * path_length as f32) - (text_width as f32) * 0.5).clamp(0.0, max_start)"
+        ],
+        [
+          "src/py_functions/labels.rs",
+          "<module>",
+          "as_f32",
+          3,
+          "let start_offset = ((fraction * path_length as f32) - (text_width as f32) * 0.5).clamp(0.0, max_start)"
+        ],
+        [
+          "src/py_functions/labels.rs",
+          "<module>",
+          "as_f32",
+          4,
+          "let layout = crate::labels::curved::layout_curved_text_at_offset( &chars, path, &glyphs_in .iter() .map(|glyph| glyph.unit_advance) .collect::<Vec<_>>(), font_size, [1.0, 1.0, 1.0, 1.0], tracking, start_offset, text_width as f32, )"
+        ],
+        [
+          "src/py_functions/labels.rs",
+          "<module>",
+          "as_f32",
+          5,
+          "let anchor_distance = fraction * path_length as f32"
+        ]
+      ]
+    },
+    "result_rows_by_affected_path": {
+      "src/core/text_overlay.rs": [
+        [
+          "src/core/text_overlay.rs",
+          "<module>",
+          "as_f32",
+          1,
+          "let mut shader_scale = required_scale as f32"
+        ],
+        [
+          "src/core/text_overlay.rs",
+          "set_resolution",
+          "as_f32",
+          1,
+          "self.uniforms.resolution = [w as f32, h as f32]"
+        ],
+        [
+          "src/core/text_overlay.rs",
+          "set_resolution",
+          "as_f32",
+          2,
+          "self.uniforms.resolution = [w as f32, h as f32]"
+        ]
+      ],
+      "src/labels/msdf/atlas.rs": [
+        [
+          "src/labels/msdf/atlas.rs",
+          "prepare_glyph",
+          "as_f32",
+          1,
+          "font_index, glyph_id, })? as f32 * scale"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          1,
+          "let offset_x = glyph.bounds[0].floor() - margin as f32"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          2,
+          "let offset_y = glyph.bounds[1].floor() - margin as f32"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          3,
+          "let contours = translated( &glyph.contours, Point::new(x as f32 - offset_x, y as f32 - offset_y), )"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          4,
+          "let contours = translated( &glyph.contours, Point::new(x as f32 - offset_x, y as f32 - offset_y), )"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          5,
+          "let sample = Point::new(pixel_x as f32 + 0.5, pixel_y as f32 + 0.5)"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          6,
+          "let sample = Point::new(pixel_x as f32 + 0.5, pixel_y as f32 + 0.5)"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          7,
+          "} } let corrections = collision_mask( &contours, &edges, &fields, cell_width as usize, cell_height as usize, Point::new(x as f32, y as f32), )"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          8,
+          "} } let corrections = collision_mask( &contours, &edges, &fields, cell_width as usize, cell_height as usize, Point::new(x as f32, y as f32), )"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          9,
+          "} correct_interpolation_artifacts( &mut fields, &edges, cell_width as usize, cell_height as usize, Point::new(x as f32, y as f32), )"
+        ],
+        [
+          "src/labels/msdf/atlas.rs",
+          "bake_prepared",
+          "as_f32",
+          10,
+          "} correct_interpolation_artifacts( &mut fields, &edges, cell_width as usize, cell_height as usize, Point::new(x as f32, y as f32), )"
+        ]
+      ],
+      "src/labels/positioned.rs": [
+        [
+          "src/labels/positioned.rs",
+          "fmt",
+          "as_f32",
+          1,
+          "let x = origin[0] + glyph.x_offset as f32 * shaped.size / 64.0"
+        ],
+        [
+          "src/labels/positioned.rs",
+          "fmt",
+          "as_f32",
+          2,
+          "let y = line_origin_y + origin[1] - glyph.y_offset as f32 * shaped.size / 64.0"
+        ],
+        [
+          "src/labels/positioned.rs",
+          "fmt",
+          "as_f32",
+          3,
+          "let advance = [ glyph.x_advance as f32 * shaped.size / 64.0, glyph.y_advance as f32 * shaped.size / 64.0, ]"
+        ],
+        [
+          "src/labels/positioned.rs",
+          "fmt",
+          "as_f32",
+          4,
+          "let advance = [ glyph.x_advance as f32 * shaped.size / 64.0, glyph.y_advance as f32 * shaped.size / 64.0, ]"
+        ]
+      ],
+      "src/labels/raster.rs": [
+        [
+          "src/labels/raster.rs",
+          "rasterize_with_halo",
+          "as_f32",
+          1,
+          "return Ok(output.mapv(|value| value as f32))"
+        ],
+        [
+          "src/labels/raster.rs",
+          "rasterize_with_halo",
+          "as_f32",
+          2,
+          "} Ok(output.mapv(|value| value.clamp(0.0, 1.0) as f32))"
+        ]
+      ],
+      "src/py_functions/labels.rs": [
+        [
+          "src/py_functions/labels.rs",
+          "screen_path_sample",
+          "as_f32",
+          1,
+          "let t = ((distance as f64 - traversed) / length) as f32"
+        ],
+        [
+          "src/py_functions/labels.rs",
+          "<module>",
+          "as_f32",
+          1,
+          "let anchor_distance = fraction * path_length as f32"
+        ]
+      ]
+    }
   }
 }

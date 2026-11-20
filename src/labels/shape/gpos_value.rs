@@ -1,4 +1,4 @@
-use super::{PositioningGlyph, TextError};
+use super::{PositionMode, PositioningGlyph, TextError};
 use ttf_parser::gpos::{Device, ValueRecord};
 use ttf_parser::Face;
 
@@ -21,23 +21,41 @@ pub(super) fn device_delta(face: &Face<'_>, device: Option<Device<'_>>) -> Resul
     }
 }
 
+#[cfg(test)]
 pub(super) fn apply_value(
     face: &Face<'_>,
     glyph: &mut PositioningGlyph,
     value: ValueRecord<'_>,
 ) -> Result<(), TextError> {
-    let x_placement = i32::from(value.x_placement)
-        .checked_add(device_delta(face, value.x_placement_device)?)
-        .ok_or(TextError::MalformedOpenType("GPOS positioning overflow"))?;
-    let y_placement = i32::from(value.y_placement)
-        .checked_add(device_delta(face, value.y_placement_device)?)
-        .ok_or(TextError::MalformedOpenType("GPOS positioning overflow"))?;
-    let x_advance = i32::from(value.x_advance)
-        .checked_add(device_delta(face, value.x_advance_device)?)
-        .ok_or(TextError::MalformedOpenType("GPOS positioning overflow"))?;
-    let y_advance = i32::from(value.y_advance)
-        .checked_add(device_delta(face, value.y_advance_device)?)
-        .ok_or(TextError::MalformedOpenType("GPOS positioning overflow"))?;
+    apply_value_with_mode(face, glyph, value, PositionMode::DESIGN_UNITS)
+}
+
+pub(super) fn apply_value_with_mode(
+    face: &Face<'_>,
+    glyph: &mut PositioningGlyph,
+    value: ValueRecord<'_>,
+    mode: PositionMode,
+) -> Result<(), TextError> {
+    let x_placement = mode.scale(
+        i32::from(value.x_placement)
+            .checked_add(device_delta(face, value.x_placement_device)?)
+            .ok_or(TextError::MalformedOpenType("GPOS positioning overflow"))?,
+    )?;
+    let y_placement = mode.scale(
+        i32::from(value.y_placement)
+            .checked_add(device_delta(face, value.y_placement_device)?)
+            .ok_or(TextError::MalformedOpenType("GPOS positioning overflow"))?,
+    )?;
+    let x_advance = mode.scale(
+        i32::from(value.x_advance)
+            .checked_add(device_delta(face, value.x_advance_device)?)
+            .ok_or(TextError::MalformedOpenType("GPOS positioning overflow"))?,
+    )?;
+    let y_advance = mode.scale(
+        i32::from(value.y_advance)
+            .checked_add(device_delta(face, value.y_advance_device)?)
+            .ok_or(TextError::MalformedOpenType("GPOS positioning overflow"))?,
+    )?;
     glyph.x_offset = glyph
         .x_offset
         .checked_add(x_placement)
@@ -96,5 +114,40 @@ mod tests {
         )
         .unwrap();
         assert_eq!(glyph.x_advance, 7);
+    }
+
+    #[test]
+    fn pair_adjustment_rounds_separately_from_base_advance() {
+        let mut head = [0u8; 54];
+        head[18..20].copy_from_slice(&1000u16.to_be_bytes());
+        let mut hhea = [0u8; 36];
+        hhea[34..36].copy_from_slice(&1u16.to_be_bytes());
+        let maxp = [0, 0, 0x50, 0, 0, 100];
+        let face = Face::from_raw_tables(ttf_parser::RawFaceTables {
+            head: &head,
+            hhea: &hhea,
+            maxp: &maxp,
+            ..ttf_parser::RawFaceTables::default()
+        })
+        .unwrap();
+        let adjustment = ValueRecord {
+            x_advance: -40,
+            x_placement: -40,
+            ..ValueRecord::default()
+        };
+        let mut glyph = PositioningGlyph::new(GlyphId(6), 2);
+        glyph.x_advance = crate::labels::font::to_q26_6(552, 1000);
+        super::apply_value_with_mode(
+            &face,
+            &mut glyph,
+            adjustment,
+            super::PositionMode::run(1000, true),
+        )
+        .unwrap();
+        assert_eq!((glyph.x_advance, glyph.x_offset), (32, -3));
+        let mut design_units = PositioningGlyph::new(GlyphId(6), 2);
+        design_units.x_advance = 552;
+        apply_value(&face, &mut design_units, adjustment).unwrap();
+        assert_eq!((design_units.x_advance, design_units.x_offset), (512, -40));
     }
 }

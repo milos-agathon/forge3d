@@ -68,11 +68,17 @@ impl LabelCompositor {
                     text.set_resolution(self.width, self.height);
                     text.set_alpha(self.text_overlay_alpha);
                     text.set_enabled(true);
-                    text.upload_uniforms(&g.queue);
+                    text.set_label_starts(&self.text_label_starts);
                     text.upload_instances(&g.device, &g.queue, &self.text_instances)?;
+                    text.upload_uniforms(&g.queue);
                     text.render(&mut pass);
                     draws += 1;
                 }
+            }
+        }
+        if self.text_overlay_enabled {
+            if let Some(text) = &mut self.text_overlay_renderer {
+                text.encode_union(&mut encoder, &self.color_view)?;
             }
         }
         timing.end(&mut encoder, scope, draws);

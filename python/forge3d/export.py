@@ -9,6 +9,7 @@ Example:
 """
 
 from dataclasses import dataclass, field
+from itertools import groupby
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 import xml.etree.ElementTree as ET
@@ -569,6 +570,88 @@ def export_svg(
 
     path = Path(path)
     path.write_text(svg_content, encoding='utf-8')
+
+
+def _mapscene_label_svg(recipe, compiled, precision: int) -> str:
+    from ._native import get_native_symbol
+    from .label_plan import _font_paths_from_glyph_atlas
+    from .map_scene import (
+        LabelLayer,
+        MapSceneTextLayoutError,
+        _chronos_label_plans,
+        _compiled_label_render_style,
+        _label_atlas_paths,
+        _layer_id,
+    )
+    from .text_atlas import load_atlas_metrics
+
+    if not isinstance(precision, int) or not 0 <= precision <= 255:
+        raise ValueError("precision must fit the native unsigned byte argument")
+    if recipe.output is None:
+        raise ValueError("MapScene.label_svg requires an OutputSpec")
+    width, height = recipe.output.width, recipe.output.height
+    root = ET.Element("svg", {
+        "xmlns": "http://www.w3.org/2000/svg", "viewBox": f"0 0 {width} {height}",
+        "overflow": "hidden",
+    })
+    frame = compiled.frame
+    plans = _chronos_label_plans(frame) if frame is not None else compiled.label_plans
+    path_data = get_native_symbol("_compiled_label_svg_path")
+    packaged = Path(__file__).resolve().parent / "data" / "fonts"
+    for layer in recipe.layers:
+        if not isinstance(layer, LabelLayer):
+            continue
+        layer_id = _layer_id(layer, "layer")
+        plan = plans.get(layer_id)
+        if plan is None or not plan.accepted:
+            continue
+        _, atlas_metrics, custom = _label_atlas_paths(layer)
+        default_size = float(load_atlas_metrics(atlas_metrics)["font_size"]) if custom else 12.0
+        supplied = _font_paths_from_glyph_atlas(layer.glyph_atlas)
+        styles = (
+            (label, _compiled_label_render_style(label, layer_id, width, height, default_size))
+            for label in plan.accepted
+        )
+        layer_group = ET.SubElement(root, "g", {"data-layer-id": layer_id})
+        for alpha, run in groupby(styles, key=lambda entry: entry[1][-1]):
+            if alpha == 0.0:
+                continue
+            group = layer_group if alpha == 1.0 else ET.SubElement(
+                layer_group, "g", {"opacity": str(alpha)},
+            )
+            for label, (geometry, origin, size, fill, halo, halo_width, _) in run:
+                typography = label.typography or {}
+                fonts = supplied or [str(packaged / Path(name).name) for name in typography.get("font_chain", ())]
+                hashes = list(typography.get("font_sha256", ()))
+                try:
+                    if path_data is None:
+                        raise SvgTextStyleError("native_text_unavailable", "outline_export", label.label_id)
+                    if not fonts or not hashes:
+                        raise SvgTextStyleError("missing_font_identity", "font_chain", label.label_id)
+                    outline = path_data(fonts, hashes, size, origin, [dict(glyph) for glyph in geometry], precision)
+                except ValueError as error:
+                    diagnostics = getattr(error, "diagnostics", ())
+                    reason = diagnostics[0]["reason"] if diagnostics else "invalid_compiled_glyph"
+                    raise MapSceneTextLayoutError({
+                        "status": "diagnostic_block", "reason": reason,
+                        "layer": layer_id, "object_id": label.label_id, "message": str(error),
+                    }) from error
+                if not outline:
+                    continue
+                label_group = ET.SubElement(group, "g", {"data-label-id": label.label_id})
+                if halo_width > 0.0 and halo[3]:
+                    color = "#{:02x}{:02x}{:02x}".format(*halo[:3])
+                    ET.SubElement(label_group, "path", {
+                        "d": outline, "fill": color, "stroke": color,
+                        "stroke-width": str(2.0 * halo_width),
+                        "stroke-linecap": "round", "stroke-linejoin": "round",
+                        "fill-rule": "nonzero", "opacity": str(halo[3] / 255.0),
+                    })
+                ET.SubElement(label_group, "path", {
+                    "d": outline, "fill": "#{:02x}{:02x}{:02x}".format(*fill[:3]),
+                    "fill-rule": "nonzero", "opacity": str(fill[3] / 255.0),
+                })
+    return ET.tostring(root, encoding="unicode", xml_declaration=True)
 
 
 def export_pdf(

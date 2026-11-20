@@ -62,11 +62,24 @@ def rasterize_shaped_run(
     height: int,
     origin: tuple[float, float] = (0.0, 0.0),
     line_ranges: Sequence[tuple[int, int]] | None = None,
+    positioned_glyphs: Sequence[Mapping] | None = None,
+    halo_width: float = 0.0,
 ):
     _native = get_native_module()
     return _native.rasterize_shaped_run(
-        shaped, width, height, origin, line_ranges
+        shaped, width, height, origin, line_ranges,
+        None if positioned_glyphs is None else [dict(glyph) for glyph in positioned_glyphs],
+        halo_width,
     )
+
+
+def rasterize_svg_path(
+    path_data: str, width: int, height: int,
+    origin: tuple[float, float] = (0.0, 0.0), halo_width: float = 0.0,
+):
+    """Rasterize absolute M/L/Q/C/Z outline paths, including a round halo."""
+    _native = get_native_module()
+    return _native.rasterize_svg_path(path_data, width, height, origin, halo_width)
 
 
 def bake_msdf_atlas(
@@ -75,7 +88,11 @@ def bake_msdf_atlas(
     font_size: float,
     px_range: float = 8.0,
     padding: int = 4,
+    *,
+    channels: int = 3,
 ):
+    if channels not in (3, 4):
+        raise ValueError("MSDF atlas channels must be 3 or 4")
     _native = get_native_module()
     fonts = [str(Path(font)) for font in font_chain]
     native_shaped_type = get_native_symbol("ShapedText")
@@ -120,6 +137,15 @@ def bake_msdf_atlas(
         baked["metrics"]["font_sha256"] = [
             hashlib.sha256(Path(font).read_bytes()).hexdigest() for font in fonts
         ]
+    if channels == 4:
+        import numpy as np
+        rgb = baked["image"]
+        image = np.empty(rgb.shape[:2] + (4,), dtype=np.uint8)
+        image[..., :3] = rgb
+        image[..., 3] = baked["sdf_image"]
+        baked["image"] = image
+        baked["metrics"]["channels"] = 4
+        baked["metrics"]["byte_count"] = image.nbytes
     return baked
 
 
@@ -128,5 +154,6 @@ __all__ = [
     "TextShapingError",
     "bake_msdf_atlas",
     "rasterize_shaped_run",
+    "rasterize_svg_path",
     "shape",
 ]

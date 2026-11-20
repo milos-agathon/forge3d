@@ -1,5 +1,7 @@
-use super::distance::{collision_mask, contains, correct_collision, edge_distance, median};
-use super::edge::{color_contours, flatten_path, Contour, Edge};
+use super::distance::{
+    collision_mask, contains, correct_collision, correct_interpolation_artifacts, edge_distance,
+};
+use super::edge::{color_contours, flatten_path_with_tolerance, Contour, Edge};
 use crate::labels::font::{FontCollection, FontGlyph, TextError};
 use crate::labels::shape::ShapedText;
 use lyon_path::math::Point;
@@ -96,7 +98,8 @@ fn prepare_glyph(
     })? as f32
         * scale;
     let contours = match fonts.outline(font_index, glyph_id) {
-        Ok(path) => flatten_path(&path, scale, Point::new(0.0, 0.0)),
+        // Resolve curves to float32 coordinate precision for the distance field.
+        Ok(path) => flatten_path_with_tolerance(&path, scale, Point::new(0.0, 0.0), f32::EPSILON),
         // Spaces and other advance-only glyphs legitimately have no outline.
         Err(TextError::MissingOutline { .. }) => Vec::new(),
         Err(error) => return Err(error),
@@ -151,6 +154,12 @@ fn field(edges: &[Edge], point: Point, inside: bool) -> ([f32; 3], f32) {
     let mut channel_true = [f32::INFINITY; 3];
     let mut nearest = f32::INFINITY;
     let sign = if inside { 1.0 } else { -1.0 };
+    let orientation = edges
+        .iter()
+        .map(|edge| edge.from.x * edge.to.y - edge.from.y * edge.to.x)
+        .sum::<f32>()
+        .signum();
+    let orientation = if orientation == 0.0 { 1.0 } else { orientation };
     for edge in edges {
         let distance = edge_distance(point, *edge);
         nearest = nearest.min(distance.true_distance.abs());
@@ -159,13 +168,9 @@ fn field(edges: &[Edge], point: Point, inside: bool) -> ([f32; 3], f32) {
                 && distance.true_distance.abs() < channel_true[channel]
             {
                 channel_true[channel] = distance.true_distance.abs();
-                // Edge winding identifies the locally interior side of one
-                // contour, but glyph fill is the non-zero union of every
-                // contour (including holes). Preserve the colored
-                // pseudo-distance magnitude and apply the independently
-                // point-sampled fill sign so the RGB median has canonical
-                // inside/outside semantics before interpolation.
-                *value = distance.pseudo_distance.abs().copysign(sign);
+                // Keep the oriented tangent extension in each channel. The
+                // independent containment sign belongs only to scalar truth.
+                *value = distance.pseudo_distance * edge.winding * orientation;
             }
         }
     }
@@ -176,26 +181,6 @@ fn field(edges: &[Edge], point: Point, inside: bool) -> ([f32; 3], f32) {
     }
     let truth = nearest.copysign(sign);
     (channels, truth)
-}
-
-fn pixel_coverage(contours: &[Contour], pixel_x: u32, pixel_y: u32) -> f32 {
-    const SUBPIXELS: usize = 8;
-    if contours.is_empty() {
-        return 0.0;
-    }
-    let mut covered = 0usize;
-    for sy in 0..SUBPIXELS {
-        for sx in 0..SUBPIXELS {
-            let point = Point::new(
-                pixel_x as f32 + (sx as f32 + 0.5) / SUBPIXELS as f32,
-                pixel_y as f32 + (sy as f32 + 0.5) / SUBPIXELS as f32,
-            );
-            if contains(contours, point) {
-                covered += 1;
-            }
-        }
-    }
-    covered as f32 / (SUBPIXELS * SUBPIXELS) as f32
 }
 
 fn bake_prepared(
@@ -223,12 +208,6 @@ fn bake_prepared(
     let mut image = vec![0u8; width as usize * height as usize * 3];
     let mut sdf_image = vec![0u8; width as usize * height as usize];
     let mut glyphs = Vec::with_capacity(prepared.len());
-    let coverage_locked = font_size >= 64.0
-        && prepared.len() == 1
-        && prepared
-            .first()
-            .is_some_and(|glyph| glyph.codepoint == 'A' as u32);
-    let rgb_px_range = if coverage_locked { 1.0f32 } else { px_range };
 
     for (index, glyph) in prepared.iter().enumerate() {
         let x = (index % columns) as u32 * cell_width;
@@ -264,37 +243,30 @@ fn bake_prepared(
             cell_height as usize,
             Point::new(x as f32, y as f32),
         );
+        for (index, pixel) in fields.iter_mut().enumerate() {
+            if corrections[index] {
+                *pixel = correct_collision(*pixel, scalar_fields[index]);
+            }
+            *pixel = pixel.map(|value| value.clamp(-0.5 * px_range, 0.5 * px_range));
+        }
+        correct_interpolation_artifacts(
+            &mut fields,
+            &edges,
+            cell_width as usize,
+            cell_height as usize,
+            Point::new(x as f32, y as f32),
+        );
         for local_y in 0..cell_height {
             for local_x in 0..cell_width {
                 let index = local_y as usize * cell_width as usize + local_x as usize;
                 let pixel_x = x + local_x;
                 let pixel_y = y + local_y;
                 let scalar = scalar_fields[index];
-                let rgb = if corrections[index] {
-                    correct_collision(fields[index], scalar)
-                } else {
-                    fields[index]
-                };
-                let coverage = pixel_coverage(&contours, pixel_x, pixel_y);
-                let median_target = if coverage_locked {
-                    coverage - 0.5
-                } else {
-                    let inside = coverage >= 0.5;
-                    let target = scalar.clamp(-rgb_px_range, rgb_px_range);
-                    if (target >= 0.0) == inside {
-                        target
-                    } else if inside {
-                        1.0e-4
-                    } else {
-                        -1.0e-4
-                    }
-                };
-                let median_delta = median_target - median(rgb);
-                let rgb = rgb.map(|channel| (channel + median_delta).clamp(-px_range, px_range));
+                let rgb = fields[index];
                 let target = (pixel_y as usize * width as usize + pixel_x as usize) * 3;
                 for channel in 0..3 {
                     image[target + channel] =
-                        ((0.5 + rgb[channel] / rgb_px_range).clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+                        ((0.5 + rgb[channel] / px_range).clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
                 }
                 sdf_image[pixel_y as usize * width as usize + pixel_x as usize] =
                     ((0.5 + scalar / px_range).clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
@@ -322,7 +294,7 @@ fn bake_prepared(
         font_size,
         line_height: font_size * 1.2,
         baseline: font_size,
-        px_range: rgb_px_range,
+        px_range,
         padding,
         bake_ms: started.elapsed().as_secs_f64() * 1000.0,
         glyphs,

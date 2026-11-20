@@ -42,6 +42,15 @@ def test_bidi_conformance() -> None:
     )
     assert match is not None, output
     character_lines, bidi_lines, failures = map(int, match.groups())
+    def source_line_count(name):
+        with (ROOT / "tests/data/unicode" / name).open(encoding="utf-8") as source:
+            return sum(1 for line in source if line.strip() and not line.lstrip().startswith(("#", "@")))
+
+    character_source_lines = source_line_count("BidiCharacterTest.txt")
+    bidi_source_lines = source_line_count("BidiTest.txt")
+    print(f"BidiCharacterTest source lines={character_source_lines}; BidiTest source lines={bidi_source_lines}, paragraph cases={bidi_lines}; failures={failures}")
+    assert character_lines == character_source_lines
+    assert character_source_lines >= 2_000 and bidi_source_lines >= 2_000
     assert character_lines >= 2_000
     assert bidi_lines >= 2_000
     assert failures == 0

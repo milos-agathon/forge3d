@@ -201,6 +201,49 @@ mod tests {
     }
 
     #[test]
+    fn mark_to_base_skips_prior_gdef_marks_without_ignore_marks_flag() {
+        let mut head = [0u8; 54];
+        head[18..20].copy_from_slice(&1000u16.to_be_bytes());
+        let mut hhea = [0u8; 36];
+        hhea[34..36].copy_from_slice(&1u16.to_be_bytes());
+        let maxp = [0, 0, 0x50, 0, 0, 100];
+        let mut gdef = vec![0, 1, 0, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 1, 0, 10, 0, 11];
+        gdef.extend(
+            [1u16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3]
+                .into_iter()
+                .flat_map(u16::to_be_bytes),
+        );
+        let data = gpos(vec![lookup(4, mark_fixture(4))]);
+        let face = ttf_parser::Face::from_raw_tables(ttf_parser::RawFaceTables {
+            head: &head,
+            hhea: &hhea,
+            maxp: &maxp,
+            gpos: Some(&data),
+            gdef: Some(&gdef),
+            ..ttf_parser::RawFaceTables::default()
+        })
+        .unwrap();
+        assert_eq!(
+            face.tables().gdef.unwrap().glyph_class(GlyphId(20)),
+            Some(ttf_parser::gdef::GlyphClass::Mark)
+        );
+        let mut buffer = glyphs(&[10, 20, 20]);
+        buffer[0].x_advance = 500;
+        super::super::apply_gpos_with_data(
+            &face,
+            Some(&data),
+            &mut buffer,
+            &[0],
+            Tag::from_bytes(b"hebr"),
+        )
+        .unwrap();
+        for mark in &buffer[1..] {
+            assert_eq!(mark.attached_to, Some(0));
+            assert_eq!((mark.x_offset, mark.y_offset), (-380, 340));
+        }
+    }
+
+    #[test]
     fn mark_to_ligature_selects_component_from_cluster() {
         let mut ligature = crate::labels::shape::gsub::Glyph::new(GlyphId(10), 4);
         ligature.component_clusters = vec![8, 4];

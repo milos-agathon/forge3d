@@ -52,3 +52,34 @@ python -c "from forge3d.text_atlas import bake_atlas, save_atlas, default_latin_
 - RGB byte count: `516000`
 - Runtime bake timing is diagnostic-only; `save_atlas` normalizes persisted
   `bake_ms` to `0.0` so canonical JSON is byte-stable.
+
+## RGBA atlas for compiled labels
+
+The opt-in atlas uses the same Latin subset as the default RGB atlas. Its RGB
+planes hold the multichannel distance field and its alpha plane holds the
+signed scalar distance field. The bake uses 96 px, range 32, and padding 2.
+Both signed fields encode half the range on either side of the outline.
+
+```powershell
+python -c "from forge3d.text_atlas import bake_atlas, save_atlas, default_latin_atlas_paths; a=bake_atlas(font_size=96, px_range=32, padding=2, channels=4); print(a.metrics['bake_ms'], a.image.nbytes); save_atlas(a, *default_latin_atlas_paths(rgba=True))"
+```
+
+- `atlas_latin_rgba.png` SHA-256 `bec2e50df6787552ea42afb31ff2ddba4716638931eb617449598fd0ef47f2da`
+- `atlas_latin_rgba.json` SHA-256 `e38d9f3dd879232e636a174a837c99a628025b2d7bdc5ae641a3ff937d432c6e`
+- RGBA byte count 10,230,000 (1550 × 1650 × 4).
+
+## Hebrew mark extension
+
+`NotoSansHebrew-marks-subset.ttf` extends the cmap of
+`NotoSansHebrew-subset.ttf` with U+05B0, U+05B8, U+05B9, U+05BC and U+05C1.
+It preserves the font layout features, glyph names, canonical and legacy cmaps,
+recommended glyphs and .notdef outline. The original subset remains available
+for plans pinned to its content.
+
+The upstream `ofl/notosanshebrew/NotoSansHebrew[wdth,wght].ttf`
+file at Google Fonts revision `4c1913251a6dd1ba34a6ef4b7a630178d01b88ff`
+has SHA-256 `7ef36a2c3593758cdb622e1bdef4f84523e92fbc3ccc667438dd80ff54c2de88`.
+The subset SHA-256 is `06dffb6483277cb91ad4ecfefa5b2c8527399d2914e225b64ee6a0816f80244d`
+in both the archive and the Python package. Use fontTools 4.58.5 with
+`--no-recalc-timestamp --layout-features='*' --glyph-names --symbol-cmap --legacy-cmap --notdef-glyph --notdef-outline --recommended-glyphs`
+and the union of the original cmap and the five code points above.
