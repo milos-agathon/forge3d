@@ -32,11 +32,12 @@ def test_bidi_conformance() -> None:
             "--nocapture",
         ],
         cwd=ROOT,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
     output = result.stdout + result.stderr
+    assert result.returncode == 0, output
     match = re.search(
         r"BidiCharacterTest\.txt=(\d+) BidiTest\.txt=(\d+) failures=(\d+)", output
     )

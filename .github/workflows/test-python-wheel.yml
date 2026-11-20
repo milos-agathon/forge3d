@@ -60,6 +60,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # The full Python suite also invokes Cargo for its Unicode and VT-store
+      # contracts. Use the same reviewed compiler as the Rust acceptance lane.
+      - name: Install reviewed Rust toolchain for full-suite subprocesses
+        if: inputs.test_mode == 'full'
+        uses: dtolnay/rust-toolchain@1.97.1
+
       - name: Prove exact-head checkout
         shell: python
         env:
