@@ -4362,6 +4362,17 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
 
     // Select which height normal to use based on debug mode
     var height_normal = height_normal_lod; // Default: LOD-aware (the fix)
+    // C01 authored materials use actual rendered geometry as their physical
+    // base. The legacy Sobel style amplifies physical slopes and is retained
+    // only for recipes that do not request the authored-material contract.
+    let physical_normals = material_layer_uniforms.snow_variation.w > 0.5;
+    if (physical_normals && !orbis_globe) {
+        height_normal = n_dd;
+    }
+    // The displaced mesh's interpolated base normal is the undisplaced up
+    // vector. Authored C01 materials project onto the actual surface instead;
+    // synthetic shading-normal details must not perturb texture ownership.
+    let triplanar_normal = select(base_normal, n_dd, physical_normals && !orbis_globe);
     if (debug_mode == DBG_FLAKE_NO_HEIGHT_NORMAL) {
         // Mode 24: use base_normal (no height detail) to isolate height-normal contribution
         height_normal = base_normal;
@@ -4398,7 +4409,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     let amplified_delta = normal_delta * normal_strength;
     let amplified_height_normal = det_normalize3(base_normal + det_barrier3(amplified_delta));
 
-    let normal_blend = lod_fade;  // Full blend at near LOD, fades at distance
+    let normal_blend = select(lod_fade, 1.0, physical_normals);
     // Capture pre-normalized normal for specular AA (Toksvig)
     let mixed_normal = det_mix3(base_normal, amplified_height_normal, normal_blend);
     let normal_len = det_sqrt(det_dot3(mixed_normal, mixed_normal));
@@ -4576,11 +4587,11 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         if (idx < layer_count) {
             let weight = det_barrier(weights[idx]);
             let layer = f32(idx);
-            // Use base_normal (smooth vertex normal) for triplanar weights, NOT blended_normal
-            // blended_normal has high-frequency height perturbations that cause weight jitter → flakes
+            // Use geometry rather than high-frequency shading-normal details.
+            // Legacy recipes retain their historical interpolated up vector.
             let sample_rgb = sample_triplanar(
                 input.world_position,
-                base_normal,  // STABLE geometric normal for triplanar projection
+                triplanar_normal,
                 tri_scale,
                 tri_blend,
                 layer,
@@ -4589,7 +4600,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             albedo = det_barrier3(det_barrier3(albedo) + det_barrier3(sample_rgb * weight));
             let layer_candidate = terrain_vt_source_id_triplanar(
                 input.world_position,
-                base_normal,
+                triplanar_normal,
                 tri_scale,
                 tri_blend,
                 layer,
@@ -5424,8 +5435,8 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         //   - BLUE dominant = surface faces Z axis (XY plane projection dominant)
         //   - Steep cliffs should show RED or BLUE, flat areas should show GREEN
         //   - Transitions should be smooth, not abrupt
-        // Use base_normal for stable triplanar weights (no high-frequency jitter)
-        let tri_weights = compute_triplanar_weights(base_normal, tri_blend);
+        // Report the same geometric weights used by the production sampler.
+        let tri_weights = compute_triplanar_weights(triplanar_normal, tri_blend);
         out.color = vec4<f32>(tri_weights, 1.0);
         return out;
     } else if (debug_mode == DBG_TRIPLANAR_CHECKER) {
@@ -5436,10 +5447,10 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         //   - If squares stretch on steep slopes, triplanar isn't working correctly
         //   - Pattern should remain world-space stable (no swimming with camera movement)
         let checker_scale = 8.0; // Number of checker squares per world unit
-        // Use base_normal for stable triplanar weights
+        // Use the production sampler's geometric projection normal.
         let checker_val = sample_triplanar_checker(
             input.world_position,
-            base_normal,  // Stable geometric normal
+            triplanar_normal,
             tri_scale,
             tri_blend,
             checker_scale

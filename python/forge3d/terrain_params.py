@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 import math
+import sys
+import warnings
 from numbers import Integral
 from typing import TYPE_CHECKING, List, Literal, Optional, Tuple, Sequence
 
@@ -674,6 +676,9 @@ class MaterialLayerSettings:
     """
 
     normal_path: Optional[str] = None
+    # Authored metre-scale materials use the rendered geometric normal as
+    # their base; legacy terrain retains its stylized height-normal treatment.
+    physical_normals: bool = False
     roughness_path: Optional[str] = None
     mask_path: Optional[str] = None
 
@@ -886,6 +891,7 @@ class AovSettings:
     source_id: bool = False
     output_dir: Optional[str] = None  # Directory for AOV output (None = same as beauty)
     format: str = "png"    # Output format: "png" or "exr" (M2)
+    building_id: bool = False  # C01 same-frame scatter batch identity; 0 = terrain/sky.
     
     def __post_init__(self) -> None:
         valid_formats = {"png", "exr", "raw"}
@@ -904,6 +910,7 @@ class AovSettings:
             or self.cloud_shadow
             or self.optical_depth
             or self.source_id
+            or self.building_id
         )
 
 
@@ -2025,7 +2032,12 @@ class LodSettings:
 
 @dataclass
 class SamplingSettings:
-    """Texture sampling configuration."""
+    """Terrain sampling configuration.
+
+    ``address_u/v/w`` are deprecated, retained for serialized compatibility,
+    and have no effect. Frame resolves always clamp; material tiling is separate.
+    Non-default address values warn and will be removed in a future release.
+    """
 
     mag_filter: str  # "Linear", "Nearest"
     min_filter: str
@@ -2034,6 +2046,30 @@ class SamplingSettings:
     address_u: str  # "Repeat", "ClampToEdge", "MirrorRepeat"
     address_v: str
     address_w: str
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if (name in ("address_u", "address_v", "address_w")
+                and isinstance(value, str) and value in ("ClampToEdge", "MirrorRepeat")):
+            # dataclasses.replace reconstructs every init field. On Python
+            # 3.10-3.12 its source is `obj`; 3.13 uses `_replace(self, ...)`.
+            # Carrying an unchanged value is not a new deprecated choice.
+            if name not in self.__dict__:
+                caller = sys._getframe(2)
+                source = caller.f_locals.get("self", caller.f_locals.get("obj"))
+                inherited = (caller.f_globals.get("__name__") == "dataclasses"
+                    and isinstance(source, SamplingSettings) and getattr(source, name) == value)
+                del caller
+                if inherited:
+                    object.__setattr__(self, name, value)
+                    return
+            warnings.warn(
+                f"SamplingSettings.{name} is deprecated and has no effect; "
+                "frame resolves always clamp to the edge. Remove this setting; "
+                "the address fields will be removed in a future release.",
+                DeprecationWarning,
+                stacklevel=2 if name in self.__dict__ else 3,
+            )
+        object.__setattr__(self, name, value)
 
     def __post_init__(self) -> None:
         valid_filters = {"Linear", "Nearest"}

@@ -23,7 +23,7 @@ use pyo3::prelude::*;
 use std::sync::{Arc, Mutex};
 use wgpu::TextureFormatFeatureFlags;
 
-use super::render_params::{AddressModeNative, FilterModeNative};
+use super::render_params::FilterModeNative;
 use crate::lighting::types::{Light, LightType};
 use crate::lighting::LightBuffer;
 

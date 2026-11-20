@@ -58,7 +58,9 @@ def atrous_denoise(
     if normal is not None:
         if normal.shape != (h, w, 3):
             raise ValueError("normal must match color shape (H, W, 3)")
-        n = _normalize(normal.astype(np.float32, copy=False))
+        guide = normal.astype(np.float32, copy=False)
+        surface = np.isfinite(guide).all(axis=-1) & (np.linalg.norm(guide, axis=-1) > 0)
+        n = _normalize(np.where(surface[..., None], guide, 0))
     else:
         n = None
 
@@ -109,6 +111,9 @@ def atrous_denoise(
                     cos_ang = np.clip(np.sum(nn * n, axis=-1, keepdims=True), -1.0, 1.0)
                     ang = np.arccos(cos_ang)
                     w_ij *= np.exp(- (ang * ang) / (2.0 * (sigma_normal ** 2) + 1e-8))
+                    # A zero/undefined normal denotes no surface. Do not mix
+                    # sky into a surface neighbourhood or denoise sky itself.
+                    w_ij *= _shift(surface[..., None], oy, ox)
 
                 # Depth difference
                 if d is not None:
@@ -119,6 +124,8 @@ def atrous_denoise(
                 wsum += w_ij
 
         out = accum / np.maximum(wsum, 1e-8)
+        if n is not None:
+            out = np.where(surface[..., None], out, c)
         step *= 2
 
     return out.astype(np.float32, copy=False)

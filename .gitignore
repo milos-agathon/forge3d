@@ -410,6 +410,7 @@ examples/**/*.py
 !examples/mapscene_thematic_rasters.py
 !examples/mapscene_water_clouds.py
 !examples/vector_line_drape.py
+!examples/terrain_material_recipe.py
 !examples/terrain_water_optics.py
 !examples/prepare_scene.py
 !examples/c03_semantic_scale.py

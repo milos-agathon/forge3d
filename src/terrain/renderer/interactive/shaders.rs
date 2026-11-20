@@ -72,13 +72,8 @@ pub(crate) fn scatter_source() -> Result<String> {
     let source = include_str!("../../../shaders/mesh_instanced.wgsl").replace("\r\n", "\n");
     let mut source = replace_once(
         source,
-        "@fragment\nfn fs_main(in: VsOut) -> @location(0) vec4<f32> {",
-        "fn concordia_scatter_shade(in: VsOut) -> vec4<f32> {",
-    )?;
-    source = replace_once(
-        source,
-        "let ndotl = max(dot(n, -l), 0.0);",
-        "let ndotl = max(dot(n, l), 0.0);",
+        "var ndotl = max(dot(n, -l), 0.0);",
+        "var ndotl = max(dot(n, l), 0.0);",
     )?;
     source = replace_once(source,
         "let direct_shadow = mix(0.20, 1.0, shadow_visibility);",
@@ -96,7 +91,7 @@ pub(crate) fn scatter_source() -> Result<String> {
         r#"
 @fragment
 fn fs_concordia(in: VsOut) -> ConcordiaSurface {
-    let shaded = concordia_scatter_shade(in);
+    let shaded = shade_scatter(in);
     // The scalar scatter material is an opaque dielectric. Its published
     // color is linear base color; it has no authored metallic/roughness map.
     return concordia_surface(in.world_pos, in.n_ws, 1.0,

@@ -861,6 +861,12 @@ impl TerrainScene {
             #[cfg(feature = "enable-gpu-instancing")]
             scatter_concordia: false,
             #[cfg(feature = "enable-gpu-instancing")]
+            scatter_renderer_format: color_format,
+            #[cfg(feature = "enable-gpu-instancing")]
+            scatter_renderer_depth_test: false,
+            #[cfg(feature = "enable-gpu-instancing")]
+            scatter_renderer_identity: false,
+            #[cfg(feature = "enable-gpu-instancing")]
             scatter_batches: Vec::new(),
             #[cfg(feature = "enable-gpu-instancing")]
             scatter_last_frame_stats: crate::terrain::scatter::TerrainScatterFrameStats::default(),
@@ -894,16 +900,6 @@ impl TerrainScene {
         match mode {
             FilterModeNative::Linear => wgpu::FilterMode::Linear,
             FilterModeNative::Nearest => wgpu::FilterMode::Nearest,
-        }
-    }
-
-    pub(in crate::terrain::renderer) fn map_address_mode(
-        mode: AddressModeNative,
-    ) -> wgpu::AddressMode {
-        match mode {
-            AddressModeNative::Repeat => wgpu::AddressMode::Repeat,
-            AddressModeNative::ClampToEdge => wgpu::AddressMode::ClampToEdge,
-            AddressModeNative::MirrorRepeat => wgpu::AddressMode::MirrorRepeat,
         }
     }
 }
