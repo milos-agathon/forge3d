@@ -9,9 +9,10 @@ Legacy in-memory preparation grids use Area by default. Declare
 `registration="area"` or `registration="point"` on a preparation
 target to select registered rendering for an in-memory scene. Existing
 schema-1 recipes with an implicit Area target retain their screen placement.
-The viewer retains the legacy mesh layout for unlabelled Cartesian Area
+The viewer retains the legacy mesh layout for affine-only Cartesian Area
 terrain. A GeoTIFF with a CRS and transform, or an explicit Point key,
-selects its sample lattice.
+selects its sample lattice. A transform-less DEM has an implicit local unit
+grid with the same sample lattice as its georeferenced counterpart.
 
 For a corner affine A, sample (column, row) is at
 A(column + 0.5, row + 0.5). In an image of size N along an axis, sample
