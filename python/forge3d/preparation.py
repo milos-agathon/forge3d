@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, field
 import hashlib
 import json
 import math
+from operator import index
 from pathlib import Path
 import re
 import tempfile
@@ -27,6 +28,9 @@ __all__ = [
 
 _KINDS = {"elevation", "continuous", "categorical", "count", "imagery", "vector", "observation"}
 _METRES = {"m": 1.0, "ft": 0.3048, "us_survey_ft": 1200.0 / 3937.0}
+_FUSION_RESAMPLING = {
+    "fusion_nearest": "nearest", "fusion_bilinear": "bilinear", "fusion_cubic": "cubic",
+}
 
 
 class PreparationError(ValueError):
@@ -82,6 +86,7 @@ class PreparationGrid:
     width: int
     height: int
     geotransform: Sequence[float]
+    sampling_lattice: tuple[float, float, int, int] | None = None
 
     def __post_init__(self) -> None:
         rasterio = _require_rasterio()
@@ -111,6 +116,22 @@ class PreparationGrid:
         object.__setattr__(self, "geotransform", gt)
         object.__setattr__(self, "width", int(self.width))
         object.__setattr__(self, "height", int(self.height))
+        if self.sampling_lattice is not None:
+            try:
+                x, y, column, row = self.sampling_lattice
+                if isinstance(column, (bool, np.bool_)) or isinstance(row, (bool, np.bool_)):
+                    raise TypeError
+                lattice = (float(x), float(y), index(column), index(row))
+                if not all(math.isfinite(v) for v in lattice[:2]):
+                    raise ValueError
+                object.__setattr__(self, "sampling_lattice", lattice)
+                corner = self._lattice_transform() * lattice[2:]
+            except (ValueError, TypeError, OverflowError):
+                _fail("invalid_grid_lattice", "A sampling lattice needs a finite parent origin and integer offsets.",
+                      "Use PreparationGrid.window to derive an aligned window.")
+            if corner != (gt[0], gt[3]):
+                _fail("invalid_grid_lattice", "The sampling lattice does not reproduce the grid corner.",
+                      "Use PreparationGrid.window to derive an aligned window.")
 
     @property
     def transform(self) -> Any:
@@ -119,6 +140,10 @@ class PreparationGrid:
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
         result["geotransform"] = list(self.geotransform)
+        if self.sampling_lattice is None:
+            result.pop("sampling_lattice")
+        else:
+            result["sampling_lattice"] = list(self.sampling_lattice)
         return result
 
     def same_as(self, other: PreparationGrid) -> bool:
@@ -129,7 +154,34 @@ class PreparationGrid:
 
     def xy(self, column: float, row: float) -> tuple[float, float]:
         """World position of a sample centre, including rotated/sheared grids."""
-        return self.transform * (column + 0.5, row + 0.5)
+        if self.sampling_lattice is None:
+            return self.transform * (column + 0.5, row + 0.5)
+        _, _, origin_column, origin_row = self.sampling_lattice
+        return self._lattice_transform() * (column + origin_column + 0.5, row + origin_row + 0.5)
+
+    def window(self, column: int, row: int, width: int, height: int) -> PreparationGrid:
+        """Return an integer window on this grid's sampling lattice."""
+        _, _, origin_column, origin_row = self._lattice()
+        parent = self._lattice_transform()
+        try:
+            if isinstance(column, (bool, np.bool_)) or isinstance(row, (bool, np.bool_)):
+                raise TypeError
+            column = index(column) + origin_column
+            row = index(row) + origin_row
+            x, y = parent * (column, row)
+        except (TypeError, OverflowError):
+            _fail("invalid_grid_lattice", "Grid window offsets must be representable integers.",
+                  "Supply column and row offsets in whole pixels.")
+        return PreparationGrid(self.crs, width, height, (x, parent.a, parent.b, y, parent.d, parent.e),
+                               sampling_lattice=(parent.c, parent.f, column, row))
+
+    def _lattice(self) -> tuple[float, float, int, int]:
+        return self.sampling_lattice or (self.geotransform[0], self.geotransform[3], 0, 0)
+
+    def _lattice_transform(self) -> Any:
+        x, y, _, _ = self._lattice()
+        _, a, b, _, d, e = self.geotransform
+        return _affine_from_metadata((x, a, b, y, d, e))
 
 
 @dataclass(frozen=True)
@@ -277,9 +329,11 @@ class PreparedLayer:
     metadata: dict[str, Any]
 
 
-def _read_raster(source: PreparationSource, path: Path, base: Path) -> tuple[np.ndarray, np.ndarray, PreparationGrid, dict[str, Any]]:
+def _read_raster(source: PreparationSource, path: Path, base: Path, *,
+                 allow_empty: bool = False,
+                 for_fusion: bool = False) -> tuple[np.ndarray, np.ndarray, PreparationGrid, dict[str, Any]]:
     try:
-        return _decode_raster(source, path, base)
+        return _decode_raster(source, path, base, allow_empty=allow_empty, for_fusion=for_fusion)
     except PreparationError:
         raise
     except (OSError, ValueError, _require_rasterio().errors.RasterioError) as exc:
@@ -287,8 +341,19 @@ def _read_raster(source: PreparationSource, path: Path, base: Path) -> tuple[np.
                                "Check the local format, numeric bands, CRS and declared mask/grid; no alternate source is selected.", source.source_id) from exc
 
 
-def _decode_raster(source: PreparationSource, path: Path, base: Path) -> tuple[np.ndarray, np.ndarray, PreparationGrid, dict[str, Any]]:
+def _decode_measurements(data: np.ndarray,
+                         encoding: tuple[tuple[float, ...], tuple[float, ...]]) -> np.ndarray:
+    result = data.astype(np.float64)
+    for band, (scale, offset) in enumerate(zip(*encoding)):
+        result[band] = result[band] * scale + offset
+    return result
+
+
+def _decode_raster(source: PreparationSource, path: Path, base: Path, *,
+                   allow_empty: bool = False,
+                   for_fusion: bool = False) -> tuple[np.ndarray, np.ndarray, PreparationGrid, dict[str, Any]]:
     extra: dict[str, Any] = {}
+    encoding: tuple[tuple[float, ...], tuple[float, ...]] | None = None
     if path.suffix.lower() in {".tif", ".tiff"}:
         with _require_rasterio().open(path) as ds:
             if ds.crs is None:
@@ -302,8 +367,18 @@ def _decode_raster(source: PreparationSource, path: Path, base: Path) -> tuple[n
             valid = ds.read_masks() != 0
             if source.nodata is not None:
                 valid &= data != source.nodata
-            extra = {"tags": ds.tags(), "scales": list(ds.scales), "offsets": list(ds.offsets),
+            tags = ds.tags()
+            extra = {"tags": tags, "scales": list(ds.scales), "offsets": list(ds.offsets),
                      "file_units": list(ds.units), "file_nodata": [str(n) if n is not None else None for n in ds.nodatavals]}
+            if for_fusion:
+                extra["band_tags"] = ds.tags(1)
+                # An external or internal mask can override GDAL's nodata mask.
+                # For fusion, matching the band's raw sentinel also removes a sample.
+                for band, nodata in enumerate(ds.nodatavals):
+                    if nodata is not None:
+                        if data.dtype.kind in "iu" and float(nodata).is_integer():
+                            nodata = int(nodata)
+                        valid[band] &= data[band] != nodata
             unit_aliases = {"metre": "m", "metres": "m", "meter": "m", "meters": "m", "feet": "ft", "foot": "ft"}
             for file_unit in ds.units:
                 if file_unit and source.units:
@@ -312,20 +387,22 @@ def _decode_raster(source: PreparationSource, path: Path, base: Path) -> tuple[n
                     if declared != encoded:
                         _fail("conflicting_units", f"File units {file_unit!r} differ from declared units {source.units!r}.",
                               "Correct the declaration or explicitly convert the source first.", source.source_id)
-            file_vertical = ds.tags().get("vertical_reference") or ds.tags().get("height_system")
-            if file_vertical and source.kind == "elevation" and file_vertical.casefold() != str(source.vertical_reference).casefold():
-                _fail("conflicting_vertical_reference", f"File height reference {file_vertical!r} differs from {source.vertical_reference!r}.",
-                      "Correct the declaration or supply a documented external datum conversion.", source.source_id)
-            extra["source_pixel_registration"] = ds.tags().get("AREA_OR_POINT", "not declared")
+            if not for_fusion:
+                file_vertical = tags.get("vertical_reference") or tags.get("height_system")
+                if file_vertical and source.kind == "elevation" and file_vertical.casefold() != str(source.vertical_reference).casefold():
+                    _fail("conflicting_vertical_reference", f"File height reference {file_vertical!r} differs from {source.vertical_reference!r}.",
+                          "Correct the declaration or supply a documented external datum conversion.", source.source_id)
+            extra["source_pixel_registration"] = tags.get("AREA_OR_POINT", "not declared")
             extra["source_geotransform_convention"] = "GDAL corner-normalized; samples at half-pixel centres"
             extra["ancillary_identities"] = [{"path": str(Path(p).resolve()), "sha256": _sha(Path(p))}
                                              for p in ds.files if Path(p).resolve() != path]
             if any(s != 1 for s in ds.scales) or any(o != 0 for o in ds.offsets):
                 if source.kind in {"categorical", "count"}:
                     _fail("encoded_discrete_values", "Discrete data has scale/offset encoding.", "Decode and verify class/count meaning externally before preparation.", source.source_id)
-                data = data.astype(np.float64)
-                for band, (scale, offset) in enumerate(zip(ds.scales, ds.offsets)):
-                    data[band] = data[band] * scale + offset
+                encoding = (ds.scales, ds.offsets)
+                if not for_fusion:
+                    data = _decode_measurements(data, encoding)
+                    encoding = None
     elif path.suffix.lower() == ".npy":
         if source.grid is None:
             _fail("missing_grid", "NumPy arrays have no geographic metadata.", "Declare a source grid with CRS and corner transform.", source.source_id)
@@ -352,7 +429,17 @@ def _decode_raster(source: PreparationSource, path: Path, base: Path) -> tuple[n
         if mask.dtype != np.bool_ or mask.shape != data.shape[1:]:
             _fail("invalid_mask", "Validity mask must be boolean and match the source grid.", "Supply a .npy mask with True for usable cells, including disclosure rules.", source.source_id)
         valid &= mask[None, ...]
-    if not np.any(valid):
+    if for_fusion and ((data.dtype.kind in "iu" and data.dtype.itemsize >= 8) or data.dtype.itemsize > 8):
+        values = data[valid]
+        with np.errstate(over="ignore", invalid="ignore"):
+            represented = values.astype(np.float64).astype(data.dtype)
+        if not np.array_equal(values, represented):
+            _fail("fusion_height_precision", "Input heights would lose precision in float64.",
+                  "Supply exactly representable values in declared physical height units.", source.source_id)
+    if encoding is not None:
+        data = _decode_measurements(data, encoding)
+        valid &= np.isfinite(data)
+    if not allow_empty and not np.any(valid):
         _fail("empty_source", "No valid samples remain.", "Check nodata and disclosure masks or select a covered region.", source.source_id)
     return data, valid, grid, extra
 
@@ -386,6 +473,8 @@ def _height_conversion(data: np.ndarray, valid: np.ndarray, grid: PreparationGri
               "Retain the measured datum or supply an externally transformed, documented source (NAP/LN02 conversions are not inferred).", source.source_id)
     from .crs import transform_coords, geoid_undulation
     rows, cols = np.nonzero(valid[0])
+    if not rows.size:
+        return result
     xy = np.array([grid.xy(int(c), int(r)) for r, c in zip(rows, cols)])
     lonlat = transform_coords(xy, grid.crs, "EPSG:4326")
     sign = 1 if pair[0] == "orthometric_egm96" else -1
@@ -436,6 +525,10 @@ def prepare_scene(recipe: PreparationRecipe, *, base_dir: str | Path = ".") -> P
     crs_type = _require_rasterio().crs.CRS
     coverage: dict[str, Any]
     for source in recipe.sources:
+        fusion_method = _FUSION_RESAMPLING.get(str(source.resampling or "").lower())
+        if fusion_method is not None and source.kind != "elevation":
+            _fail("invalid_elevation_resampling", "Fusion sampling requires an elevation source.",
+                  "Use a resampling method appropriate for this layer's measurements.", source.source_id)
         path = _local(source.path, base)
         identity = {"path": str(path), "sha256": _sha(path)}
         metadata = dict(source.metadata)
@@ -475,7 +568,15 @@ def prepare_scene(recipe: PreparationRecipe, *, base_dir: str | Path = ".") -> P
             layer = PreparedLayer(source.source_id, source.kind, None, None, None, features, metadata)
             coverage = {"feature_count": len(features)}
         else:
-            data, valid, original_grid, extra = _read_raster(source, path, base)
+            if fusion_method is None:
+                data, valid, original_grid, extra = _read_raster(source, path, base)
+            else:
+                from .terrain_fusion import _ground_steps, _read_fusion_elevation, _warp_on_target
+
+                _ground_steps(recipe.target_grid)
+                data, valid, original_grid, extra = _read_fusion_elevation(
+                    source, path, base, recipe.vertical_reference, surface_kind=source.metadata.get("surface_kind", "bare_earth"),
+                )
             metadata.update(extra)
             metadata["source_grid"] = original_grid.to_dict()
             if source.kind == "count":
@@ -487,7 +588,7 @@ def prepare_scene(recipe: PreparationRecipe, *, base_dir: str | Path = ".") -> P
                 operations.append({"operation": "retain_native_count_cells", "analysis_resampling": "none"})
             else:
                 grid = recipe.target_grid
-                method = source.resampling or ("nearest" if source.kind == "categorical" else "bilinear")
+                method = fusion_method or source.resampling or ("nearest" if source.kind == "categorical" else "bilinear")
                 _resampling_method(method)
                 if source.kind == "categorical":
                     if data.dtype.kind not in "iu" or method != "nearest":
@@ -496,21 +597,29 @@ def prepare_scene(recipe: PreparationRecipe, *, base_dir: str | Path = ".") -> P
                             and (int(data[valid].min()) < -(2**53) or int(data[valid].max()) > 2**53)):
                         _fail("category_precision", "Warp scratch cannot exactly represent these IDs.", "Remap IDs to exactly representable integers with a recorded lookup table.", source.source_id)
                 if source.kind == "elevation":
-                    data = _height_conversion(data, valid, original_grid, source, recipe.vertical_reference)
+                    if fusion_method is None:
+                        data = _height_conversion(data, valid, original_grid, source, recipe.vertical_reference)
                     metadata.update({"units": "m", "vertical_reference": recipe.vertical_reference})
-                    operations.append({"operation": "height_reference", "from": source.vertical_reference,
+                    operation = "height_units" if fusion_method and recipe.vertical_reference == "unresolved" else "height_reference"
+                    operations.append({"operation": operation, "from": source.vertical_reference,
                                        "to": recipe.vertical_reference, "input_units": source.units, "output_units": "m"})
                 if not original_grid.same_as(grid):
                     dtype = data.dtype
-                    data, valid = _warp(data, valid, original_grid, grid, method)
+                    if fusion_method is None:
+                        data, valid = _warp(data, valid, original_grid, grid, method)
+                    else:
+                        data, valid = _warp_on_target(data, valid, original_grid, grid, method,
+                                                     source_id=source.source_id)
                     if source.kind == "categorical":
                         data = np.where(valid, data, 0).astype(dtype)
                     elif source.kind == "imagery" and dtype == np.uint8:
                         data = np.rint(np.where(valid, data, 0)).clip(0, 255).astype(np.uint8)
-                    operations.append({"operation": "geographic_warp", "resampling": method,
+                    operations.append({"operation": "geographic_warp", "resampling": source.resampling if fusion_method else method,
                                        "from_grid": original_grid.to_dict(), "to_grid": grid.to_dict()})
                 else:
                     operations.append({"operation": "retain_grid", "resampling": "none"})
+                if fusion_method is not None:
+                    data = np.where(valid, data, np.nan)
             if not np.any(valid):
                 _fail("no_coverage", "Source has no valid target coverage.", "Correct CRS/grid metadata or choose an overlapping extent.", source.source_id)
             if data.shape[0] == 1:

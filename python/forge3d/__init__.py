@@ -721,6 +721,7 @@ from .preparation import (
     PreparationError, PreparationGrid, PreparationSource, PreparationRecipe,
     PreparedLayer, PreparedScene, prepare_scene,
 )
+from .terrain_fusion import TerrainFusion, fuse_terrain
 from .landscape import LandscapeLayout, export_landscape, verify_landscape_import
 from .chronos import FlythroughManifest, render_flythrough
 from .subject_story import (CompiledSubjectShot, StoryAnnotation, StoryObstacle, SubjectFeature,
@@ -1128,6 +1129,8 @@ __all__ = [
     "PreparedLayer",
     "PreparedScene",
     "prepare_scene",
+    "TerrainFusion",
+    "fuse_terrain",
     "LandscapeLayout",
     "export_landscape",
     "verify_landscape_import",

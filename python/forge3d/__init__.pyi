@@ -155,6 +155,7 @@ from .preparation import (
     PreparedScene as PreparedScene,
     prepare_scene as prepare_scene,
 )
+from .terrain_fusion import TerrainFusion as TerrainFusion, fuse_terrain as fuse_terrain
 from .landscape import (
     LandscapeLayout as LandscapeLayout,
     export_landscape as export_landscape,
