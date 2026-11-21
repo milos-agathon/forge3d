@@ -1593,8 +1593,12 @@ def _build_mapscene_terrain_params(
     sun = settings.get("sun") if isinstance(settings.get("sun"), Mapping) else {}
     terrain_span, clip = _terrain_render_span_and_clip(recipe)
     if statistical_domain is not None:
+        # Statistical publications gate the author's camera against this base
+        # clip; widening it by camera distance would let a clipped view pass.
         clip = (recipe.camera.near if recipe.camera.near is not None else clip[0],
                 recipe.camera.far if recipe.camera.far is not None else clip[1])
+    else:
+        clip = (clip[0], max(clip[1], float(recipe.camera.distance) * 1.2))
     preset_albedo = "mix" if preset_name else "colormap"
     preset_colormap_strength = 0.5 if preset_name else 1.0
     configured_colormap_strength = settings.get("colormap_strength")
@@ -3803,7 +3807,7 @@ def _terrain_render_span_and_clip(recipe: "SceneRecipe") -> tuple[float, tuple[f
     """
     _bounds, _crs, metric_span = _terrain_frame(recipe.terrain)
     span = max(1.0, metric_span if metric_span is not None else _terrain_scene_diagonal(recipe.terrain))
-    return span, (0.1, max(6000.0, span * 1.5, float(recipe.camera.distance) * 1.2))
+    return span, (0.1, max(6000.0, span * 1.5))
 
 
 def _building_terrain_scale(recipe: "SceneRecipe") -> tuple[tuple[float, ...] | None, float | None]:
