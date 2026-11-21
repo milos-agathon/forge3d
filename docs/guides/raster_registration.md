@@ -33,12 +33,15 @@ under the destination affine.
 | GDAL and Rasterio DEM loader | Corner-normalized affine with the raster type dropped | Carries Area or Point with the affine and applies no second shift |
 | Preparation and alignment | Warped normalized corners and marked preparation output Area | Checks registration before combining rasters and records an explicitly chosen conversion. Warp samples use both normalized affines |
 | Viewer terrain mesh and shadow | Spread vertices across the corner footprint while indexing heights with texel units | Georeferenced mesh vertices land at source samples. Raster overlays retain edge-normalized extent and draped vectors evaluate height on the same sample lattice |
+| Viewer raster overlays | Loaded TIFFs as ordinary images and assigned a normalized extent | A registered GeoTIFF must match the terrain's CRS, transform, dimensions and registration. Prepare any different lattice before loading. Ordinary images use their explicitly normalized extent, defaulting to full terrain coverage |
 | MapScene warp and raster drape | Baked samples on the height grid, then sampled the drape over outer texel edges | Bakes on the registered grid and converts geometry node UV to texel-centre UV in the material shader. The registered fullscreen path reads both height and drape north-up |
+| MapScene thematic overlays and RasterRecipe | Read thematic textures across their outer texel edges. RasterRecipe accepted only Area | Thematic GeoTIFFs are aligned before classification. Resident recipes require exact grid agreement for operands and terrain. The shader uses the same node-to-texel rule for classes, drapes and water reflections |
 | MapScene vectors and labels | Camera-projected world anchors already used outer samples. Prepared screen vectors used outer edges | World and prepared screen anchors use the outer samples as the terrain extent |
+| Subject story | Validated the stated bounds against the outer DEM sample centres | Continues to use outer sample centres from the normalized affine for its mesh and feature anchors |
 | Hybrid traced terrain and albedo | Node-centred heights and albedo with caller-supplied spacing | The registered wrapper derives spacing and the local origin from its affine. Drape and height arrays must share the same lattice. World mesh vertices use the same origin |
 | Physical-water texture | Explicit node-UV bilinear loads across first and last samples | Derived terrain maps continue to use the same node domain as the height field |
 | Landscape export | First pixel centre became vertex 0,0 | Carries source registration and identifies the exported vertices as Point, with the first vertex's world coordinates |
-| TIFF and orthographic trace output | TIFF writer emitted Area. Traced output carried pixels alone | Data TIFFs emit the actual registration. Orthographic traced pixels form an Area grid independently of the input registration |
+| Data GeoTIFF and orthographic render output | TIFF writer emitted Area. Rendered images carried pixels alone | Data GeoTIFFs emit their actual registration. Viewer and MapScene map the outer terrain samples to viewport edges. Tracing uses the requested sensor centre and ground pixel size. All three write Area render pixels using the resulting output affine |
 
 The MapScene material change uses the existing overlay uniform, with
 the registered raster flag in its formerly reserved `params7.z` lane.
@@ -53,3 +56,10 @@ To trace a registered north-up map, pass the DEM samples and their
 Supply a ground pixel size in metres. A drape must share the terrain's
 grid. Use `forge3d.export.render_to_geotiff` to write the resulting
 beauty image or one of its raster layers.
+
+For a registered north-up MapScene, set `OutputSpec(format="geotiff", …)`.
+Use `metadata={"coordinate_space": "world"}` for vector or label layers
+authored in the terrain CRS. The viewer provides
+`ViewerHandle.snapshot_geotiff(path, width, height)` for a georeferenced
+terrain. Both output grids cover the interval between the first and last
+source samples, using the complete cell on a singleton axis.
