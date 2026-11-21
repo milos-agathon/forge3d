@@ -21,8 +21,7 @@ use crate::core::shader_registry::{begin_shader_render_capture, finish_shader_re
 use serde::Serialize;
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// One timed GPU pass in the execution report.
 #[derive(Clone, Debug)]
@@ -100,13 +99,13 @@ pub struct JitterEvidence {
     pub dd_hash_b: String,
 }
 
-/// Passes recorded for the render currently in flight.
-static CURRENT: Mutex<Vec<PassRecord>> = Mutex::new(Vec::new());
-/// The last completed capture, serialized by `execution_report_json`.
-static LAST: Mutex<Option<FinishedCapture>> = Mutex::new(None);
-static CAPTURE_USES_GPU: AtomicBool = AtomicBool::new(true);
+/// The latest process-wide capture for the explicit diagnostics getter.
+static LAST: Mutex<Option<Arc<FinishedCapture>>> = Mutex::new(None);
 
 thread_local! {
+    static LAST_ON_THREAD: RefCell<Option<Arc<FinishedCapture>>> = const { RefCell::new(None) };
+    static CURRENT_PASSES: RefCell<Vec<PassRecord>> = const { RefCell::new(Vec::new()) };
+    static CAPTURE_USES_GPU: Cell<bool> = const { Cell::new(true) };
     static EXTERNAL_CAPTURE: RefCell<Option<RenderCaptureGuard>> = const { RefCell::new(None) };
     static CAPTURE_DEPTH: Cell<usize> = const { Cell::new(0) };
     static CURRENT_CODEC: RefCell<Option<CodecSnapshot>> = const { RefCell::new(None) };
@@ -155,33 +154,105 @@ impl Drop for RenderCaptureGuard {
     }
 }
 
-fn lock_current() -> std::sync::MutexGuard<'static, Vec<PassRecord>> {
-    CURRENT.lock().unwrap_or_else(|p| p.into_inner())
+/// A progress callback is a caller-owned render boundary. Save only the
+/// in-flight collectors. A successful callback render owns its own LAST
+/// result until the outer render finishes, including when the outer aborts.
+#[cfg(feature = "extension-module")]
+pub(crate) fn with_render_capture_suspended<T>(callback: impl FnOnce() -> T) -> T {
+    use crate::core::degradation::{swap_degradation_capture, Degradation};
+    use crate::core::shader_contract_runtime::{
+        swap_runtime_contract_capture, RuntimeContractObservation,
+    };
+    use crate::core::shader_registry::swap_shader_render_capture;
+
+    struct Suspended {
+        depth: usize,
+        external: Option<RenderCaptureGuard>,
+        uses_gpu: bool,
+        passes: Vec<PassRecord>,
+        inputs: BTreeMap<String, String>,
+        models: BTreeMap<String, String>,
+        codec: Option<CodecSnapshot>,
+        precision: Option<PrecisionEvidence>,
+        jitter: Option<JitterEvidence>,
+        shaders: Option<BTreeMap<String, String>>,
+        degradations: Option<Vec<Degradation>>,
+        observations: Option<Vec<RuntimeContractObservation>>,
+    }
+
+    impl Drop for Suspended {
+        fn drop(&mut self) {
+            // If callback code abandoned a Python-owned capture, let it
+            // unwind while its collectors are still current.
+            abort_external_render_capture();
+            EXTERNAL_CAPTURE.with(|slot| slot.replace(self.external.take()));
+            CAPTURE_DEPTH.with(|slot| slot.set(self.depth));
+            CAPTURE_USES_GPU.set(self.uses_gpu);
+            CURRENT_PASSES.replace(std::mem::take(&mut self.passes));
+            CURRENT_INPUTS.with(|slot| slot.replace(std::mem::take(&mut self.inputs)));
+            CURRENT_MODELS.with(|slot| slot.replace(std::mem::take(&mut self.models)));
+            CURRENT_CODEC.with(|slot| slot.replace(self.codec.take()));
+            CURRENT_PRECISION.with(|slot| slot.replace(self.precision.take()));
+            CURRENT_JITTER.with(|slot| slot.replace(self.jitter.take()));
+            swap_shader_render_capture(self.shaders.take());
+            swap_degradation_capture(self.degradations.take());
+            swap_runtime_contract_capture(self.observations.take());
+        }
+    }
+
+    let depth = CAPTURE_DEPTH.with(Cell::get);
+    if depth == 0 {
+        return callback();
+    }
+    let _ledger = crate::core::resource_tracker::suspend_ledger_capture();
+    let _saved = Suspended {
+        depth: CAPTURE_DEPTH.with(|slot| slot.replace(0)),
+        external: EXTERNAL_CAPTURE.with(|slot| slot.take()),
+        uses_gpu: CAPTURE_USES_GPU.replace(true),
+        passes: CURRENT_PASSES.take(),
+        inputs: CURRENT_INPUTS.with(|slot| slot.take()),
+        models: CURRENT_MODELS.with(|slot| slot.take()),
+        codec: CURRENT_CODEC.with(|slot| slot.take()),
+        precision: CURRENT_PRECISION.with(|slot| slot.take()),
+        jitter: CURRENT_JITTER.with(|slot| slot.take()),
+        shaders: swap_shader_render_capture(None),
+        degradations: swap_degradation_capture(None),
+        observations: swap_runtime_contract_capture(None),
+    };
+    callback()
 }
 
-fn lock_last() -> std::sync::MutexGuard<'static, Option<FinishedCapture>> {
+fn lock_last() -> std::sync::MutexGuard<'static, Option<Arc<FinishedCapture>>> {
     LAST.lock().unwrap_or_else(|p| p.into_inner())
 }
 
+type DegradationRecords = Vec<(String, String, String)>;
+
 #[cfg(feature = "extension-module")]
-fn notify_python_degradation_capture(method: &str) {
+fn python_capture_records(method: &str) -> DegradationRecords {
     use pyo3::prelude::PyAnyMethods;
 
     if unsafe { pyo3::ffi::Py_IsInitialized() } == 0 {
-        return;
+        return Vec::new();
     }
-    pyo3::Python::with_gil(|py| match py.import_bound("forge3d._degradation") {
-        Ok(module) => {
-            if let Err(error) = module.call_method0(method) {
+    pyo3::Python::with_gil(|py| {
+        let records = py.import_bound("forge3d._degradation")
+            .and_then(|module| module.call_method0(method))
+            .and_then(|value| if value.is_none() { Ok(Vec::new()) } else { value.extract() });
+        match records {
+            Ok(records) => records,
+            Err(error) => {
                 log::warn!("Python degradation capture {method} failed: {error}");
+                Vec::new()
             }
         }
-        Err(error) => log::debug!("Python degradation sink unavailable: {error}"),
-    });
+    })
 }
 
 #[cfg(not(feature = "extension-module"))]
-fn notify_python_degradation_capture(_method: &str) {}
+fn python_capture_records(_method: &str) -> DegradationRecords {
+    Vec::new()
+}
 
 /// Start a render capture: clears the per-render pass list. `entry_point` names
 /// the render entry for logging/debugging (not part of the serialized schema).
@@ -196,7 +267,7 @@ pub fn begin_cpu_render_capture(entry_point: &str) -> RenderCaptureGuard {
     let root = CAPTURE_DEPTH.with(|depth| depth.get() == 0);
     let capture = begin_render_capture_with_resources(entry_point, &[]);
     if root {
-        CAPTURE_USES_GPU.store(false, Ordering::Relaxed);
+        CAPTURE_USES_GPU.set(false);
     }
     capture
 }
@@ -207,7 +278,7 @@ pub fn begin_render_capture_with_resources(
     entry_point: &str,
     allocation_owner_ids: &[u64],
 ) -> RenderCaptureGuard {
-    CAPTURE_USES_GPU.store(true, Ordering::Relaxed);
+    CAPTURE_USES_GPU.set(true);
     let root = CAPTURE_DEPTH.with(|depth| {
         let current = depth.get();
         depth.set(current + 1);
@@ -231,9 +302,8 @@ pub fn begin_render_capture_with_resources(
     CURRENT_JITTER.with(|slot| slot.borrow_mut().take());
     CURRENT_INPUTS.with(|inputs| inputs.borrow_mut().clear());
     CURRENT_MODELS.with(|models| models.borrow_mut().clear());
-    notify_python_degradation_capture("begin_capture");
-    let mut cur = lock_current();
-    cur.clear();
+    python_capture_records("begin_capture");
+    CURRENT_PASSES.with(|passes| passes.borrow_mut().clear());
     log::debug!("render capture begin: {entry_point}");
     RenderCaptureGuard {
         active: true,
@@ -243,11 +313,11 @@ pub fn begin_render_capture_with_resources(
 
 /// Record one timed GPU pass for the in-flight render, in call order.
 pub fn record_pass(label: &str, gpu_ms: f64, draw_calls: u32) {
-    lock_current().push(PassRecord {
+    CURRENT_PASSES.with(|passes| passes.borrow_mut().push(PassRecord {
         label: label.to_string(),
         gpu_ms,
         draw_calls,
-    });
+    }));
 }
 
 /// Record a deterministic render input in the active certificate.
@@ -308,8 +378,8 @@ pub fn record_f3dz_pages(eps: f32, page_count: u32, base_quality: bool) {
 /// context when one already exists; certificate assembly never forces GPU
 /// initialization.
 fn finish_render_capture() {
-    let uses_gpu = CAPTURE_USES_GPU.load(Ordering::Relaxed);
-    let passes = lock_current().clone();
+    let uses_gpu = CAPTURE_USES_GPU.get();
+    let passes = CURRENT_PASSES.take();
     let models = CURRENT_MODELS.with(|models| std::mem::take(&mut *models.borrow_mut()));
     let ledger = finish_ledger_capture();
     let codec = CURRENT_CODEC.with(|slot| slot.borrow_mut().take());
@@ -318,7 +388,6 @@ fn finish_render_capture() {
         .into_iter()
         .map(|d| (d.kind, d.name, d.consequence))
         .collect();
-    notify_python_degradation_capture("finish_capture");
 
     // Re-derive capability_absent entries from the live context so a cleared
     // degradation sink cannot certify a capability gap away: the negotiated
@@ -340,6 +409,11 @@ fn finish_render_capture() {
                     ));
                 }
             }
+        }
+    }
+    for entry in python_capture_records("finish_capture") {
+        if !degradations.iter().any(|(kind, name, _)| *kind == entry.0 && *name == entry.1) {
+            degradations.push(entry);
         }
     }
     degradations.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
@@ -427,6 +501,8 @@ fn finish_render_capture() {
         jitter: CURRENT_JITTER.with(|slot| slot.borrow_mut().take()),
     };
 
+    let finished = Arc::new(finished);
+    LAST_ON_THREAD.replace(Some(Arc::clone(&finished)));
     *lock_last() = Some(finished);
 }
 
@@ -435,9 +511,9 @@ pub fn abort_render_capture() {
     crate::core::shader_registry::abort_shader_render_capture();
     crate::core::shader_contract_runtime::abort_runtime_contract_capture();
     crate::core::degradation::abort_degradation_capture();
-    notify_python_degradation_capture("abort_capture");
+    python_capture_records("abort_capture");
     CURRENT_CODEC.with(|codec| codec.borrow_mut().take());
-    lock_current().clear();
+    CURRENT_PASSES.with(|passes| passes.borrow_mut().clear());
     CURRENT_PRECISION.with(|slot| slot.borrow_mut().take());
     CURRENT_JITTER.with(|slot| slot.borrow_mut().take());
     CURRENT_INPUTS.with(|inputs| inputs.borrow_mut().clear());
@@ -449,7 +525,7 @@ pub fn begin_external_render_capture(entry_point: &str) {
     EXTERNAL_CAPTURE.with(|slot| {
         slot.borrow_mut().take();
         *slot.borrow_mut() = Some(begin_render_capture(entry_point));
-        CAPTURE_USES_GPU.store(false, Ordering::Relaxed);
+        CAPTURE_USES_GPU.set(false);
     });
 }
 
@@ -552,14 +628,32 @@ struct ReportJson<'a> {
 /// JSON. Deterministic: BTreeMap key order, recorded pass order, and
 /// (kind, name)-sorted degradations. Errors when no render has completed yet.
 pub fn execution_report_json() -> Result<String, RenderError> {
-    let last = lock_last();
-    let cap = last.as_ref().ok_or_else(|| {
+    let last = lock_last().clone();
+    let cap = last.as_deref().ok_or_else(|| {
         RenderError::render(
             "no completed render capture available; run a native render \
              (begin/finish_render_capture) before requesting the execution report",
         )
     })?;
 
+    serialize_capture(cap)
+}
+
+/// Serialize the calling thread's completed capture for render-owned certificates.
+pub(crate) fn calling_thread_execution_report_json() -> Result<String, RenderError> {
+    if CAPTURE_DEPTH.get() > 0 {
+        return Err(RenderError::render("the calling thread's render capture is still active"));
+    }
+    LAST_ON_THREAD.with(|slot| {
+        let last = slot.borrow();
+        let capture = last.as_deref().ok_or_else(|| {
+            RenderError::render("the calling thread has no completed render capture")
+        })?;
+        serialize_capture(capture)
+    })
+}
+
+fn serialize_capture(cap: &FinishedCapture) -> Result<String, RenderError> {
     let report = ReportJson {
         schema: "forge3d.render_certificate/1",
         engine: EngineJson {
@@ -618,10 +712,12 @@ pub fn execution_report_json() -> Result<String, RenderError> {
 
 pub(crate) fn completed_ledger_report(
 ) -> Result<crate::core::resource_tracker::LedgerReport, RenderError> {
-    lock_last()
-        .as_ref()
-        .map(|capture| capture.ledger.clone())
-        .ok_or_else(|| RenderError::render("no completed render allocation capture is available"))
+    LAST_ON_THREAD.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|capture| capture.ledger.clone())
+            .ok_or_else(|| RenderError::render("no completed render allocation capture on the calling thread"))
+    })
 }
 
 /// Sign the canonical RenderCertificate payload digest with Ed25519.
@@ -679,7 +775,8 @@ pub fn emit_certificate_for_kwarg(
     };
 
     let diagnostics = py.import_bound("forge3d.diagnostics")?;
-    let cert = diagnostics.call_method1("render_certificate", ())?;
+    let report = calling_thread_execution_report_json()?;
+    let cert = diagnostics.call_method1("_certificate_from_report", (report, true))?;
     if is_path {
         let certificate_mod = py.import_bound("forge3d.certificate")?;
         certificate_mod.call_method1("write_certificate", (cert, arg))?;

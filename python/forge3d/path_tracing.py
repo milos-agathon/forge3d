@@ -12,7 +12,9 @@ must pass ``synthetic_ok=True`` to receive synthetic pixels.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
+from os import PathLike
 from functools import wraps
 import hashlib
 from operator import index as _index
@@ -21,10 +23,15 @@ from typing import Any, Dict, Optional, Tuple, Iterable, Mapping, Callable, Sequ
 import numpy as np
 import time as _time
 
-from .certificate import _render_capture, emit_render_certificate
+from .certificate import _emit_current_render_certificate, _render_capture
+from .certificate import emit_render_certificate as emit_render_certificate
 from .denoise import atrous_denoise
 
 from ._native import get_native_symbol
+from ._terrain_checkpoint import (
+    PosterCheckpoint, Progress, ProgressCallback, TerrainRenderCancelled,
+    TerrainRenderProgress, array_digest, options as _checkpoint_options,
+)
 
 
 class ExperimentalSyntheticOutput(RuntimeError):
@@ -57,7 +64,7 @@ def _captured_synthetic_render(name: str):
                 )
                 result = function(*args, **kwargs)
             if certificate:
-                _certificate.emit_render_certificate(certificate)
+                _certificate._emit_current_render_certificate(certificate)
             return result
 
         return wrapped
@@ -934,6 +941,10 @@ def hybrid_render_terrain_reference(
     temperature_c: float | None = None,
     atmosphere: "Mapping[str, Any] | Any | None" = None,
     sdf_scene: "object | None" = None,
+    on_progress: ProgressCallback | None = None,
+    checkpoint_path: str | PathLike[str] | None = None,
+    checkpoint_every: int | None = None,
+    resume: bool = False,
 ) -> dict:
     """Converged GPU path-traced reference of a real DEM under sun + IBL.
 
@@ -1007,7 +1018,18 @@ def hybrid_render_terrain_reference(
     effective-ray correction. ``earth_model='flat'`` requires
     ``refraction_model='none'``. Unsupported model names or model pairs raise
     an exception; they never fall back to flat or vacuum rendering.
+    With on_progress, receive a TerrainRenderProgress after each completed
+    native frame. Return exactly False to raise TerrainRenderCancelled.
+    Other return values continue rendering. Callback exceptions propagate
+    unchanged. The event identifies the last measured variance and its age.
+
+    checkpoint_path is a file in an existing directory. Supply a positive
+    checkpoint_every in frames to publish atomically at that cadence.
+    With resume=True, use the same scene, build, adapter and driver. Omit
+    the cadence on resume to keep the saved checkpoint unchanged. Cancellation
+    advertises a path once a checkpoint has been published or restored.
     """
+    path, every = _checkpoint_options(on_progress, checkpoint_path, checkpoint_every, resume)
     from ._cache_policy import report_cache_bypass
     report_cache_bypass(cache, "path_tracing.hybrid_render_terrain_reference")
     native_render = get_native_symbol("hybrid_render_terrain_reference")
@@ -1158,6 +1180,16 @@ def hybrid_render_terrain_reference(
             raise ValueError(f"mesh_vertices must be (N, 3), got {mv.shape}")
         if mi.ndim != 2 or mi.shape[1] != 3:
             raise ValueError(f"mesh_indices must be (M, 3), got {mi.shape}")
+    internal = {}
+    if on_progress is not None:
+        progress = Progress(on_progress, path if resume else None)
+
+        def frame_complete(frames, variance_at, variance, _converged, published):
+            progress.notify(frames, variance_at, variance, path=path if published else None)
+
+        internal["_on_progress"] = frame_complete
+    if path is not None:
+        internal["_checkpoint"] = (path, every, resume)
     result = native_render(
         dem,
         int(width),
@@ -1198,6 +1230,7 @@ def hybrid_render_terrain_reference(
         temperature_c=float(temperature_c),
         atmosphere=atmosphere,
         sdf_scene=sdf_scene,
+        **internal,
     )
     result["sun_source"] = sun_source
     result["solar_azimuth_deg"] = float(sun_azimuth_deg)
@@ -1233,6 +1266,10 @@ def render_terrain_poster(
     seed: int = 7,
     certificate: bool | str = False,
     cache: str | None = None,
+    on_progress: ProgressCallback | None = None,
+    checkpoint_path: str | PathLike[str] | None = None,
+    checkpoint_every: int | None = None,
+    resume: bool = False,
     **kwargs: Any,
 ) -> dict:
     """Render a converged terrain plate as exact full-sensor tiles.
@@ -1241,7 +1278,16 @@ def render_terrain_poster(
     diagnostics for every tile in ``tiles``, and ``certificate_digest``.
     ``cache`` is accepted for the ANAMNESIS render contract; the native terrain
     reference currently ignores it.
+    checkpoint_path is a dedicated job directory. Completed tiles are
+    published individually. Supply checkpoint_every to also save in-flight
+    native frames at that cadence. resume=True restores matching completed
+    tiles and continues any in-flight tile from its saved frame.
+
+    on_progress uses the terrain callback convention. tile is the zero-based
+    (column, row). tile_complete identifies the boundary after a tile has
+    been assembled and its record has been published, if enabled.
     """
+    path, every = _checkpoint_options(on_progress, checkpoint_path, checkpoint_every, resume, poster=True)
     forbidden = {"sensor_rect", "full_width", "full_height", "pixel_offset"}
     managed_kwargs = sorted(forbidden.intersection(kwargs))
     if managed_kwargs:
@@ -1264,7 +1310,12 @@ def render_terrain_poster(
     if output_width <= 0 or output_height <= 0 or tile_size <= 0:
         raise ValueError("width, height, and tile must be positive")
 
-    dem = np.ascontiguousarray(np.asarray(heightmap, dtype=np.float32))
+    # A checkpointed job hashes and renders the same owned scene data.
+    # A caller can change its arrays while a tile receipt is being published.
+    dem = (
+        np.array(heightmap, dtype=np.float32, order="C", copy=True)
+        if path is not None else np.ascontiguousarray(np.asarray(heightmap, dtype=np.float32))
+    )
     if dem.ndim != 2:
         raise ValueError(f"heightmap must be 2D (H, W), got shape {dem.shape}")
     if not np.isfinite(dem).all():
@@ -1272,7 +1323,10 @@ def render_terrain_poster(
 
     material = None
     if albedo_map is not None:
-        material = np.ascontiguousarray(np.asarray(albedo_map, dtype=np.float32))
+        material = (
+            np.array(albedo_map, dtype=np.float32, order="C", copy=True)
+            if path is not None else np.ascontiguousarray(np.asarray(albedo_map, dtype=np.float32))
+        )
         if material.ndim != 3 or material.shape[2] != 4:
             raise ValueError(
                 f"albedo_map must be a 3D (H, W, 4) array, got shape {material.shape}"
@@ -1320,8 +1374,78 @@ def render_terrain_poster(
     )
     n_x = (output_width + tile_size - 1) // tile_size
     n_y = (output_height + tile_size - 1) // tile_size
+    checkpoint = None
+    if path is not None:
+        runtime = get_native_symbol("_terrain_checkpoint_runtime")
+        if runtime is None:
+            raise RuntimeError("Terrain poster checkpoints require a native build with recovery support")
+        # Freeze scalar/sequence parameters once. These are the values passed
+        # to every tile; arrays are hashed in the same dtypes uploaded by the
+        # terrain wrapper.
+        cam = {
+            key: tuple(float(value) for value in cam[key])
+            for key in ("origin", "look_at", "up") if key in cam
+        } | {
+            key: float(cam[key]) if cam[key] is not None else None
+            for key in ("exposure", "fov_y", "half_height") if key in cam
+        }
+        spacing = tuple(float(value) for value in spacing)
+        albedo = tuple(float(value) for value in albedo)
+        sun_color = tuple(float(value) for value in sun_color)
+        env_map = None if env_map is None else np.array(env_map, dtype=np.float32, order="C", copy=True)
+        mesh_vertices = None if mesh_vertices is None else np.array(mesh_vertices, dtype=np.float32, order="C", copy=True)
+        mesh_indices = None if mesh_indices is None else np.array(mesh_indices, dtype=np.uint32, order="C", copy=True)
+        exaggeration, env_intensity = float(exaggeration), float(env_intensity)
+        sun_azimuth_deg, sun_elevation_deg = float(sun_azimuth_deg), float(sun_elevation_deg)
+        sun_intensity, variance_threshold = float(sun_intensity), float(variance_threshold)
+        spp, min_frames, max_frames, seed = int(spp), int(min_frames), int(max_frames), int(seed)
+        identity = {
+            "material": (albedo, albedo_sampling),
+            "camera": (model, cam),
+            "tile_layout": (output_width, output_height, tile_size),
+            "terrain_grid": (spacing, exaggeration),
+            "lighting": (sun_azimuth_deg, sun_elevation_deg, sun_intensity, sun_color),
+            "environment": env_intensity,
+            "settings": (spp, min_frames, max_frames, variance_threshold, seed),
+            "heightmap": array_digest(dem, np.float32),
+            "albedo_map": array_digest(material, np.float32),
+            "env_map": array_digest(env_map, np.float32),
+            "mesh_vertices": array_digest(mesh_vertices, np.float32),
+            "mesh_indices": array_digest(mesh_indices, np.uint32),
+        }
+        checkpoint = PosterCheckpoint(path, resume, identity, runtime())
+
+    def render_tile(width, height, **options):
+        return hybrid_render_terrain_reference(dem, width, height, cam, cache=cache, **options)
+
+    with checkpoint.open() if checkpoint is not None else nullcontext():
+        return _render_poster_tiles(
+            render_tile, output_width, output_height, model, tile_size, n_x, n_y,
+            albedo_map_sha256, checkpoint, every, on_progress, resume, certificate,
+            dict(
+                spacing=spacing, exaggeration=exaggeration, albedo=albedo,
+                albedo_map=material, albedo_sampling=albedo_sampling,
+                sun_azimuth_deg=sun_azimuth_deg, sun_elevation_deg=sun_elevation_deg,
+                sun_intensity=sun_intensity, sun_color=sun_color, env_map=env_map,
+                env_intensity=env_intensity, mesh_vertices=mesh_vertices,
+                mesh_indices=mesh_indices, spp=spp, max_frames=max_frames,
+                min_frames=min_frames, variance_threshold=variance_threshold,
+                seed=seed, certificate=False,
+            ),
+        )
+
+
+def _render_poster_tiles(
+    render_tile, output_width, output_height, model, tile_size, n_x, n_y,
+    albedo_map_sha256, checkpoint, every, on_progress, resume, certificate,
+    render_options,
+):
     plate = np.empty((output_height, output_width, 4), dtype=np.uint8)
     tiles = []
+    progress = Progress(on_progress)
+    frames_dispatched = 0
+    recovered_tiles = 0
+    resumed_tiles = 0
 
     with _render_capture(
         "python.path_tracing.render_terrain_poster", "hybrid_pt.poster", 1
@@ -1338,36 +1462,46 @@ def render_terrain_poster(
                     (x0 + tw) / output_width,
                     (y0 + th) / output_height,
                 )
-                result = hybrid_render_terrain_reference(
-                    dem,
-                    tw,
-                    th,
-                    cam,
-                    spacing=spacing,
-                    exaggeration=exaggeration,
-                    albedo=albedo,
-                    albedo_map=material,
-                    albedo_sampling=albedo_sampling,
+                window = (x0, y0, tw, th)
+                destination = plate[y0 : y0 + th, x0 : x0 + tw]
+                tile_id = (ix, iy)
+                frame_path = receipt = None
+                if checkpoint is not None:
+                    frame_path, receipt = checkpoint.paths(ix, iy)
+                    if resume and receipt.exists():
+                        stats = checkpoint.restore_tile(
+                            receipt, window, destination, render_options["max_frames"],
+                            render_options["min_frames"], np.float32(render_options["variance_threshold"]),
+                        )
+                        stats.update(x0=x0, y0=y0, width=tw, height=th, sensor_rect=rect)
+                        tiles.append(stats)
+                        recovered_tiles += 1
+                        progress.notify(
+                            stats["frames"], stats["frames"], stats["variance"],
+                            tile=tile_id, path=receipt, tile_complete=True,
+                        )
+                        continue
+
+                tracking = {}
+                resume_tile = bool(resume and frame_path is not None and frame_path.exists())
+                if on_progress is not None:
+                    def report_frame(event):
+                        progress.notify(
+                            event.completed_frames, event.variance_at_frame, event.variance,
+                            tile=tile_id, path=event.checkpoint_path,
+                        )
+                    tracking["on_progress"] = report_frame
+                if resume_tile or every is not None:
+                    tracking.update(checkpoint_path=frame_path, checkpoint_every=every, resume=resume_tile)
+                result = render_tile(
+                    tw, th,
                     camera_model=model,
                     sensor_rect=rect,
                     full_width=output_width,
                     full_height=output_height,
                     pixel_offset=(x0, y0),
-                    sun_azimuth_deg=sun_azimuth_deg,
-                    sun_elevation_deg=sun_elevation_deg,
-                    sun_intensity=sun_intensity,
-                    sun_color=sun_color,
-                    env_map=env_map,
-                    env_intensity=env_intensity,
-                    mesh_vertices=mesh_vertices,
-                    mesh_indices=mesh_indices,
-                    spp=spp,
-                    max_frames=max_frames,
-                    min_frames=min_frames,
-                    variance_threshold=variance_threshold,
-                    seed=seed,
-                    certificate=False,
-                    cache=cache,
+                    **render_options,
+                    **tracking,
                 )
                 if not bool(result.get("converged")):
                     raise RuntimeError(
@@ -1380,7 +1514,7 @@ def render_terrain_poster(
                         f"host-visible budget: {peak}"
                     )
                 reservoir_valid_count = int(result["reservoir_valid_count"])
-                if material is not None and float(sun_intensity) > 0.0:
+                if render_options["albedo_map"] is not None and float(render_options["sun_intensity"]) > 0.0:
                     if reservoir_valid_count <= 0:
                         raise RuntimeError(
                             "terrain poster tile "
@@ -1393,7 +1527,7 @@ def render_terrain_poster(
                         "terrain poster tile returned invalid rgba: "
                         f"shape={tile_rgba.shape}, dtype={tile_rgba.dtype}"
                     )
-                plate[y0 : y0 + th, x0 : x0 + tw] = tile_rgba
+                destination[:] = tile_rgba
                 stats = {
                     key: value
                     for key, value in result.items()
@@ -1409,6 +1543,20 @@ def render_terrain_poster(
                     }
                 )
                 tiles.append(stats)
+                if checkpoint is not None or on_progress is not None:
+                    stats.setdefault("resumed", False)
+                    stats.setdefault("resume_frame", 0)
+                    dispatched = stats.setdefault("frames_dispatched", result["frames"])
+                    frames_dispatched += dispatched
+                    resumed_tiles += int(resume_tile)
+                    if receipt is not None:
+                        checkpoint.save_tile(receipt, window, tile_rgba, stats)
+                        if frame_path.exists():
+                            frame_path.unlink()
+                    progress.notify(
+                        stats["frames"], stats["frames"], stats["variance"],
+                        tile=tile_id, path=receipt, tile_complete=True,
+                    )
 
         record_inputs = get_native_symbol("_record_terrain_poster_certificate_inputs")
         if record_inputs is None:
@@ -1416,19 +1564,32 @@ def render_terrain_poster(
                 "render_terrain_poster requires a native build with the terrain "
                 "poster certificate helper"
             )
+        recovery_inputs = {}
+        if checkpoint is not None:
+            recovery_inputs["_recovery"] = (recovered_tiles, resumed_tiles, frames_dispatched)
+            recovery_inputs["_provenance"] = (
+                checkpoint.manifest_digest.hex(),
+                hashlib.sha256(memoryview(plate)).hexdigest(),
+                render_options["albedo"],
+                checkpoint.runtime,
+            )
         record_inputs(
             model,
             albedo_map_sha256,
-            albedo_sampling,
+            render_options["albedo_sampling"],
             output_width,
             output_height,
             n_x,
             n_y,
+            **recovery_inputs,
         )
 
-    certificate_digest = emit_render_certificate(certificate)
-    return {
-        "rgba": plate,
-        "tiles": tiles,
-        "certificate_digest": certificate_digest,
-    }
+    certificate_digest = _emit_current_render_certificate(certificate)
+    result = {"rgba": plate, "tiles": tiles, "certificate_digest": certificate_digest}
+    if checkpoint is not None or on_progress is not None:
+        result.update(
+            resumed=bool(recovered_tiles or resumed_tiles),
+            recovered_tiles=recovered_tiles,
+            frames_dispatched=frames_dispatched,
+        )
+    return result

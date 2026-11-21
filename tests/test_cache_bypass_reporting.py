@@ -26,7 +26,7 @@ def test_mapscene_fresh_paths_report_reason(tmp_path, monkeypatch, options, outp
     marker = object()
     monkeypatch.setattr(scene, "_render_impl", lambda *a, **kw: marker)
     monkeypatch.setattr(certificate, "_render_capture", lambda *a, **kw: nullcontext())
-    monkeypatch.setattr(certificate, "emit_render_certificate", lambda *a, **kw: None)
+    monkeypatch.setattr(certificate, "_emit_current_render_certificate", lambda *a, **kw: None)
     assert scene.render(cache=tmp_path / "cache", **options) is marker
     assert scene.last_render_metadata["bypass_reason"] == reason
     assert scene.last_render_metadata["cache_hit"] is False

@@ -51,6 +51,11 @@ pub fn finish_degradation_capture() -> Vec<Degradation> {
     CAPTURE.with(|capture| capture.borrow_mut().take().unwrap_or_default())
 }
 
+#[cfg(feature = "extension-module")]
+pub(crate) fn swap_degradation_capture(value: Option<Vec<Degradation>>) -> Option<Vec<Degradation>> {
+    CAPTURE.with(|capture| capture.replace(value))
+}
+
 pub fn abort_degradation_capture() {
     CAPTURE.with(|capture| {
         capture.borrow_mut().take();

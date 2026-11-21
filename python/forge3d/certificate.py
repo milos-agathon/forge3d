@@ -71,6 +71,24 @@ _SIGNING_KEY_ENV = "FORGE3D_CERT_SIGNING_KEY"
 _CAPTURE_STATE = threading.local()
 
 
+def _call_render_progress(callback, args):
+    """Invoke user code with an independent render certificate scope."""
+    from . import _degradation
+    from ._native import get_native_symbol
+
+    call = get_native_symbol("_call_render_progress")
+    if call is None:
+        raise RuntimeError("Terrain progress requires native callback isolation")
+    depth = getattr(_CAPTURE_STATE, "depth", 0)
+    active_degradations = _degradation._suspend_capture()
+    _CAPTURE_STATE.depth = 0
+    try:
+        return call(callback, args)
+    finally:
+        _CAPTURE_STATE.depth = depth
+        _degradation._restore_capture(active_degradations)
+
+
 @contextmanager
 def _render_capture(entry_point: str, pass_label: str, draw_calls: int = 1):
     """Capture one pure-Python render without overwriting an outer capture."""
@@ -115,7 +133,7 @@ def _captured_cpu_render(entry_point: str, pass_label: str, draw_calls: int = 1)
             with _render_capture(entry_point, pass_label, draw_calls=draw_calls):
                 result = function(*args, **kwargs)
             if certificate:
-                emit_render_certificate(certificate)
+                _emit_current_render_certificate(certificate)
             return result
 
         return wrapped
@@ -315,7 +333,7 @@ def verify(
 def emit_render_certificate(
     certificate: "bool | str | os.PathLike[str] | None",
 ) -> "str | None":
-    """Handle a ``certificate=`` render kwarg for the LAST completed render.
+    """Export a signed certificate for the process's latest completed render.
 
     ``certificate`` follows the render entry-point contract:
 
@@ -337,7 +355,28 @@ def emit_render_certificate(
         return None
     from . import diagnostics as _diagnostics
 
-    cert = _diagnostics.render_certificate()
+    return _write_requested_certificate(certificate, _diagnostics.render_certificate())
+
+
+def _emit_current_render_certificate(
+    certificate: "bool | str | os.PathLike[str] | None",
+) -> "str | None":
+    """Export the completed render that owns this ``certificate=`` argument."""
+    if not certificate:
+        return None
+    from . import diagnostics as _diagnostics
+    from ._native import get_native_symbol
+
+    report = get_native_symbol("_calling_thread_execution_report")
+    if report is None:
+        raise RuntimeError("Render certificates require a matching compiled Forge3D extension.")
+    cert = _diagnostics._certificate_from_report(report())
+    return _write_requested_certificate(certificate, cert)
+
+
+def _write_requested_certificate(
+    certificate: "bool | str | os.PathLike[str]", cert: Mapping[str, Any],
+) -> str:
     if not isinstance(certificate, bool):
         write_certificate(cert, os.fspath(certificate))
     return payload_sha256(cert)

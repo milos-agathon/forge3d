@@ -120,8 +120,8 @@ class _PosterNative:
 def _disable_capture(monkeypatch):
     if hasattr(pt, "_render_capture"):
         monkeypatch.setattr(pt, "_render_capture", lambda *args, **kwargs: contextlib.nullcontext())
-    if hasattr(pt, "emit_render_certificate"):
-        monkeypatch.setattr(pt, "emit_render_certificate", lambda certificate: None)
+    if hasattr(pt, "_emit_current_render_certificate"):
+        monkeypatch.setattr(pt, "_emit_current_render_certificate", lambda certificate: None)
 
 
 def test_poster_tiles_match_exact_grid(monkeypatch):
@@ -152,6 +152,7 @@ def test_poster_tiles_match_exact_grid(monkeypatch):
         {},
         tile=4,
         certificate=False,
+        cache="tile-cache",
     )
     expected = [
         (4, 4, 0, 0), (4, 4, 4, 0), (3, 4, 8, 0),
@@ -163,6 +164,7 @@ def test_poster_tiles_match_exact_grid(monkeypatch):
         assert kwargs["full_width"] == 11 and kwargs["full_height"] == 7
         assert kwargs["sensor_rect"] == (x0 / 11, y0 / 7, (x0 + width) / 11, (y0 + height) / 7)
         assert kwargs["certificate"] is False
+        assert kwargs["cache"] == "tile-cache"
     assert result["rgba"].shape == (7, 11, 4)
     assert len(result["tiles"]) == 6
     assert native.recorded[-2:] == (3, 2)

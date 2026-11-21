@@ -21,6 +21,7 @@ organized by workflow rather than by Rust module layout.
 | Terrain quality controls | `terrain_params`, `presets`, `terrain_scatter` | `terrain_atmosphere_path_demo.py`, `pnoa_river_showcase_video.py` |
 | Caller-driven water surfaces and optics | `WaterOpticsSettings` through `TerrainRenderer` | [Water optics](water_optics.md), `terrain_water_optics.py` |
 | Native/offscreen rendering | `Scene`, `Session`, `TerrainRenderer`, `render_offline` | `terrain_atmosphere_path_demo.py`, `triangle_png.py` |
+| Recoverable terrain and poster renders | `hybrid_render_terrain_reference`, `render_terrain_poster` | [Resume a render](recoverable_terrain_renders.md) |
 | Match a compatible terrain reference | `recover_scene`, `RecoveredScene` | GPU acceptance scene; this estimates surface colour, sunlight, and haze without changing an existing map on its own |
 | Typed map scenes | `MapScene`, `LabelLayer`, `MapSceneBuildingLayer`, `Tiles3DLayer`, `MapScene.save_bundle`, `MapScene.load_bundle` | `mapscene_terrain_raster.py`, `mapscene_vector_labels.py`, `mapscene_buildings_labels.py` |
 | Map scale continuity | `forge3d.semantic_scale` | [Semantic scale guide](semantic_scale.md), `c03_semantic_scale.py` |
