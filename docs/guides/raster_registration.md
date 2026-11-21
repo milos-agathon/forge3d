@@ -9,6 +9,9 @@ Legacy in-memory preparation grids use Area by default. Declare
 `registration="area"` or `registration="point"` on a preparation
 target to select registered rendering for an in-memory scene. Existing
 schema-1 recipes with an implicit Area target retain their screen placement.
+The viewer retains the legacy mesh layout for unlabelled Cartesian Area
+terrain. A GeoTIFF with a CRS and transform, or an explicit Point key,
+selects its sample lattice.
 
 For a corner affine A, sample (column, row) is at
 A(column + 0.5, row + 0.5). In an image of size N along an axis, sample
@@ -18,8 +21,10 @@ UV is (node_uv * (N - 1) + 0.5) / N. A singleton axis always samples its
 sole texel. Preserve the sample locations when converting Area to Point by
 adding half of each pixel axis to the native file origin. Subtract half of
 each axis in the reverse direction. The normalized affine stays unchanged
-for that conversion. A warp to a different grid evaluates the destination
-samples under the destination affine.
+for that conversion. Set `registration_conversion="preserve_sample_locations"`
+on a preparation source, an alignment call, or MapScene drape metadata to
+declare it. A warp to a different grid evaluates the destination samples
+under the destination affine.
 
 | Stage | Before #84 | Registration and coordinates |
 | --- | --- | --- |
@@ -28,7 +33,7 @@ samples under the destination affine.
 | GDAL and Rasterio DEM loader | Corner-normalized affine with the raster type dropped | Carries Area or Point with the affine and applies no second shift |
 | Preparation and alignment | Warped normalized corners and marked preparation output Area | Checks registration before combining rasters and records an explicitly chosen conversion. Warp samples use both normalized affines |
 | Viewer terrain mesh and shadow | Spread vertices across the corner footprint while indexing heights with texel units | Georeferenced mesh vertices land at source samples. Raster overlays retain edge-normalized extent and draped vectors evaluate height on the same sample lattice |
-| MapScene warp and raster drape | Baked samples on the height grid, then sampled the drape over outer texel edges | Bakes on the registered grid and converts its geometry node UV to texel-centre UV in the material shader |
+| MapScene warp and raster drape | Baked samples on the height grid, then sampled the drape over outer texel edges | Bakes on the registered grid and converts geometry node UV to texel-centre UV in the material shader. The registered fullscreen path reads both height and drape north-up |
 | MapScene vectors and labels | Camera-projected world anchors already used outer samples. Prepared screen vectors used outer edges | World and prepared screen anchors use the outer samples as the terrain extent |
 | Hybrid traced terrain and albedo | Node-centred heights and albedo with caller-supplied spacing | The registered wrapper derives spacing and the local origin from its affine. Drape and height arrays must share the same lattice. World mesh vertices use the same origin |
 | Physical-water texture | Explicit node-UV bilinear loads across first and last samples | Derived terrain maps continue to use the same node domain as the height field |
@@ -36,7 +41,7 @@ samples under the destination affine.
 | TIFF and orthographic trace output | TIFF writer emitted Area. Traced output carried pixels alone | Data TIFFs emit the actual registration. Orthographic traced pixels form an Area grid independently of the input registration |
 
 The MapScene material change uses the existing overlay uniform, with
-the registered drape flag in its formerly reserved `params7.z` lane.
+the registered raster flag in its formerly reserved `params7.z` lane.
 The drape texture and sampler remain at group 6, bindings 17 and 15.
 The viewer shadow change uses the existing 128-byte depth uniform,
 with the registered grid flag at `grid_params.y`. The height input
