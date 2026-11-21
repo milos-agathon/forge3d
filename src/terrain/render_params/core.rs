@@ -72,7 +72,7 @@ pub struct TerrainRenderParams {
     pub colormap_srgb: bool,
     /// P6.1: Use exact linear_to_srgb() instead of pow-gamma for output encoding
     pub output_srgb_eotf: bool,
-    /// P7: Camera projection mode ("screen" = fullscreen triangle, "mesh" = perspective grid)
+    /// Camera mode; mesh modes accept `:dem` for DEM-driven procedural grid density.
     pub camera_mode: String,
     pub culling: String,
     pub shading: String,

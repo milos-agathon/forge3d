@@ -68,6 +68,31 @@ def test_gpu_water_optics_analytic_regression(tmp_path):
 
 
 @pytest.mark.offscreen
+def test_gpu_dem_mesh_traverses_rectangular_grid(tmp_path):
+    from dataclasses import replace
+    module = _gpu_module()
+
+    class RectangularDem(module.Fixture):
+        def __init__(self, output):
+            super().__init__(output)
+            self.bed = self.bed[:, ::2].copy()
+            self.mask = self.mask[:, ::2].copy()
+
+        def params(self, *args, **kwargs):
+            params = super().params(*args, **kwargs)
+            params.camera_mode = "mesh:zup:dem"
+            params.water.optics = replace(
+                params.water.optics,
+                surface_height=np.asarray(params.water.optics.surface_height)[:, ::2],
+            )
+            return params
+
+    fixture = RectangularDem(_gpu_output(tmp_path, "rectangular-dem"))
+    light = module.normalize([0, np.cos(np.deg2rad(60)), np.sin(np.deg2rad(60))])
+    module.shadow_measurement(fixture, light)
+
+
+@pytest.mark.offscreen
 def test_gpu_water_lighting_and_proof_exclusion(tmp_path):
     import json
     from forge3d import verify

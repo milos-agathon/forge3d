@@ -390,6 +390,11 @@ impl TerrainScene {
         let grid_size = clipmap_camera_config(&params.camera_mode)
             .map(|config| config.ring_resolution as f32)
             .unwrap_or(512.0);
+        let grid_size = if is_dem_mesh_camera_mode(&params.camera_mode) {
+            0.0 // The program reads both grid dimensions from the height texture.
+        } else {
+            grid_size
+        };
         uniforms.extend_from_slice(&[camera_mode, grid_size, params.clip.0, params.clip.1]);
 
         uniforms

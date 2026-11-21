@@ -38,6 +38,7 @@ data loading, cartography, export, and the runnable examples in ``examples/``.
    guides/gpu_raster_recipes
    guides/rendering_and_analysis
    terrain/offline-render-quality
+   terrain/dem-mesh
    guides/output_and_integration
    examples/index
 

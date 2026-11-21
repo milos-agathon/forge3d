@@ -13,7 +13,8 @@ impl TerrainScene {
         &self,
         label: &'static str,
         uniform_buffer: &wgpu::Buffer,
-        heightmap_view: &wgpu::TextureView,
+        uploaded_height_view: &wgpu::TextureView,
+        camera_mode: &str,
         material_view: &wgpu::TextureView,
         material_sampler: &wgpu::Sampler,
         shading_buffer: &wgpu::Buffer,
@@ -26,6 +27,25 @@ impl TerrainScene {
         height_ao_computed: bool,
         sun_vis_computed: bool,
     ) -> Result<wgpu::BindGroup> {
+        // The DEM grid's CPU draw count and shadow pass use the uploaded DEM.
+        // Bind that same source even if an overview or streamed pages are resident.
+        let (heightmap_view, height_page_table, height_atlas, height_coverage) =
+            if is_dem_mesh_camera_mode(camera_mode) {
+                (
+                    uploaded_height_view,
+                    self.height_page_table_fallback_buffer.inner(),
+                    uploaded_height_view,
+                    uploaded_height_view,
+                )
+            } else {
+                let heightmap_view = self.main_pass_height_view(uploaded_height_view);
+                (
+                    heightmap_view,
+                    self.main_pass_height_page_table(),
+                    self.main_pass_height_atlas_view(heightmap_view),
+                    self.main_pass_height_coverage_view(heightmap_view),
+                )
+            };
         let height_ao_sample_guard = self
             .height_ao_sample_view
             .lock()
@@ -142,19 +162,15 @@ impl TerrainScene {
                 },
                 wgpu::BindGroupEntry {
                     binding: 20,
-                    resource: self.main_pass_height_page_table().as_entire_binding(),
+                    resource: height_page_table.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 21,
-                    resource: wgpu::BindingResource::TextureView(
-                        self.main_pass_height_atlas_view(heightmap_view),
-                    ),
+                    resource: wgpu::BindingResource::TextureView(height_atlas),
                 },
                 wgpu::BindGroupEntry {
                     binding: 22,
-                    resource: wgpu::BindingResource::TextureView(
-                        self.main_pass_height_coverage_view(heightmap_view),
-                    ),
+                    resource: wgpu::BindingResource::TextureView(height_coverage),
                 },
             ],
         });
@@ -169,6 +185,7 @@ impl TerrainScene {
         &self,
         uniform_buffer: &wgpu::Buffer,
         heightmap_view: &wgpu::TextureView,
+        camera_mode: &str,
         material_view: &wgpu::TextureView,
         material_sampler: &wgpu::Sampler,
         material_normal_view: &wgpu::TextureView,
@@ -197,6 +214,7 @@ impl TerrainScene {
             "terrain_pbr_pom.bind_group",
             uniform_buffer,
             heightmap_view,
+            camera_mode,
             material_view,
             material_sampler,
             shading_buffer,
