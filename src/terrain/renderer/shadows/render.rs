@@ -9,6 +9,7 @@ impl TerrainScene {
         height_curve_view: &wgpu::TextureView,
         heightmap_width: u32,
         heightmap_height: u32,
+        dem_grid: Option<(u32, u32)>,
         terrain_spacing: f32,
         height_exag: f32,
         height_min: f32,
@@ -149,7 +150,8 @@ impl TerrainScene {
         self.csm_renderer.upload_uniforms(&self.queue);
 
         const SHADOW_GRID_RES: u32 = 1024;
-        let vertices_per_cascade = (SHADOW_GRID_RES - 1) * (SHADOW_GRID_RES - 1) * 6;
+        let grid_size = dem_grid.unwrap_or((SHADOW_GRID_RES, SHADOW_GRID_RES));
+        let vertices_per_cascade = terrain_grid_vertex_count(grid_size)?;
 
         #[cfg(feature = "enable-gpu-instancing")]
         let scatter_shadow = if self.scatter_batches.is_empty() {
@@ -200,7 +202,7 @@ impl TerrainScene {
         for cascade_idx in 0..cascade_count {
             let cascade = &self.csm_renderer.uniforms.cascades[cascade_idx as usize];
             let stored_light_view_proj = cascade.light_view_proj;
-            let shadow_uniforms = ShadowPassUniforms {
+            let mut shadow_uniforms = ShadowPassUniforms {
                 light_view_proj: if shared_frame {
                     (glam::Mat4::from_cols_array_2d(&stored_light_view_proj)
                         * glam::Mat4::from_translation(glam::Vec3::new(
@@ -230,6 +232,10 @@ impl TerrainScene {
                 ],
                 height_curve,
             };
+            if dem_grid.is_some() {
+                // The shader uses the bound height texture for both grid dimensions.
+                shadow_uniforms.grid_params[0] = 0.0;
+            }
 
             let shadow_uniform_buffer = tracked_create_buffer_init(
                 self.device.as_ref(),
