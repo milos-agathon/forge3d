@@ -1233,7 +1233,7 @@ impl HybridPathTracer {
     pub(crate) fn render_terrain_reference_recoverable(
         desc: &TerrainReferenceDesc,
         options: Option<TerrainCheckpointOptions>,
-        on_frame: &mut OnFrame<'_>,
+        on_frame: &mut OnFrame,
     ) -> Result<(TerrainReferenceOutput, (u32, u32)), RenderError> {
         validate_desc(desc)?;
         let source = match &desc.sdf_scene {
@@ -1256,7 +1256,7 @@ impl HybridPathTracer {
         &self,
         desc: &TerrainReferenceDesc,
         mut checkpoint: Option<TerrainCheckpoint>,
-        mut on_frame: Option<&mut OnFrame<'_>>,
+        mut on_frame: Option<&mut OnFrame>,
     ) -> Result<(TerrainReferenceOutput, (u32, u32)), RenderError> {
         let device = &try_ctx()?.device;
         let queue = &try_ctx()?.queue;

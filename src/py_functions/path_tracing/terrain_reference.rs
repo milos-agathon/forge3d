@@ -210,7 +210,7 @@ fn extract_atmosphere_lut_handle(
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-pub(crate) fn _terrain_checkpoint_runtime(py: Python<'_>) -> PyResult<Py<PyAny>> {
+pub(crate) fn _terrain_checkpoint_runtime(py: Python) -> PyResult<Py<PyAny>> {
     let identity = PyDict::new_bound(py);
     for (name, digest) in crate::path_tracing::hybrid_compute::checkpoint_runtime()? {
         identity.set_item(name, crate::core::provenance::to_hex(&digest))?;
@@ -322,7 +322,7 @@ pub(crate) fn hybrid_render_terrain_reference(
     temperature_c: f64,
     atmosphere: Option<Bound<'_, PyAny>>,
     sdf_scene: Option<PyRef<'_, crate::sdf::py::PySdfScene>>,
-    _on_progress: Option<Bound<'_, PyAny>>,
+    _on_progress: Option<Bound<PyAny>>,
     _checkpoint: Option<(std::path::PathBuf, Option<u32>, bool)>,
 ) -> PyResult<Py<PyAny>> {
     let _ = cache;
