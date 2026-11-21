@@ -118,6 +118,13 @@ class _FrozenLabelPlans(Mapping[str, Any]):
     def __len__(self) -> int:
         return len(self._snapshots)
 
+    def _has_accepted(self, layer_id: str | None = None) -> bool:
+        """Inspect owned decisions without copying or exposing mutable plans."""
+        if layer_id is None:
+            return any(plan.accepted for plan in self._snapshots.values())
+        plan = self._snapshots.get(layer_id)
+        return plan is not None and bool(plan.accepted)
+
 
 class _SceneCompiler:
     """Publish a complete result only after validation/compilation succeeds.

@@ -18,6 +18,7 @@ from typing import Any, Mapping
 import numpy as np
 
 from ._canonical_json import canonical_json_bytes
+from ._map_scene_compiler import _FrozenLabelPlans
 
 
 class _LazyScratch:
@@ -240,6 +241,19 @@ def _cache_bypass_reason(scene):
 
 def _eligible(scene):
     return _cache_bypass_reason(scene) is None
+
+
+def _has_accepted_labels(plans, layer_id=None):
+    if type(plans) is dict and not plans:
+        return False
+    # The compiler owns normalized LabelPlans behind this exact mapping type.
+    # Its boolean query keeps the detached-copy contract of public reads.
+    if type(plans) is _FrozenLabelPlans:
+        return plans._has_accepted(layer_id)
+    if layer_id is None:
+        return any(plan.accepted for plan in plans.values())
+    plan = plans.get(layer_id)
+    return plan is not None and bool(plan.accepted)
 
 
 def _path_free(recipe):
@@ -721,8 +735,13 @@ class _SceneExecution:
                 custom = bool(image_path and metrics_path and Path(image_path).exists() and Path(metrics_path).exists())
                 if custom:
                     png, metrics = Path(image_path), Path(metrics_path)
-                plan = plans.get(layer.layer_id)
-                if cache_requested and plan is not None and plan.accepted:
+                if type(plans) is _FrozenLabelPlans:
+                    bind_atlas = cache_requested and plans._has_accepted(layer.layer_id)
+                else:
+                    # Preserve custom mapping reads even when no cache was requested.
+                    plan = plans.get(layer.layer_id)
+                    bind_atlas = cache_requested and plan is not None and plan.accepted
+                if bind_atlas:
                     source, identity, decoded = self.atlas_binding(Path(png), Path(metrics), custom)
                     sources[layer.layer_id], identities[layer.layer_id] = source, identity
                     decoded_atlases[layer.layer_id] = decoded
@@ -857,11 +876,11 @@ class _SceneExecution:
                 outputs.append(declare("frame.output", frame, self.payload["frames"][str(frame)], ()))
             return outputs
         label_compile = (declare("label.compile", -1, self.label_state, ()) if any(
-            plan.accepted for plans in self.label_plans.values() for plan in plans.values()
+            _has_accepted_labels(plans) for plans in self.label_plans.values()
         ) else None)
         for frame in frames:
             image = declare("terrain.render", frame, self.base_states[frame], ())
-            if label_compile is not None and any(plan.accepted for plan in self.label_plans[frame].values()):
+            if label_compile is not None and _has_accepted_labels(self.label_plans[frame]):
                 image = declare("label.composite", frame, self.label_state[str(frame)], (("terrain.rgba@0", image), ("label.plan@1", label_compile)))
             outputs.append(declare("frame.output", frame, self.base_states[frame]["recipe"]["output"], (("frame.rgba@0", image),)))
         return outputs

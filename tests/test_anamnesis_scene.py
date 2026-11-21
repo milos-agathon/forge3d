@@ -97,6 +97,52 @@ def test_scene_adapter_releases_snapshots_when_callbacks_are_released(tmp_path):
         gc.collect()
 
 
+def test_frozen_label_acceptance_query_preserves_owned_decisions(monkeypatch):
+    import forge3d._map_scene_compiler as compiler
+    from forge3d._anamnesis_scene import _has_accepted_labels
+    from forge3d.label_plan import AcceptedLabel, LabelCandidate, LabelPlan
+
+    candidate = LabelCandidate("candidate", "point", (10.0, 20.0))
+    source = LabelPlan([AcceptedLabel("label", "source", "Peak", "Point", candidate)], [])
+    frozen = compiler._FrozenLabelPlans({"active": source, "empty": LabelPlan([], [])})
+    detached = frozen["active"]
+    source.accepted.clear()
+    detached.accepted.clear()
+    assert frozen["active"].accepted
+
+    def reject_copy(*args, **kwargs):
+        raise AssertionError("boolean label query copied a complete plan")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(compiler.copy, "deepcopy", reject_copy)
+        assert _has_accepted_labels(frozen)
+        assert _has_accepted_labels(frozen, "active")
+        assert not _has_accepted_labels(frozen, "empty")
+        assert not _has_accepted_labels(frozen, "missing")
+        assert not _has_accepted_labels(compiler._FrozenLabelPlans({}))
+        with pytest.raises(AssertionError, match="copied a complete plan"):
+            frozen["active"]
+
+
+def test_label_acceptance_query_respects_custom_mapping_reads():
+    from forge3d._anamnesis_scene import _has_accepted_labels
+    from forge3d._map_scene_compiler import _FrozenLabelPlans
+    from forge3d.label_plan import AcceptedLabel, LabelCandidate, LabelPlan
+
+    candidate = LabelCandidate("candidate", "point", (10.0, 20.0))
+    source = LabelPlan([AcceptedLabel("label", "source", "Peak", "Point", candidate)], [])
+
+    class CustomPlans(_FrozenLabelPlans):
+        def __getitem__(self, layer_id):
+            return LabelPlan([], [])
+
+    custom = CustomPlans({"active": source})
+    assert not _has_accepted_labels(custom)
+    assert not _has_accepted_labels(custom, "active")
+    assert _has_accepted_labels({"active": source})
+    assert _has_accepted_labels({"active": source}, "active")
+
+
 def test_scene_snapshots_preserve_aliases_cycles_arrays_and_copy_hooks(monkeypatch):
     import copy
     import forge3d.map_scene as ms
