@@ -1811,11 +1811,12 @@ fn normalize_for_shadow(tex_coord: vec2<f32>) -> vec3<f32> {
     let h_norm = clamp(det_div(h_raw - h_min, h_range), 0.0, 1.0);
 
     // Apply height curve (must match shadow depth shader)
-    let h_curved = apply_height_curve01(h_norm);
+    let h_curved = det_barrier(apply_height_curve01(h_norm));
 
-    // Compute shadow-normalized Z (matches shadow depth shader: world_z = h_curved * h_exag)
-    let shadow_z = h_curved * h_exag;
-    
+    // Mesh shadow slab: metre relief centred on zero, matching
+    // terrain_shadow_depth.wgsl (never the 1-metre z_scale compression the
+    // mesh clip position uses — sun rays exit it after metres of travel).
+    let shadow_z = det_barrier((h_curved - 0.5) * h_range) * h_exag;
     let shadow_height = det_fma(h_curved, h_max - h_min, h_min) * h_exag;
     return select(
         vec3<f32>(world_xy.x, world_xy.y, shadow_z),
@@ -5867,9 +5868,13 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             // Also apply POM occlusion with same clamp
             ao_clamped = det_barrier(ao_clamped) * max(occlusion, 0.65);
 
-            // P2-S3: Shadow factor clamped to [0.30, 1.0]
-            // Use the already-mapped shadow value from CSM
-            let shadow_clamped = max(shadow_factor, 0.30);
+            // P2-S3: Shadow factor clamped to [0.30, 1.0].
+            // The raw CSM visibility drives the direct diffuse term — mapped to
+            // [SHADOW_MIN, 1] and floored at 0.30 as this clamp documents.
+            // (`shadow_factor` above is the IBL-softened variant capped at
+            // 0.8..1 by SHADOW_IBL_FACTOR; feeding it here capped cast shadows
+            // at a 20% diffuse dip, which is why shadows were invisible.)
+            let shadow_clamped = max(det_mix(SHADOW_MIN, 1.0, shadow_visibility), 0.30);
 
             // Heightfield ray-traced sun visibility: modulates direct sun lighting
             // When sun_visibility disabled, texture is 1x1 white (1.0 = fully lit)

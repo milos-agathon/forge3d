@@ -149,11 +149,16 @@ fn vs_shadow(@builtin(vertex_index) vertex_id: u32) -> VertexOutput {
     let world_xy = (uv - vec2<f32>(0.5)) * terrain_span;
     let height_range = max(height_max - height_min, 1e-6);
     let height_normalized = clamp(det_div(h_raw - height_min, height_range), 0.0, 1.0);
-    let height_curved = apply_height_curve(height_normalized);
-    let world_z = height_curved * z_scale;
+    let height_curved = det_barrier(apply_height_curve(height_normalized));
+    // The shadow slab lives in *metre relief*, centred on zero — never the
+    // 1-metre z_scale compression: a sun ray exits a z_scale-thick slab after
+    // a few metres of horizontal travel, so nothing could ever occlude
+    // anything and shadows silently never appeared. The fragment's
+    // normalize_for_shadow reconstructs the identical formula.
+    let world_z = det_barrier((height_curved - 0.5) * height_range) * z_scale;
     let world_height = det_mix(height_min, height_max, height_curved) * z_scale;
     let world_pos = select(
-        vec3<f32>(world_xy, world_z),
+        vec3<f32>(world_xy.x, world_xy.y, world_z),
         vec3<f32>(world_xy.x, world_height, world_xy.y),
         u_shadow.grid_params.y != 0.0,
     );

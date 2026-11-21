@@ -6352,43 +6352,43 @@
     }
   },
   "splat_fused_env_map": {
-   "base_commit": "d6b9e556",
-   "base_count": 1861,
-   "base_digest": "a2a5794b463106a295bf326ade34c081cb780eaa6d5b99a7fdbd17d7c8fbf0cf",
-   "result_count": 1865,
-   "result_digest": "ea4107298699b4ff56aa1d80a3317fe86dda35de354e3ec0900e501ef0e92fb7",
-   "added": [
-    [
-     "src/path_tracing/hybrid_compute/render_fused.rs",
-     "env_from_hdr_image",
-     "as_f32",
-     1,
-     "let radiance = [ (sums[ti * 3] * inv).max(0.0) as f32, (sums[ti * 3 + 1] * inv).max(0.0) as f32, (sums[ti * 3 + 2] * inv).max(0.0) as f32, ]"
+    "base_commit": "d6b9e556",
+    "base_count": 1861,
+    "base_digest": "a2a5794b463106a295bf326ade34c081cb780eaa6d5b99a7fdbd17d7c8fbf0cf",
+    "result_count": 1865,
+    "result_digest": "ea4107298699b4ff56aa1d80a3317fe86dda35de354e3ec0900e501ef0e92fb7",
+    "added": [
+      [
+        "src/path_tracing/hybrid_compute/render_fused.rs",
+        "env_from_hdr_image",
+        "as_f32",
+        1,
+        "let radiance = [ (sums[ti * 3] * inv).max(0.0) as f32, (sums[ti * 3 + 1] * inv).max(0.0) as f32, (sums[ti * 3 + 2] * inv).max(0.0) as f32, ]"
+      ],
+      [
+        "src/path_tracing/hybrid_compute/render_fused.rs",
+        "env_from_hdr_image",
+        "as_f32",
+        2,
+        "let radiance = [ (sums[ti * 3] * inv).max(0.0) as f32, (sums[ti * 3 + 1] * inv).max(0.0) as f32, (sums[ti * 3 + 2] * inv).max(0.0) as f32, ]"
+      ],
+      [
+        "src/path_tracing/hybrid_compute/render_fused.rs",
+        "env_from_hdr_image",
+        "as_f32",
+        3,
+        "let radiance = [ (sums[ti * 3] * inv).max(0.0) as f32, (sums[ti * 3 + 1] * inv).max(0.0) as f32, (sums[ti * 3 + 2] * inv).max(0.0) as f32, ]"
+      ],
+      [
+        "src/path_tracing/hybrid_compute/render_fused.rs",
+        "env_from_hdr_image",
+        "as_f32",
+        4,
+        "*value = (f64::from(*value) * scale).clamp(0.0, clamp) as f32"
+      ]
     ],
-    [
-     "src/path_tracing/hybrid_compute/render_fused.rs",
-     "env_from_hdr_image",
-     "as_f32",
-     2,
-     "let radiance = [ (sums[ti * 3] * inv).max(0.0) as f32, (sums[ti * 3 + 1] * inv).max(0.0) as f32, (sums[ti * 3 + 2] * inv).max(0.0) as f32, ]"
-    ],
-    [
-     "src/path_tracing/hybrid_compute/render_fused.rs",
-     "env_from_hdr_image",
-     "as_f32",
-     3,
-     "let radiance = [ (sums[ti * 3] * inv).max(0.0) as f32, (sums[ti * 3 + 1] * inv).max(0.0) as f32, (sums[ti * 3 + 2] * inv).max(0.0) as f32, ]"
-    ],
-    [
-     "src/path_tracing/hybrid_compute/render_fused.rs",
-     "env_from_hdr_image",
-     "as_f32",
-     4,
-     "*value = (f64::from(*value) * scale).clamp(0.0, clamp) as f32"
-    ]
-   ],
-   "removed": [],
-   "review": "2026-10-19: SPLAT-FUSED HDRI env-map path (env_from_hdr_image). Four additions, none narrowing an absolute world coordinate: three narrow the accumulated HDR sky radiance (sums[ti*3..]*inv, a per-texel half-float range normalisation of the baked environment map) and one narrows the same clamped radiance scalar when the env texture is uploaded (*value * scale). All four operate on environment-map radiance and texture values, never on a camera, terrain or splat position; world positions continue to cross f64 -> f32 only through Anchor::to_render_f32. The base is the production inventory of d6b9e556, the commit this branch was rebased onto; the four env-map sites bridge it to 1865. The four sites were approved in the 2026-10-22 review (5617567760); the rebased base and result were confirmed by the world-coordinate gate at that head. Both digests are in scan order, so they are not numerically comparable with this file's chain digests; the gate normalises the base the way the chain does and checks that it hashes to concordia's recorded result."
+    "removed": [],
+    "review": "2026-10-19: SPLAT-FUSED HDRI env-map path (env_from_hdr_image). Four additions, none narrowing an absolute world coordinate: three narrow the accumulated HDR sky radiance (sums[ti*3..]*inv, a per-texel half-float range normalisation of the baked environment map) and one narrows the same clamped radiance scalar when the env texture is uploaded (*value * scale). All four operate on environment-map radiance and texture values, never on a camera, terrain or splat position; world positions continue to cross f64 -> f32 only through Anchor::to_render_f32. The base is the production inventory of d6b9e556, the commit this branch was rebased onto; the four env-map sites bridge it to 1865. The four sites were approved in the 2026-10-22 review (5617567760); the rebased base and result were confirmed by the world-coordinate gate at that head. Both digests are in scan order, so they are not numerically comparable with this file's chain digests; the gate normalises the base the way the chain does and checks that it hashes to concordia's recorded result."
   },
   "nephele_splat_env_map_2026_10_30": {
     "base_count": 1936,
@@ -6474,148 +6474,303 @@
     "result_digest": "9edcc6da84f3a5570286e2d44cd3efd8324c5be35ce7822f61f744d858796b09",
     "review": "PR 299: ViewerTerrainData::clip_planes pushes the terrain camera's near plane out to half the eye's distance from the terrain bounding box (a fixed near <= 1.0 z-fought steep walls under a long lens). The one cast narrows that scalar f64 distance to the f32 near plane; it is never a world position, which still crosses f64 -> f32 only through Anchor."
   },
- "autochiron": {
-  "base_count": 1832,
-  "base_digest": "757d9c40e9f4dde8935f45dd6bab69b81c6d82f8d51dfc327c06fd7e21de01f9",
-  "result_count": 1850,
-  "result_digest": "9e7a23747ae95ed6d259bf6d387a3bfb7e7eefdbb38671fe1ad7f87d9e587087",
-  "added": [
-   [
-    "src/cinema/bindings.rs",
-    "cinema_validate",
-    "as_f32",
-    1,
-    "} if !time_offset.is_finite() || time_offset < 0.0 || solution.segments[0].t0 != 0.0 || solution.segments.last().unwrap().t1 != shot.duration_s || solution.segments.windows(2).any(|s| s[0].t1 != s[1].t0) || keys[0].time > time_offset || keys.last().unwrap().time < f64::from((time_offset + shot.duration_s) as f32) || keys .iter() .any(|k| k.radius <= 0.0 || k.fov <= 0.0 || k.fov >= 180.0) { return Err(py_error(binding( , , )))"
-   ],
-   [
-    "src/cinema/gpu_trace.rs",
-    "trace",
-    "as_f32",
-    1,
-    "origin_spacing: [ 0.0, 0.0, (terrain.width / (terrain.w - 1) as f64) as f32, (terrain.width / (terrain.h - 1) as f64) as f32, ], h_params: [pyramid.h_min, pyramid.h_max, 1.0, 0.0], albedo_pad: [0.0"
-   ],
-   [
-    "src/cinema/gpu_trace.rs",
-    "trace",
-    "as_f32",
-    2,
-    "origin_spacing: [ 0.0, 0.0, (terrain.width / (terrain.w - 1) as f64) as f32, (terrain.width / (terrain.h - 1) as f64) as f32, ], h_params: [pyramid.h_min, pyramid.h_max, 1.0, 0.0], albedo_pad: [0.0"
-   ],
-   [
-    "src/cinema/validate.rs",
-    "native",
-    "as_f32",
-    1,
-    "CameraKeyframe::new( self.time as f32, self.phi as f32, self.theta as f32, self.radius, self.fov as f32, Some(self.target), )"
-   ],
-   [
-    "src/cinema/validate.rs",
-    "native",
-    "as_f32",
-    2,
-    "CameraKeyframe::new( self.time as f32, self.phi as f32, self.theta as f32, self.radius, self.fov as f32, Some(self.target), )"
-   ],
-   [
-    "src/cinema/validate.rs",
-    "native",
-    "as_f32",
-    3,
-    "CameraKeyframe::new( self.time as f32, self.phi as f32, self.theta as f32, self.radius, self.fov as f32, Some(self.target), )"
-   ],
-   [
-    "src/cinema/validate.rs",
-    "native",
-    "as_f32",
-    4,
-    "CameraKeyframe::new( self.time as f32, self.phi as f32, self.theta as f32, self.radius, self.fov as f32, Some(self.target), )"
-   ],
-   [
-    "src/cinema/validate.rs",
-    "consumer",
-    "as_f32",
-    1,
-    "let state = a .evaluate(t as f32) .ok_or_else(|| binding( , ))?"
-   ],
-   [
-    "src/cinema/validate.rs",
-    "resample",
-    "as_f32",
-    1,
-    "time: f64::from(t as f32), phi: f64::from(phi as f32), theta: f64::from((d.y / r).clamp(-1.0, 1.0).acos().to_degrees() as f32), radius: r, fov: f64::from(shot.framing.fov_deg as f32), target: target.to_array(),"
-   ],
-   [
-    "src/cinema/validate.rs",
-    "resample",
-    "as_f32",
-    2,
-    "time: f64::from(t as f32), phi: f64::from(phi as f32), theta: f64::from((d.y / r).clamp(-1.0, 1.0).acos().to_degrees() as f32), radius: r, fov: f64::from(shot.framing.fov_deg as f32), target: target.to_array(),"
-   ],
-   [
-    "src/cinema/validate.rs",
-    "resample",
-    "as_f32",
-    3,
-    "time: f64::from(t as f32), phi: f64::from(phi as f32), theta: f64::from((d.y / r).clamp(-1.0, 1.0).acos().to_degrees() as f32), radius: r, fov: f64::from(shot.framing.fov_deg as f32), target: target.to_array(),"
-   ],
-   [
-    "src/cinema/validate.rs",
-    "resample",
-    "as_f32",
-    4,
-    "time: f64::from(t as f32), phi: f64::from(phi as f32), theta: f64::from((d.y / r).clamp(-1.0, 1.0).acos().to_degrees() as f32), radius: r, fov: f64::from(shot.framing.fov_deg as f32), target: target.to_array(),"
-   ],
-   [
-    "src/cinema/validate.rs",
-    "framing",
-    "as_f32",
-    1,
-    "let projection = crate::camera::perspective_wgpu( (fov_deg as f32).to_radians(), f.aspect as f32, 0.01, eye.distance(shot.subject.center()) as f32 * 4.0 + 1.0, )"
-   ],
-   [
-    "src/cinema/validate.rs",
-    "framing",
-    "as_f32",
-    2,
-    "let projection = crate::camera::perspective_wgpu( (fov_deg as f32).to_radians(), f.aspect as f32, 0.01, eye.distance(shot.subject.center()) as f32 * 4.0 + 1.0, )"
-   ],
-   [
-    "src/cinema/validate.rs",
-    "framing",
-    "as_f32",
-    3,
-    "let projection = crate::camera::perspective_wgpu( (fov_deg as f32).to_radians(), f.aspect as f32, 0.01, eye.distance(shot.subject.center()) as f32 * 4.0 + 1.0, )"
-   ],
-   [
-    "src/cinema/validate.rs",
-    "times",
-    "as_f32",
-    1,
-    "(0..=n) .map(|i| f64::from((offset + shot.duration_s * i as f64 / n as f64) as f32) - offset) .collect()"
-   ],
-   [
-    "src/cinema/validate.rs",
-    "add_ray",
-    "as_f32",
-    1,
-    "origin_tmin: [p.x, p.y, p.z, 0.0], direction_tmax: [d.x, d.y, d.z, length as f32],"
-   ],
-   [
-    "src/cinema/validate.rs",
-    "validate",
-    "as_f32",
-    1,
-    "let actual_fov = f64::from( a.evaluate((t + offset) as f32) .ok_or_else(|| binding( , ))? .fov_deg, )"
-   ]
-  ],
-  "removed": [],
-  "review": "Exact 18 sites in artifacts/autochiron-conversion-review.json (SHA-256 fb8d7c9ed27af9f45245bdac8b3a69c83ab41ec7d8493d08a837bf4c4378bcbc); Milos explicitly ratified this list on 2026-10-11 by replying \"Approved\" to the six-decision manifest. Motion remains f64; world positions use typed Anchor. Inventory counts, digests and entries unchanged."
- },
- "autochiron_main_integration": {
-  "base_revision": "58dbde344e29fe784d6dc3093f32797972894b2d",
-  "base_count": 1942,
-  "base_digest": "9edcc6da84f3a5570286e2d44cd3efd8324c5be35ce7822f61f744d858796b09",
-  "result_count": 1960,
-  "result_digest": "22125269c051b2783c11b2b06de124bf10fa7a7cf5f250365aff57af42eee360",
-  "basis": "The exact 18 additions from the unchanged autochiron record, applied to current main. Reversing them restores the viewer_terrain_clip_planes freeze."
- }
+  "autochiron": {
+    "base_count": 1832,
+    "base_digest": "757d9c40e9f4dde8935f45dd6bab69b81c6d82f8d51dfc327c06fd7e21de01f9",
+    "result_count": 1850,
+    "result_digest": "9e7a23747ae95ed6d259bf6d387a3bfb7e7eefdbb38671fe1ad7f87d9e587087",
+    "added": [
+      [
+        "src/cinema/bindings.rs",
+        "cinema_validate",
+        "as_f32",
+        1,
+        "} if !time_offset.is_finite() || time_offset < 0.0 || solution.segments[0].t0 != 0.0 || solution.segments.last().unwrap().t1 != shot.duration_s || solution.segments.windows(2).any(|s| s[0].t1 != s[1].t0) || keys[0].time > time_offset || keys.last().unwrap().time < f64::from((time_offset + shot.duration_s) as f32) || keys .iter() .any(|k| k.radius <= 0.0 || k.fov <= 0.0 || k.fov >= 180.0) { return Err(py_error(binding( , , )))"
+      ],
+      [
+        "src/cinema/gpu_trace.rs",
+        "trace",
+        "as_f32",
+        1,
+        "origin_spacing: [ 0.0, 0.0, (terrain.width / (terrain.w - 1) as f64) as f32, (terrain.width / (terrain.h - 1) as f64) as f32, ], h_params: [pyramid.h_min, pyramid.h_max, 1.0, 0.0], albedo_pad: [0.0"
+      ],
+      [
+        "src/cinema/gpu_trace.rs",
+        "trace",
+        "as_f32",
+        2,
+        "origin_spacing: [ 0.0, 0.0, (terrain.width / (terrain.w - 1) as f64) as f32, (terrain.width / (terrain.h - 1) as f64) as f32, ], h_params: [pyramid.h_min, pyramid.h_max, 1.0, 0.0], albedo_pad: [0.0"
+      ],
+      [
+        "src/cinema/validate.rs",
+        "native",
+        "as_f32",
+        1,
+        "CameraKeyframe::new( self.time as f32, self.phi as f32, self.theta as f32, self.radius, self.fov as f32, Some(self.target), )"
+      ],
+      [
+        "src/cinema/validate.rs",
+        "native",
+        "as_f32",
+        2,
+        "CameraKeyframe::new( self.time as f32, self.phi as f32, self.theta as f32, self.radius, self.fov as f32, Some(self.target), )"
+      ],
+      [
+        "src/cinema/validate.rs",
+        "native",
+        "as_f32",
+        3,
+        "CameraKeyframe::new( self.time as f32, self.phi as f32, self.theta as f32, self.radius, self.fov as f32, Some(self.target), )"
+      ],
+      [
+        "src/cinema/validate.rs",
+        "native",
+        "as_f32",
+        4,
+        "CameraKeyframe::new( self.time as f32, self.phi as f32, self.theta as f32, self.radius, self.fov as f32, Some(self.target), )"
+      ],
+      [
+        "src/cinema/validate.rs",
+        "consumer",
+        "as_f32",
+        1,
+        "let state = a .evaluate(t as f32) .ok_or_else(|| binding( , ))?"
+      ],
+      [
+        "src/cinema/validate.rs",
+        "resample",
+        "as_f32",
+        1,
+        "time: f64::from(t as f32), phi: f64::from(phi as f32), theta: f64::from((d.y / r).clamp(-1.0, 1.0).acos().to_degrees() as f32), radius: r, fov: f64::from(shot.framing.fov_deg as f32), target: target.to_array(),"
+      ],
+      [
+        "src/cinema/validate.rs",
+        "resample",
+        "as_f32",
+        2,
+        "time: f64::from(t as f32), phi: f64::from(phi as f32), theta: f64::from((d.y / r).clamp(-1.0, 1.0).acos().to_degrees() as f32), radius: r, fov: f64::from(shot.framing.fov_deg as f32), target: target.to_array(),"
+      ],
+      [
+        "src/cinema/validate.rs",
+        "resample",
+        "as_f32",
+        3,
+        "time: f64::from(t as f32), phi: f64::from(phi as f32), theta: f64::from((d.y / r).clamp(-1.0, 1.0).acos().to_degrees() as f32), radius: r, fov: f64::from(shot.framing.fov_deg as f32), target: target.to_array(),"
+      ],
+      [
+        "src/cinema/validate.rs",
+        "resample",
+        "as_f32",
+        4,
+        "time: f64::from(t as f32), phi: f64::from(phi as f32), theta: f64::from((d.y / r).clamp(-1.0, 1.0).acos().to_degrees() as f32), radius: r, fov: f64::from(shot.framing.fov_deg as f32), target: target.to_array(),"
+      ],
+      [
+        "src/cinema/validate.rs",
+        "framing",
+        "as_f32",
+        1,
+        "let projection = crate::camera::perspective_wgpu( (fov_deg as f32).to_radians(), f.aspect as f32, 0.01, eye.distance(shot.subject.center()) as f32 * 4.0 + 1.0, )"
+      ],
+      [
+        "src/cinema/validate.rs",
+        "framing",
+        "as_f32",
+        2,
+        "let projection = crate::camera::perspective_wgpu( (fov_deg as f32).to_radians(), f.aspect as f32, 0.01, eye.distance(shot.subject.center()) as f32 * 4.0 + 1.0, )"
+      ],
+      [
+        "src/cinema/validate.rs",
+        "framing",
+        "as_f32",
+        3,
+        "let projection = crate::camera::perspective_wgpu( (fov_deg as f32).to_radians(), f.aspect as f32, 0.01, eye.distance(shot.subject.center()) as f32 * 4.0 + 1.0, )"
+      ],
+      [
+        "src/cinema/validate.rs",
+        "times",
+        "as_f32",
+        1,
+        "(0..=n) .map(|i| f64::from((offset + shot.duration_s * i as f64 / n as f64) as f32) - offset) .collect()"
+      ],
+      [
+        "src/cinema/validate.rs",
+        "add_ray",
+        "as_f32",
+        1,
+        "origin_tmin: [p.x, p.y, p.z, 0.0], direction_tmax: [d.x, d.y, d.z, length as f32],"
+      ],
+      [
+        "src/cinema/validate.rs",
+        "validate",
+        "as_f32",
+        1,
+        "let actual_fov = f64::from( a.evaluate((t + offset) as f32) .ok_or_else(|| binding( , ))? .fov_deg, )"
+      ]
+    ],
+    "removed": [],
+    "review": "Exact 18 sites in artifacts/autochiron-conversion-review.json (SHA-256 fb8d7c9ed27af9f45245bdac8b3a69c83ab41ec7d8493d08a837bf4c4378bcbc); Milos explicitly ratified this list on 2026-10-11 by replying \"Approved\" to the six-decision manifest. Motion remains f64; world positions use typed Anchor. Inventory counts, digests and entries unchanged."
+  },
+  "autochiron_main_integration": {
+    "base_revision": "58dbde344e29fe784d6dc3093f32797972894b2d",
+    "base_count": 1942,
+    "base_digest": "9edcc6da84f3a5570286e2d44cd3efd8324c5be35ce7822f61f744d858796b09",
+    "result_count": 1960,
+    "result_digest": "22125269c051b2783c11b2b06de124bf10fa7a7cf5f250365aff57af42eee360",
+    "basis": "The exact 18 additions from the unchanged autochiron record, applied to current main. Reversing them restores the viewer_terrain_clip_planes freeze."
+  },
+  "terrain_shadow_relief_lut": {
+    "branch_commit": "98040910",
+    "review": "2026-11-20: shadow-only split of studio_branch_relief_lut for PR 4. The viewer.rs LUT and render-frame cast sites belong to the viewer PR and are intentionally omitted here. The two remaining files narrow bounded cascade-index ratios and the SHADOW_GRID_RES u32 constant; no absolute world coordinate is narrowed, and Anchor remains the sole production world-position narrowing owner.",
+    "base_count": 1940,
+    "base_digest": "bbc0fe72aadecc3d746f1c4daee24629ea23943e217bd849696b67b7fb8656b0",
+    "result_count": 1941,
+    "result_digest": "b4cc2648cb47e3c1f7a540913c3b50dc24f544ccd29de1a8b1ff37d6d5f7bd7c",
+    "files": {
+      "src/terrain/renderer/shadows/render.rs": {
+        "base": [
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            1,
+            "let step = (far_plane - near_plane) / cascade_count as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            2,
+            "fallback.push((near_plane + step * i as f32).min(far_plane))"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            3,
+            "let texel_size = (light_max.x - light_min.x) / self.csm_renderer.config.shadow_map_size as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            4,
+            "self.csm_renderer.uniforms.shadow_map_size = self.csm_renderer.config.shadow_map_size as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            5,
+            "let terrain_width = heightmap_width.max(heightmap_height).max(1) as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            6,
+            "height_exag }, height_min, height_max, ], grid_params: [ SHADOW_GRID_RES as f32, if y_up { 1.0"
+          ]
+        ],
+        "result": [
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            1,
+            "let step = (far_plane - near_plane) / cascade_count as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            2,
+            "fallback.push((near_plane + step * i as f32).min(far_plane))"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            3,
+            "let texel_size = (light_max.x - light_min.x) / self.csm_renderer.config.shadow_map_size as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            4,
+            "self.csm_renderer.uniforms.shadow_map_size = self.csm_renderer.config.shadow_map_size as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            5,
+            "let terrain_width = heightmap_width.max(heightmap_height).max(1) as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            6,
+            "light_view_proj: stored_light_view_proj, terrain_params: [terrain_spacing, height_exag, height_min, height_max], grid_params: [ SHADOW_GRID_RES as f32, if y_up { 1.0"
+          ]
+        ]
+      },
+      "src/terrain/renderer/shadows/setup.rs": {
+        "base": [
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup_with_mode",
+            "as_f32",
+            1,
+            "let aspect = params.size_px.0 as f32 / params.size_px.1 as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup_with_mode",
+            "as_f32",
+            2,
+            "let aspect = params.size_px.0 as f32 / params.size_px.1 as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup_with_mode",
+            "as_f32",
+            3,
+            "let step = (shadow_far - last) / remaining.max(1) as f32"
+          ]
+        ],
+        "result": [
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup_with_mode",
+            "as_f32",
+            1,
+            "let aspect = params.size_px.0 as f32 / params.size_px.1 as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup_with_mode",
+            "as_f32",
+            2,
+            "let aspect = params.size_px.0 as f32 / params.size_px.1 as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup_with_mode",
+            "as_f32",
+            3,
+            "let t = i as f32 / cascade_count as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup_with_mode",
+            "as_f32",
+            4,
+            "let t = i as f32 / cascade_count as f32"
+          ]
+        ]
+      }
+    }
+  }
 }

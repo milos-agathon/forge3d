@@ -34,9 +34,13 @@ pub(crate) fn terrain_source(bindless: bool) -> Result<String> {
             "    out.concordia_metallic = metallic;"
         ),
     )?;
+    // The terrain shader's shadow height after the TERRA-DETERMINATA rewrite
+    // (the determinism barrier and the domain-relative form). The contract
+    // names the *current* spelling; the replacement is CONCORDIA's own,
+    // domain-centred and range-scaled shadow height.
     source = replace_once(
         source,
-        "let shadow_z = h_curved * h_exag;",
+        "let shadow_z = det_barrier((h_curved - 0.5) * h_range) * h_exag;",
         "let shadow_z = (h_curved - 0.5) * h_range * h_exag;",
     )?;
     source = replace_once(
