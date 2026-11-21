@@ -39,7 +39,7 @@ under the destination affine.
 | MapScene vectors and labels | Camera-projected world anchors already used outer samples. Prepared screen vectors used outer edges | World and prepared screen anchors use the outer samples as the terrain extent |
 | Subject story | Validated the stated bounds against the outer DEM sample centres | Continues to use outer sample centres from the normalized affine for its mesh and feature anchors |
 | Hybrid traced terrain and albedo | Node-centred heights and albedo with caller-supplied spacing | The registered wrapper derives spacing and the local origin from its affine. Drape and height arrays must share the same lattice. World mesh vertices use the same origin |
-| Physical-water texture | Explicit node-UV bilinear loads across first and last samples | Derived terrain maps continue to use the same node domain as the height field |
+| Physical-water texture | Heights and normals used node-UV bilinear loads while coverage used edge-normalized sampling | Registered coverage, height and normals use the same bilinear loads on the height-field nodes |
 | Landscape export | First pixel centre became vertex 0,0 | Carries source registration and identifies the exported vertices as Point, with the first vertex's world coordinates |
 | Data GeoTIFF and orthographic render output | TIFF writer emitted Area. Rendered images carried pixels alone | Data GeoTIFFs emit their actual registration. Viewer and MapScene map the outer terrain samples to viewport edges. Tracing uses the requested sensor centre and ground pixel size. All three write Area render pixels using the resulting output affine |
 
