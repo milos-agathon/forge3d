@@ -1577,7 +1577,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
           $junit = Join-Path $dir "junit.xml"
           $pytestTemp = Join-Path $dir "pytest"
-          python -m pytest tests/test_mapscene_buildings.py tests/test_mapscene_furniture.py tests/test_mapscene_render_png.py tests/test_mapscene_screen_space_settings.py -v -s --tb=short --basetemp="$pytestTemp" --junitxml="$junit" *>&1 | Tee-Object (Join-Path $dir "pytest.log")
+          python -m pytest tests/test_mapscene_buildings.py tests/test_mapscene_building_anchoring.py tests/test_mapscene_furniture.py tests/test_mapscene_render_png.py tests/test_mapscene_screen_space_settings.py -v -s --tb=short --basetemp="$pytestTemp" --junitxml="$junit" *>&1 | Tee-Object (Join-Path $dir "pytest.log")
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/assert_junit_zero_skips.py "$junit"
           exit $LASTEXITCODE
