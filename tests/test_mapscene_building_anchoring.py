@@ -118,15 +118,25 @@ def test_mesh_source_string_is_a_gltf_path():
     assert map_scene._building_gltf_path(layer) == "/data/landmark.glb"
 
 
-def test_geojson_buildings_render_with_screen_space_effects(tmp_path):
-    layer = _building_layer(tmp_path)
+@pytest.mark.parametrize("source_form", ("mapping", "string"))
+def test_geojson_buildings_render_with_screen_space_effects(tmp_path, source_form):
+    path = tmp_path / "campus.geojson"
+    path.write_text(json.dumps(_city_geojson()), encoding="utf-8")
+    if source_form == "mapping":
+        layer = f3d.MapSceneBuildingLayer.from_geojson(path)
+    else:
+        layer = f3d.MapSceneBuildingLayer(
+            layer_id="campus", source=str(path), support_level="supported",
+            metadata={"source_format": "geojson"}, features=_city_geojson()["features"],
+        )
+    assert map_scene._building_gltf_path(layer) is None
     scene = _country_scene([layer])
     assert scene.validate().status == "ok"
-    out = tmp_path / "taa.png"
+    out = tmp_path / f"taa-{source_form}.png"
     try:
         scene.render(str(out))
     except f3d.MapSceneNativeUnavailable as exc:
-        pytest.fail(f"supported GeoJSON buildings were refused under TAA: {exc}")
+        pytest.fail(f"{source_form} GeoJSON buildings were refused under TAA: {exc}")
     assert out.exists()
 
 
@@ -178,6 +188,50 @@ def test_file_backed_projected_dem_supplies_bounds_and_span(tmp_path):
     assert crs == "EPSG:32632"
     assert bounds == pytest.approx((500000.0, 5190000.0, 510000.0, 5200000.0))
     assert span == pytest.approx(10000.0)
+
+
+def test_file_backed_dem_places_a_small_footprint_at_its_grid_corner(tmp_path):
+    import rasterio
+    from rasterio.transform import from_origin
+
+    path = tmp_path / "ten_km.tif"
+    transform = from_origin(500000.0, 5200000.0, 156.25, 156.25)
+    with rasterio.open(
+        path, "w", driver="GTiff", width=64, height=64, count=1,
+        dtype="float32", crs="EPSG:32632", transform=transform,
+    ) as dataset:
+        dataset.write(np.zeros((64, 64), dtype=np.float32), 1)
+
+    bounds, crs, span = map_scene._terrain_frame(
+        f3d.TerrainSource(path=str(path), crs="EPSG:32632")
+    )
+    # A 100 m polygon in the northeast corner of the 10 km grid.
+    geojson = tmp_path / "corner.geojson"
+    geojson.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature", "id": "corner",
+            "properties": {"height": 100.0, "roof:shape": "flat"},
+            "geometry": {"type": "Polygon", "coordinates": [[
+                [509900.0, 5199900.0], [510000.0, 5199900.0],
+                [510000.0, 5200000.0], [509900.0, 5200000.0],
+                [509900.0, 5199900.0],
+            ]]},
+        }],
+    }), encoding="utf-8")
+    layer = f3d.MapSceneBuildingLayer.from_geojson(
+        geojson, metadata={"source_crs": "EPSG:32632"}
+    )
+    batches = map_scene._native_building_mesh_batches_for_layers(
+        [layer], bounds, span, crs
+    )
+    assert batches
+    positions = np.asarray(batches[0]["positions"], dtype=np.float64)
+    center = (positions[:, [0, 2]].min(axis=0) + positions[:, [0, 2]].max(axis=0)) * 0.5
+    size = np.ptp(positions[:, [0, 2]], axis=0)
+    # 100 m of a 10 km span is 0.017 scene units — not a country-wide quad.
+    assert size == pytest.approx((0.017, 0.017), abs=1.0e-3)
+    assert center == pytest.approx((0.8415, -0.8415), abs=0.02)
 
 
 def test_footprints_are_transformed_into_the_terrain_crs(tmp_path):
