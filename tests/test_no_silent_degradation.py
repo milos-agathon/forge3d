@@ -1089,8 +1089,9 @@ def test_e_former_mapscene_quarantine_has_required_physical_routing(tmp_path):
     import textwrap
 
     targets = {
-        "tests/test_mapscene_buildings.py", "tests/test_mapscene_furniture.py",
-        "tests/test_mapscene_render_png.py", "tests/test_mapscene_screen_space_settings.py",
+        "tests/test_mapscene_buildings.py", "tests/test_mapscene_building_anchoring.py",
+        "tests/test_mapscene_furniture.py", "tests/test_mapscene_render_png.py",
+        "tests/test_mapscene_screen_space_settings.py",
     }
     assert targets.isdisjoint(ci_pytest_lane.unrun_files())
     assert targets <= set(ci_pytest_lane.full_lane_files())

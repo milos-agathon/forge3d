@@ -1591,11 +1591,14 @@ def _build_mapscene_terrain_params(
     renderer_config = load_renderer_config(renderer_config_data)
     ibl = settings.get("ibl") if isinstance(settings.get("ibl"), Mapping) else {}
     sun = settings.get("sun") if isinstance(settings.get("sun"), Mapping) else {}
-    terrain_span = max(1.0, _terrain_scene_diagonal(recipe.terrain))
-    clip = (0.1, max(6000.0, terrain_span * 1.5))
+    terrain_span, clip = _terrain_render_span_and_clip(recipe)
     if statistical_domain is not None:
+        # Statistical publications gate the author's camera against this base
+        # clip; widening it by camera distance would let a clipped view pass.
         clip = (recipe.camera.near if recipe.camera.near is not None else clip[0],
                 recipe.camera.far if recipe.camera.far is not None else clip[1])
+    else:
+        clip = (clip[0], max(clip[1], float(recipe.camera.distance) * 1.2))
     preset_albedo = "mix" if preset_name else "colormap"
     preset_colormap_strength = 0.5 if preset_name else 1.0
     configured_colormap_strength = settings.get("colormap_strength")
@@ -3682,6 +3685,8 @@ def _append_roof_geometry(
     footprint: Sequence[Sequence[float]],
     wall_height: float,
     roof_type: str,
+    *,
+    metric_scaled: bool = False,
 ) -> None:
     if roof_type == "flat" or len(footprint) < 3:
         return
@@ -3691,7 +3696,10 @@ def _append_roof_geometry(
     min_z, max_z = min(zs), max(zs)
     cx = (min_x + max_x) * 0.5
     cz = (min_z + max_z) * 0.5
-    roof_h = max(0.05, wall_height * 0.25)
+    # A fixed scene-unit minimum put a 40 m gabled roof's ridge at ~589 units
+    # on the metric path. Scale it with the walls there; keep the old minimum
+    # only for synthetic scenes with no measured span.
+    roof_h = wall_height * 0.25 if metric_scaled else max(0.05, wall_height * 0.25)
     y0 = wall_height
     y1 = wall_height + roof_h
     corners = [
@@ -3734,12 +3742,143 @@ def _append_roof_geometry(
             _append_roof_triangle(positions, normals, indices, corners[3], ridge[1], corners[2])
 
 
+def _terrain_frame(terrain: "TerrainSource") -> tuple[tuple[float, ...] | None, str | None, float | None]:
+    """Resolve the terrain's bounds, CRS and metric span once.
+
+    Metadata wins when the caller supplied it; otherwise a file-backed DEM's
+    grid supplies the bounds and, for a projected CRS, the metric span. Every
+    consumer (terrain camera, clipping, building placement and height) uses
+    this one answer so they cannot disagree about units.
+    """
+    metadata = _metadata_dict(terrain.metadata)
+    raw_bounds = metadata.get("bounds")
+    bounds = (
+        tuple(float(value) for value in raw_bounds)
+        if isinstance(raw_bounds, Sequence)
+        and not isinstance(raw_bounds, (str, bytes))
+        and len(raw_bounds) == 4
+        else None
+    )
+    crs = str(metadata.get("target_crs") or metadata.get("crs") or terrain.crs or "") or None
+    raw_span = metadata.get("terrain_span")
+    try:
+        span = float(raw_span) if raw_span is not None else None
+    except (TypeError, ValueError):
+        span = None
+    if span is not None and (not math.isfinite(span) or span <= 0.0):
+        span = None
+
+    grid = _terrain_alignment_grid(terrain)
+    if grid is not None:
+        if crs is None:
+            crs = str(grid.get("crs") or "") or None
+        try:
+            from .alignment import _affine_from_metadata
+
+            transform = _affine_from_metadata(grid["transform"])
+        except Exception:
+            transform = None
+        if transform is not None:
+            width_m = float(grid["width"]) * float(transform.a)
+            height_m = float(grid["height"]) * float(transform.e)
+            if bounds is None and width_m and height_m:
+                west, north = float(transform.c), float(transform.f)
+                east, south = west + width_m, north + height_m
+                bounds = (min(west, east), min(north, south), max(west, east), max(north, south))
+            if span is None and crs is not None:
+                try:
+                    import rasterio
+
+                    raster_crs = rasterio.crs.CRS.from_user_input(crs)
+                    if raster_crs.is_projected and raster_crs.linear_units_factor[1] == 1:
+                        candidate = max(abs(width_m), abs(height_m))
+                        if math.isfinite(candidate) and candidate > 0.0:
+                            span = candidate
+                except Exception:
+                    pass
+    return bounds, crs, span
+
+
+def _terrain_render_span_and_clip(recipe: "SceneRecipe") -> tuple[float, tuple[float, float]]:
+    """The renderer's terrain span and clip, from the same frame as buildings.
+
+    A measured country span must not become 256 grid cells with a 6 km far
+    clip while the camera sits 24 km away.
+    """
+    _bounds, _crs, metric_span = _terrain_frame(recipe.terrain)
+    span = max(1.0, metric_span if metric_span is not None else _terrain_scene_diagonal(recipe.terrain))
+    return span, (0.1, max(6000.0, span * 1.5))
+
+
+def _building_terrain_scale(recipe: "SceneRecipe") -> tuple[tuple[float, ...] | None, float | None]:
+    """Backward-compatible view of the terrain frame used by building helpers."""
+    bounds, _crs, span = _terrain_frame(recipe.terrain)
+    return bounds, span
+
+
+def _building_layer_crs(layer: "BuildingLayer") -> str | None:
+    """The CRS of a layer's footprints; GeoJSON is WGS84 unless declared otherwise."""
+    metadata = _metadata_dict(layer.metadata)
+    source = layer.source if isinstance(layer.source, Mapping) else {}
+    for key in ("source_crs", "crs", "crs_epsg"):
+        value = source.get(key) or metadata.get(key)
+        if value is not None and str(value) != "":
+            return str(value)
+    fmt = str(source.get("source_format") or metadata.get("source_format") or "").lower()
+    # GeoJSON is WGS84 by contract. A fixture with no declared format has
+    # coordinates in the scene's own units, not degrees — do not project them.
+    if fmt == "geojson":
+        return "EPSG:4326"
+    return None
+
+
+def _building_points_in_terrain_crs(
+    points: Sequence[Sequence[Any]], source_crs: str | None, terrain_crs: str | None,
+    layer_id: str,
+) -> list[tuple[float, float]]:
+    out = [(float(point[0]), float(point[1])) for point in points]
+    if source_crs is None or terrain_crs is None or source_crs == terrain_crs:
+        return out
+    try:
+        from pyproj import Transformer
+
+        transform = Transformer.from_crs(source_crs, terrain_crs, always_xy=True)
+        return [tuple(transform.transform(x, y)) for x, y in out]  # type: ignore[misc]
+    except Exception as error:
+        raise MapSceneNativeUnavailable(
+            diagnostic_block(
+                layer=layer_id,
+                reason=f"cannot transform building footprints from {source_crs} to {terrain_crs}: {error}",
+                required_native="pyproj CRS transform",
+            )
+        ) from error
+
+
 def _native_building_mesh_batches_for_layers(
     layers: Sequence["BuildingLayer"],
+    terrain_bounds: Sequence[float] | None = None,
+    metric_span: float | None = None,
+    terrain_crs: str | None = None,
 ) -> list[dict[str, Any]] | None:
-    bounds = _building_scene_bounds(layers)
+    # Prefer the terrain's own bounds: normalizing a city footprint by its
+    # own bbox stretches it over an entire country DEM (measured: 0 changed
+    # pixels). The layer bbox remains the fallback for synthetic scenes.
+    bounds = (
+        tuple(float(value) for value in terrain_bounds)
+        if terrain_bounds is not None and len(terrain_bounds) == 4
+        else _building_scene_bounds(layers)
+    )
     if bounds is None:
         return None
+    # Height is given in metres; `metric_span` is the terrain's measured long
+    # side in metres. Bounds may be degrees, so they cannot set the height
+    # scale — only the placement. Without a measured span, fall back to the
+    # old city-scale rule rather than inventing one.
+    units_per_extent = (
+        1.7 / float(metric_span)
+        if metric_span is not None and float(metric_span) > 0.0
+        else 1.0 / 45.0
+    )
     try:
         import numpy as np
         from .geometry import extrude_polygon
@@ -3757,8 +3896,16 @@ def _native_building_mesh_batches_for_layers(
                 properties = feature["properties"]  # type: ignore[assignment]
             fill = _render_building_fill_color(properties)
             color = (fill[0] / 255.0, fill[1] / 255.0, fill[2] / 255.0, fill[3] / 255.0)
-            wall_height = max(0.08, min(1.4, _render_building_height(properties) / 45.0))
+            height_metres = _render_building_height(properties) * units_per_extent
+            # Synthetic scenes have no measured span: keep the old city-scale
+            # minimum so a 2 m building does not collapse to 0.044 units.
+            wall_height = (
+                min(1.4, max(1e-5, height_metres))
+                if metric_span is not None
+                else max(0.08, min(1.4, height_metres))
+            )
             roof_type = _render_building_roof_type(properties)
+            source_crs = _building_layer_crs(layer)
             feature_id = str(
                 feature.get("id")
                 or properties.get("id")
@@ -3771,7 +3918,10 @@ def _native_building_mesh_batches_for_layers(
             for ring in _render_building_rings(geometry):
                 if len(ring) < 3:
                     continue
-                footprint = [_building_point_to_scene(point, bounds) for point in ring]
+                in_terrain_crs = _building_points_in_terrain_crs(
+                    ring, source_crs, terrain_crs, str(layer.layer_id)
+                )
+                footprint = [_building_point_to_scene(point, bounds) for point in in_terrain_crs]
                 if len(footprint) >= 2 and footprint[0] == footprint[-1]:
                     footprint = footprint[:-1]
                 if len(footprint) < 3:
@@ -3788,7 +3938,10 @@ def _native_building_mesh_batches_for_layers(
                     normals[:, 1] = 1.0
                 all_normals.extend(normals.tolist())
                 all_indices.extend((np.asarray(mesh.indices, dtype=np.uint32).reshape(-1, 3) + offset).astype(int).tolist())
-                _append_roof_geometry(all_positions, all_normals, all_indices, footprint, wall_height, roof_type)
+                _append_roof_geometry(
+                    all_positions, all_normals, all_indices, footprint, wall_height, roof_type,
+                    metric_scaled=metric_span is not None,
+                )
             if all_positions and all_indices:
                 batches.append(
                     {
@@ -3812,7 +3965,14 @@ def _terrain_scatter_building_batches_for_recipe(
     building_layers = [layer for layer in recipe.layers if isinstance(layer, BuildingLayer)]
     if not building_layers:
         return None
-    batches = _native_building_mesh_batches_for_layers(building_layers)
+    terrain_bounds, terrain_crs, metric_span = _terrain_frame(recipe.terrain)
+    if terrain_bounds is None and metric_span is None:
+        # A synthetic DEM has a CRS label but no geospatial frame; its
+        # footprint coordinates are already scene units, not degrees.
+        terrain_crs = None
+    batches = _native_building_mesh_batches_for_layers(
+        building_layers, terrain_bounds, metric_span, terrain_crs,
+    )
     if not batches:
         return None
 
@@ -3989,7 +4149,14 @@ def _composite_native_building_layers(base: Any, recipe: "SceneRecipe") -> tuple
     scene_cls = _native_scene_class()
     if scene_cls is None:
         return base, False, {}
-    batches = _native_building_mesh_batches_for_layers(building_layers)
+    terrain_bounds, terrain_crs, metric_span = _terrain_frame(recipe.terrain)
+    if terrain_bounds is None and metric_span is None:
+        # A synthetic DEM has a CRS label but no geospatial frame; its
+        # footprint coordinates are already scene units, not degrees.
+        terrain_crs = None
+    batches = _native_building_mesh_batches_for_layers(
+        building_layers, terrain_bounds, metric_span, terrain_crs,
+    )
     if not batches:
         return base, False, {}
 
@@ -4079,17 +4246,28 @@ def _building_textured_material_intents(layer: "BuildingLayer") -> list[dict[str
 
 
 def _building_gltf_path(layer: "BuildingLayer") -> str | None:
+    """World geometry only — a footprint file is not a glTF, in either source form."""
     metadata = _metadata_dict(layer.metadata)
     for key in ("gltf_path", "glb_path", "asset_path"):
         value = metadata.get(key)
         if value:
             return str(value)
+
+    source_format = str(metadata.get("source_format", "")).lower()
     if isinstance(layer.source, Mapping):
         value = layer.source.get("path") or layer.source.get("gltf_path") or layer.source.get("glb_path")
-        return str(value) if value else None
-    if layer.source is not None:
-        return str(layer.source)
-    return None
+        source_format = str(layer.source.get("source_format", source_format)).lower()
+    elif layer.source is not None:
+        value = str(layer.source)
+    else:
+        value = None
+    if not value:
+        return None
+    if source_format and source_format not in {"mesh", "gltf", "glb"}:
+        return None
+    if source_format in {"mesh", "gltf", "glb"}:
+        return str(value)
+    return str(value) if str(value).lower().endswith((".gltf", ".glb")) else None
 
 
 def _screen_rect_pixels(rect: Sequence[float] | None, *, width: int, height: int) -> tuple[int, int, int, int]:
@@ -4360,6 +4538,11 @@ def _render_native_offscreen_result(
                 reason = "tile geometry has no shared material/velocity stream or representative depth in the terrain camera convention"
             elif isinstance(layer, BuildingLayer) and _building_gltf_path(layer) and not is_cartographic_landmark(layer):
                 reason = "world-space textured geometry has no shared UV/material/velocity outputs"
+            elif isinstance(layer, BuildingLayer) and _building_textured_material_intents(layer) and not is_cartographic_landmark(layer):
+                # A requested texture is a material intent, not a file
+                # extension. The native scatter pass has no UV stream for it,
+                # so say so instead of drawing a pixel-identical scalar mesh.
+                reason = "textured building material has no shared UV/material/velocity outputs"
             if reason:
                 incompatible.append(diagnostic_block(layer=_layer_id(layer, "layer"),
                     reason=reason, required_native="CONCORDIA layer participation"))
