@@ -156,23 +156,23 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "4c64e0f50779",
-    "version": "1.47.1",
+    "git_sha": "569c5a85d9cd",
+    "version": "1.52.0",
     "wgsl_module_hashes": {
       "ibl.precompute.shader.brdf": "1ae542caaac04a941c211ec924c0072a3110cbff03aff23e140ea9305ba8dc75",
       "ibl.precompute.shader.equirect": "c77440fdaca6bb421e6775d86cb0be2f7cb3638e103de07121027e338c2a9772",
       "ibl.precompute.shader.prefilter": "7e705dff6742aa1a9ad760a42561d01d66899e27408043c0e62f8c907f9d1694",
       "line_aa.wgsl": "0ebdc403a1ef64bff361ef867fc6ccdf71b3f5367d5a59b7c3c888eb74fde085",
       "polygon_fill.wgsl": "75693f644f709f14a914b3d0acec9d5c0b5668365363a1eafe08aecd15c75c5a",
-      "terrain.shadow_depth.shader": "228860457ad33e87fa6b6523a947453b1bdd65f09e6795746556b2cae94fc5b3",
-      "terrain_pbr_pom.shader": "2b3204277949a1d6323e4b2c16adb1b2f7830bcf4a3b20914aebef174d3cab5e",
+      "terrain.shadow_depth.shader": "a64a0899cf40592f95068b62ffbd40212d8f8440d11ef6a3aa1c8682ea943eed",
+      "terrain_pbr_pom.shader": "c34d14e791dc0cc2b8431e33613f53462e2fdd77ebd7d3e3f67e63728620f3f2",
       "vf.Vector.OIT.Compose": "934b46d4b65e4911a49ba0b29b6c2deea2662d8eac1db0cab40a78677a88122d"
     }
   },
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 4.526080131530762,
+      "gpu_ms": 3.234816074371338,
       "label": "terrain.shadow"
     },
     {
@@ -182,22 +182,22 @@
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.height_ao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.sun_visibility"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.sky"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.09932799637317657,
+      "gpu_ms": 0.43007999658584595,
       "label": "terrain.main"
     },
     {
@@ -207,17 +207,17 @@
     },
     {
       "draw_calls": 4,
-      "gpu_ms": 0.004095999989658594,
+      "gpu_ms": 0.011264000087976456,
       "label": "vector.polygon_fill"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.01024,
+      "gpu_ms": 0.022528,
       "label": "vector.oit"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.002048,
+      "gpu_ms": 0.00512,
       "label": "vector.oit.compose"
     },
     {
@@ -230,7 +230,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "55aa59a28f2d190be52a434453b2e9801752a6ed78a8f5ba748be4362b8d60dd63cd79156a7e994e52485ef69716ab0469ea1c7ba7e997fc678cec8803589a0c",
+    "sig": "cb900cbe441b43fc8b2635631c45f4b4b20a7fcabd44c80f1fc10c9ec9869505b36b91ef46b2c04ba355d7c3f9291dcea5f649f627fb11f1296c246a8764200f",
     "signed_fields": [
       "adapter",
       "allocations",
