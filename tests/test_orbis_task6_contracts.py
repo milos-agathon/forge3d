@@ -14,6 +14,12 @@ import numpy as np
 import pytest
 
 
+def _encode_ifd(entries: list[tuple[int, int, int, int]], next_offset: int) -> bytes:
+    encoded = struct.pack("<H", len(entries))
+    encoded += b"".join(struct.pack("<HHII", *entry) for entry in entries)
+    return encoded + struct.pack("<I", next_offset)
+
+
 def _write_quadrant_cog(
     path: Path,
     *,
@@ -109,17 +115,12 @@ def _write_quadrant_cog(
     first_ifd_size = 2 + 12 * len(common_full) + 4
     second_ifd_offset = first_ifd_offset + first_ifd_size
 
-    def ifd(entries: list[tuple[int, int, int, int]], next_offset: int) -> bytes:
-        encoded = struct.pack("<H", len(entries))
-        encoded += b"".join(struct.pack("<HHII", *entry) for entry in entries)
-        return encoded + struct.pack("<I", next_offset)
-
     path.write_bytes(
         struct.pack("<2sHI", b"II", 42, first_ifd_offset)
         + data
         + external
-        + ifd(common_full, second_ifd_offset)
-        + ifd(overview_entries, 0)
+        + _encode_ifd(common_full, second_ifd_offset)
+        + _encode_ifd(overview_entries, 0)
     )
     return path
 
@@ -220,27 +221,61 @@ def test_geographic_root_leaf_and_overview_selection(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("registration", ["Area", "Point"])
 def test_cog_tile_samples_exact_source_and_overview_centres(tmp_path, registration):
-    import rasterio
-    from affine import Affine
-    from rasterio.enums import Resampling
-
     values = np.arange(16, dtype=np.float32) + 100 * np.arange(16, dtype=np.float32)[:, None]
     for with_overview, offset, expected in ((False, (5.5, 7.5), 705), (True, (5, 7), 654.5)):
         # Global tile (2, 2, 1) has centre at (45 E, 22.5 N). The latter
         # fixture centres that node on overview sample (2, 3), an average
         # of full-resolution samples (4, 6) through (5, 7).
         path = tmp_path / f"centres-{with_overview}.tif"
-        transform = Affine.translation(45 - offset[0], 22.5 + offset[1]) * Affine.scale(1, -1)
-        with rasterio.open(path, "w", driver="GTiff", width=16, height=16, count=1,
-                           dtype=values.dtype, crs="EPSG:4326", transform=transform,
-                           tiled=True, blockxsize=16, blockysize=16) as dataset:
-            dataset.write(values, 1)
-            dataset.update_tags(AREA_OR_POINT=registration)
-            if with_overview:
-                dataset.build_overviews([2], Resampling.average)
+        overview = values.reshape(8, 2, 8, 2).mean(axis=(1, 3)) if with_overview else None
+        _write_registered_cog(path, values, overview, offset, registration)
         dataset = _native().CogDataset(path.as_uri(), cache_size_mb=1)
         np.testing.assert_array_equal(dataset.read_height_tile(2, 2, 1, 1, 1), [[expected]])
         np.testing.assert_array_equal(dataset.read_height_tile_coverage(2, 2, 1, 1, 1), [[255]])
+
+
+def _write_registered_cog(
+    path: Path,
+    values: np.ndarray,
+    overview: np.ndarray | None,
+    offset: tuple[float, float],
+    registration: str,
+) -> None:
+    """Write float tiles with explicit GeoTIFF registration and no GDAL dependency."""
+    contents = bytearray(8)
+
+    def append(payload):
+        address = len(contents)
+        contents.extend(payload)
+        return address
+
+    def tile_entries(samples):
+        height, width = samples.shape
+        tile = np.zeros((16, 16), dtype="<f4")
+        tile[:height, :width] = samples
+        data = tile.tobytes()
+        return [
+            (256, 3, 1, width), (257, 3, 1, height), (258, 3, 1, 32),
+            (259, 3, 1, 1), (262, 3, 1, 1), (277, 3, 1, 1),
+            (322, 3, 1, 16), (323, 3, 1, 16),
+            (324, 4, 1, append(data)), (325, 4, 1, len(data)), (339, 3, 1, 3),
+        ]
+
+    entries = tile_entries(values)
+    point = registration == "Point"
+    half_cell = 0.5 if point else 0.0
+    scale = append(struct.pack("<3d", 1.0, 1.0, 0.0))
+    tiepoint = append(struct.pack(
+        "<6d", 0, 0, 0, 45 - offset[0] + half_cell, 22.5 + offset[1] - half_cell, 0,
+    ))
+    keys = append(struct.pack(
+        "<16H", 1, 1, 0, 3, 1024, 0, 1, 2, 1025, 0, 1, 2 if point else 1, 2048, 0, 1, 4326,
+    ))
+    entries += [(33550, 12, 3, scale), (33922, 12, 6, tiepoint), (34735, 3, 16, keys)]
+    next_ifd = append(_encode_ifd(tile_entries(overview), 0)) if overview is not None else 0
+    first_ifd = append(_encode_ifd(entries, next_ifd))
+    struct.pack_into("<2sHI", contents, 0, b"II", 42, first_ifd)
+    path.write_bytes(contents)
 
 
 def test_projected_cog_maps_global_tile_through_source_crs(tmp_path: Path) -> None:
