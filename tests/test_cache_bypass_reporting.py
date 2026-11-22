@@ -134,6 +134,7 @@ def test_registered_terrain_reports_cache_bypass_once(monkeypatch, cache):
 
     def trace(*args, **options):
         assert options.get("cache") is None
+        warnings.warn("unrelated trace diagnostic", DeprecationWarning, stacklevel=2)
         return {}
 
     monkeypatch.setattr(path_tracing, "hybrid_render_terrain_reference", trace)
@@ -142,10 +143,13 @@ def test_registered_terrain_reports_cache_bypass_once(monkeypatch, cache):
         path_tracing.render_registered_terrain(
             np.zeros((3, 3)), grid, 3, 3, pixel_size=8, cache=cache,
         )
-    assert len(caught) == (0 if cache is None else 1)
-    if caught:
-        assert "path_tracing.render_registered_terrain" in str(caught[0].message)
-        assert "render_cache_unsupported" in str(caught[0].message)
+    bypasses = [warning for warning in caught if "cache bypassed" in str(warning.message)]
+    assert len(bypasses) == (0 if cache is None else 1), [str(item.message) for item in caught]
+    if bypasses:
+        assert bypasses[0].category is RuntimeWarning
+        assert str(bypasses[0].message) == (
+            "path_tracing.render_registered_terrain: cache bypassed (render_cache_unsupported); rendering fresh"
+        )
 
 
 @pytest.mark.parametrize("entrypoint", ["render_oit", "render_snapshot", "render_pick_map", "render_oit_and_pick"])
