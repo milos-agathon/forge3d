@@ -1166,7 +1166,10 @@ mod tests {
             .unwrap();
         assert_eq!(verify_target(target, None).unwrap().proof_status, "proven");
         let source = crate::shader_sources::terrain();
-        let safe = "let drape = textureSampleLevel(material_drape_tex, material_map_samp, drape_uv, 0.0);";
+        let safe = concat!(
+            "let drape = textureSampleLevel(material_drape_tex, material_map_samp, ",
+            "raster_texture_uv(drape_uv, textureDimensions(material_drape_tex)), 0.0);",
+        );
         assert_eq!(source.matches(safe).count(), 1);
         let source = source.replace(
             safe,
