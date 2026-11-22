@@ -20,12 +20,15 @@ pytestmark = [
 
 
 def _reference_vertices(config, heights):
-    """Independent bilinear samples, rounded at the renderer's f32 boundary."""
+    """Bilinear samples on the implicit unit grid, whose centres are half-integers."""
     rows = [v.to_array() for v in config.vertices]
     height, width = heights.shape
     for row in rows:
-        u = np.float32(np.clip(row[0] / width, 0, 1)) * np.float32(width - 1)
-        v = np.float32(np.clip(row[2] / height, 0, 1)) * np.float32(height - 1)
+        # Round normalized world coordinates where the renderer narrows to f32.
+        u = np.float32(np.clip(row[0] / width, 0, 1)) * np.float32(width)
+        v = np.float32(np.clip(row[2] / height, 0, 1)) * np.float32(height)
+        u = np.clip(u - np.float32(0.5), np.float32(0), np.float32(width - 1))
+        v = np.clip(v - np.float32(0.5), np.float32(0), np.float32(height - 1))
         x0, y0 = int(np.floor(u)), int(np.floor(v))
         x1, y1 = min(x0 + 1, width - 1), min(y0 + 1, height - 1)
         fx, fy = u - np.float32(x0), v - np.float32(y0)

@@ -70,3 +70,9 @@ MapScene validates GeoTIFF eligibility before rendering. Its orthographic
 terrain grid must already be in the requested CRS, and the GeoTIFF beauty
 uses 8-bit RGBA. At sizes below the native render viewport, beauty and AOVs
 are sampled at the published pixel centres.
+
+## Golden changes for #84
+
+| Golden | Measured shift and stage | Render comparison |
+| --- | --- | --- |
+| `orbis_rainier_ground.nvidia-vulkan.png` | The streamed COG reader places height samples half a source cell east and south of their previous positions. That is 5.42 m east and 7.90 m south at Mount Rainier. | The previous RTX 3070/Vulkan render matched the old golden exactly. The corrected render differs at 23,891 of 49,152 pixels, with SSIM 0.992876 and mean absolute RGB difference 0.407 on a 255-point scale. [Physical GPU evidence](https://github.com/milos-agathon/forge3d/actions/runs/45013111915/job/137182773469) |
