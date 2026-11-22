@@ -10,9 +10,19 @@ fallback, and a pixel check that was an xfail. Every one is a gate here.
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
+from _terrain_runtime import terrain_rendering_available  # noqa: E402
+
+engine_required = pytest.mark.skipif(
+    not terrain_rendering_available(),
+    reason="no terrain-safe GPU for the engine's render path",
+)
 
 import forge3d as f3d
 from forge3d import map_scene
@@ -313,7 +323,10 @@ def test_country_scale_buildings_move_real_pixels(tmp_path):
     scene.render(str(out_without))
     without = np.asarray(Image.open(out_without).convert("RGB"), dtype=np.int32)
 
-    assert float(without.std()) > 5.0, "the terrain itself was not visible in this frame"
+    # Channel spread passes on a flat RGB background; spatial variation does not.
+    assert float(without[..., 0].astype(np.float64).std()) > 5.0, (
+        "the terrain itself was not visible in this frame"
+    )
 
     scene = _country_scene([layer])
     out_with = tmp_path / "with.png"
@@ -324,7 +337,136 @@ def test_country_scale_buildings_move_real_pixels(tmp_path):
     ys, xs = np.nonzero(diff > 8)
     assert xs.size > 0, "the anchored building still moves no pixels"
     height, width = diff.shape
-    # The campus is near the frame centre; far-edge changes would mean the
-    # footprint was stretched across the DEM again.
-    assert 0.15 * width < float(xs.mean()) < 0.85 * width
-    assert 0.15 * height < float(ys.mean()) < 0.85 * height
+    # The campus projects to x=71..73, y=54..57 on this fixture. A full-frame
+    # change whose mean sits near the centre must not satisfy the gate.
+    assert 65 <= int(xs.min()) and int(xs.max()) <= 80, (xs.min(), xs.max())
+    assert 48 <= int(ys.min()) and int(ys.max()) <= 64, (ys.min(), ys.max())
+
+
+# --- Milos's second review ---------------------------------------------------
+
+def test_spacing_metadata_and_projected_feet_are_metres_for_both_consumers(tmp_path):
+    import rasterio
+    from rasterio.transform import from_origin
+
+    # In-memory DEM: only bounds + 100 m spacing, no explicit span/grid.
+    scene = _country_scene([])
+    terrain = f3d.TerrainSource(
+        data=np.zeros((64, 64), np.float32), crs="EPSG:32632",
+        metadata={"width": 64, "height": 64, "bounds": [500000, 5200000, 510000, 5200000],
+                  "resolution": (156.25, 156.25)},
+    )
+    assert map_scene._terrain_frame(terrain)[2] == pytest.approx(10000.0)
+
+    # File-backed grid in US survey feet: 10,000 ft is ~3,048 m, not 1 unit.
+    path = tmp_path / "feet.tif"
+    with rasterio.open(
+        path, "w", driver="GTiff", width=64, height=64, count=1,
+        dtype="float32", crs="EPSG:2263",
+        transform=from_origin(1000000.0, 200000.0, 156.25, 156.25),
+    ) as dataset:
+        dataset.write(np.zeros((64, 64), np.float32), 1)
+    feet = map_scene._terrain_frame(f3d.TerrainSource(path=str(path), crs="EPSG:2263"))
+    assert feet[2] == pytest.approx(10000.0 * 1200 / 3937, rel=0.01)
+
+
+def test_preset_camera_uses_metric_span_and_far_clip_includes_relief(tmp_path):
+    scene = _country_scene([])
+    terrain = f3d.TerrainSource(
+        data=np.zeros((256, 256), np.float32), crs="EPSG:4326",
+        metadata={"width": 256, "height": 256, "bounds": BOUNDS,
+                  "resolution": [(BOUNDS[2] - BOUNDS[0]) / 256, (BOUNDS[3] - BOUNDS[1]) / 256],
+                  "terrain_span": METRIC_SPAN},
+    )
+    current = scene.recipe.camera
+    preset = map_scene._camera_from_preset(current, terrain, {"radius_scale": 2.4})
+    assert preset.distance == pytest.approx(METRIC_SPAN * 2.4, rel=1e-3)
+
+    relief_scene = _country_scene([])
+    params = map_scene._build_mapscene_terrain_params(
+        relief_scene.recipe, relief_scene.recipe.terrain.data, (128, 128), projection_only=True
+    )
+    relief = float(relief_scene.recipe.terrain.data.max()) - float(relief_scene.recipe.terrain.data.min())
+    assert params.clip[1] >= 24000.0 * 1.2 + relief - 1.0
+
+
+@engine_required
+def test_plain_string_geojson_renders_on_projected_terrain(tmp_path):
+    from pyproj import Transformer
+
+    tr = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+    west, south = tr.transform(BOUNDS[0], BOUNDS[1])
+    east, north = tr.transform(BOUNDS[2], BOUNDS[3])
+    path = tmp_path / "campus.geojson"
+    path.write_text(json.dumps(_city_geojson()), encoding="utf-8")
+    layer = f3d.MapSceneBuildingLayer(
+        layer_id="campus", source=str(path), support_level="supported",
+        features=_city_geojson()["features"],
+    )
+    assert map_scene._building_gltf_path(layer) is None
+    assert map_scene._building_layer_crs(layer) == "EPSG:4326"
+    scene = f3d.MapScene(
+        terrain=f3d.TerrainSource(
+            data=np.random.default_rng(3).integers(200, 3800, size=(256, 256)).astype(np.float32),
+            crs="EPSG:3857", metadata={"width": 256, "height": 256,
+                                       "bounds": [west, south, east, north],
+                                       "terrain_span": METRIC_SPAN},
+        ),
+        camera=f3d.OrbitCamera(target=(0.0, 0.0, 0.0), distance=24000.0,
+                               azimuth_deg=90.0, elevation_deg=45.0, fov_deg=45.0),
+        lighting=f3d.LightingPreset(name="studio-daylight",
+                                    settings={"screen_space": {"enabled": True, "taa_enabled": True}}),
+        output=f3d.OutputSpec(128, 128, format="png"), layers=[layer],
+    )
+    assert scene.validate().status == "ok"
+    scene.render(str(tmp_path / "plain-string.png"))
+    assert (tmp_path / "plain-string.png").exists()
+
+
+def test_nonfinite_crs_transform_returns_a_layer_diagnostic():
+    from pyproj import Transformer
+
+    points = [(100.0, 0.0)]
+    with pytest.raises(f3d.MapSceneNativeUnavailable) as exc:
+        map_scene._building_points_in_terrain_crs(
+            points, "+proj=longlat +datum=WGS84",
+            "+proj=ortho +lat_0=0 +lon_0=0 +datum=WGS84", "campus",
+        )
+    assert "nonfinite" in str(exc.value)
+
+
+def test_rotated_affine_uses_both_axes_and_inverse_placement(tmp_path):
+    import rasterio
+    from affine import Affine
+
+    path = tmp_path / "rotated.tif"
+    transform = Affine.translation(500000.0, 5200000.0) @ Affine.rotation(30) @ Affine.scale(156.25, -156.25)
+    with rasterio.open(
+        path, "w", driver="GTiff", width=64, height=64, count=1,
+        dtype="float32", crs="EPSG:32632", transform=transform,
+    ) as dataset:
+        dataset.write(np.zeros((64, 64), np.float32), 1)
+
+    bounds, crs, span, affine, shape = map_scene._terrain_grid_frame(
+        f3d.TerrainSource(path=str(path), crs="EPSG:32632")
+    )
+    assert shape == (64, 64)
+    assert span == pytest.approx(10000.0, rel=1e-3)
+    expected_point = transform @ (19.2, 19.2)  # 30% into both axes
+    placed = map_scene._building_point_to_scene(expected_point, bounds, affine, shape)
+    assert placed == pytest.approx((0.3 * 1.7 - 0.85, 0.3 * 1.7 - 0.85), abs=1e-3)
+
+
+def test_metric_height_is_not_clamped_but_synthetic_is(tmp_path):
+    path = tmp_path / "tower.geojson"
+    path.write_text(json.dumps(_city_geojson(height=120.0)), encoding="utf-8")
+    layer = f3d.MapSceneBuildingLayer.from_geojson(path)
+    metric = map_scene._native_building_mesh_batches_for_layers(
+        [layer], BOUNDS, 100.0, "EPSG:4326"
+    )
+    small_path = tmp_path / "small.geojson"
+    small_path.write_text(json.dumps(_city_geojson(height=2.0)), encoding="utf-8")
+    small = f3d.MapSceneBuildingLayer.from_geojson(small_path)
+    synthetic = map_scene._native_building_mesh_batches_for_layers([small])
+    assert metric[0]["wall_height"] == pytest.approx(2.04, rel=1e-3)
+    assert synthetic[0]["wall_height"] == pytest.approx(0.08)
