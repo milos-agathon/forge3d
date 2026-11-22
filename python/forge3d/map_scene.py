@@ -1767,10 +1767,22 @@ def _build_mapscene_terrain_params(
         clip = (recipe.camera.near if recipe.camera.near is not None else clip[0],
                 recipe.camera.far if recipe.camera.far is not None else clip[1])
     else:
-        # The far plane must clear the camera orbit AND the terrain's relief;
-        # without the relief term the far side of a tall DEM reads as sky.
-        relief = max(0.0, float(domain[1]) - float(domain[0])) * float(settings.get("exaggeration") or 1.0)
-        clip = (clip[0], max(clip[1], float(recipe.camera.distance) * 1.2) + relief)
+        # The far plane must clear the camera orbit and the *exaggerated*
+        # elevation range above the aim, not just the colour domain.
+        import numpy as np
+
+        heights = np.asarray(heightmap, dtype=np.float64)
+        finite = heights[np.isfinite(heights)]
+        if finite.size:
+            vertical = max(abs(float(finite.min())), abs(float(finite.max()))) * float(
+                settings.get("exaggeration") or 1.0
+            )
+        else:
+            vertical = 0.0
+        clip = (
+            clip[0],
+            max(clip[1], float(recipe.camera.distance) * 1.2 + vertical + 0.5 * terrain_span),
+        )
     preset_albedo = "mix" if preset_name else "colormap"
     preset_colormap_strength = 0.5 if preset_name else 1.0
     configured_colormap_strength = settings.get("colormap_strength")
@@ -3948,7 +3960,7 @@ def _building_point_to_scene(
 ) -> tuple[float, float]:
     if transform is not None and shape is not None:
         # The inverse affine gives raster row/column even for a rotated grid.
-        column, row = ~transform @ (float(point[0]), float(point[1]))
+        column, row = ~transform * (float(point[0]), float(point[1]))
         u = column / max(float(shape[0]), 1.0e-9)
         v = row / max(float(shape[1]), 1.0e-9)
         return (u * 1.7 - 0.85, v * 1.7 - 0.85)
@@ -4080,6 +4092,12 @@ def _terrain_grid_frame(
 
     width = float(metadata.get("width") or metadata.get("cols") or 1.0)
     height = float(metadata.get("height") or metadata.get("rows") or 1.0)
+    array_shape = getattr(terrain.data, "shape", None)
+    if array_shape is not None and len(array_shape) >= 2:
+        if not metadata.get("width") and not metadata.get("cols"):
+            width = float(array_shape[1])
+        if not metadata.get("height") and not metadata.get("rows"):
+            height = float(array_shape[0])
     transform = None
     shape: tuple[int, int] | None = None
     grid = _terrain_alignment_grid(terrain)
@@ -4096,12 +4114,13 @@ def _terrain_grid_frame(
             transform = None
 
     if transform is not None:
-        span_x = width * math.hypot(float(transform.a), float(transform.b))
-        span_y = height * math.hypot(float(transform.d), float(transform.e))
+        # Affine columns are (a, d) and rows are (b, e).
+        span_x = width * math.hypot(float(transform.a), float(transform.d))
+        span_y = height * math.hypot(float(transform.b), float(transform.e))
         if bounds is None:
             corners = [
-                transform @ (0.0, 0.0), transform @ (width, 0.0),
-                transform @ (0.0, height), transform @ (width, height),
+                transform * (0.0, 0.0), transform * (width, 0.0),
+                transform * (0.0, height), transform * (width, height),
             ]
             bounds = (
                 min(point[0] for point in corners), min(point[1] for point in corners),
@@ -4124,8 +4143,8 @@ def _terrain_grid_frame(
 
                 geod = Geod(ellps="WGS84")
                 west, south, east, north = bounds
-                span_x, _, _ = geod.inv(west, south, east, south)
-                span_y, _, _ = geod.inv(west, south, west, north)
+                _, _, span_x = geod.inv(west, south, east, south)
+                _, _, span_y = geod.inv(west, south, west, north)
                 span = max(span_x, span_y)
         except Exception:
             pass
@@ -4166,10 +4185,9 @@ def _building_layer_crs(layer: "BuildingLayer") -> str | None:
         if value is not None and str(value) != "":
             return str(value)
     fmt = str(source.get("source_format") or metadata.get("source_format") or "").lower()
-    # GeoJSON is WGS84 by contract — including a plain path string, where no
-    # source_format is declared. Synthetic fixtures with no such path stay
-    # in scene units.
-    plain_path = layer.source if isinstance(layer.source, str) else ""
+    # GeoJSON is WGS84 by contract — both public forms: source=path and
+    # source={"path": path}. No source_format is required.
+    plain_path = layer.source if isinstance(layer.source, str) else str(source.get("path") or "")
     if fmt == "geojson" or plain_path.lower().endswith((".geojson", ".json")):
         return "EPSG:4326"
     return None

@@ -339,8 +339,7 @@ def test_country_scale_buildings_move_real_pixels(tmp_path):
     height, width = diff.shape
     # The campus projects to x=71..73, y=54..57 on this fixture. A full-frame
     # change whose mean sits near the centre must not satisfy the gate.
-    assert 65 <= int(xs.min()) and int(xs.max()) <= 80, (xs.min(), xs.max())
-    assert 48 <= int(ys.min()) and int(ys.max()) <= 64, (ys.min(), ys.max())
+    _assert_changed_inside_projected_campus(diff)
 
 
 # --- Milos's second review ---------------------------------------------------
@@ -440,7 +439,7 @@ def test_rotated_affine_uses_both_axes_and_inverse_placement(tmp_path):
     from affine import Affine
 
     path = tmp_path / "rotated.tif"
-    transform = Affine.translation(500000.0, 5200000.0) @ Affine.rotation(30) @ Affine.scale(156.25, -156.25)
+    transform = Affine.translation(500000.0, 5200000.0) * Affine.rotation(30) * Affine.scale(156.25, -156.25)
     with rasterio.open(
         path, "w", driver="GTiff", width=64, height=64, count=1,
         dtype="float32", crs="EPSG:32632", transform=transform,
@@ -452,7 +451,7 @@ def test_rotated_affine_uses_both_axes_and_inverse_placement(tmp_path):
     )
     assert shape == (64, 64)
     assert span == pytest.approx(10000.0, rel=1e-3)
-    expected_point = transform @ (19.2, 19.2)  # 30% into both axes
+    expected_point = transform * (19.2, 19.2)  # 30% into both axes
     placed = map_scene._building_point_to_scene(expected_point, bounds, affine, shape)
     assert placed == pytest.approx((0.3 * 1.7 - 0.85, 0.3 * 1.7 - 0.85), abs=1e-3)
 
@@ -470,3 +469,122 @@ def test_metric_height_is_not_clamped_but_synthetic_is(tmp_path):
     synthetic = map_scene._native_building_mesh_batches_for_layers([small])
     assert metric[0]["wall_height"] == pytest.approx(2.04, rel=1e-3)
     assert synthetic[0]["wall_height"] == pytest.approx(0.08)
+
+
+# --- Milos's third review ----------------------------------------------------
+
+def test_span_uses_data_shape_and_geodesic_distance():
+    # Degree bounds with no explicit span: Geod.inv's third value is distance.
+    terrain = f3d.TerrainSource(
+        data=np.zeros((100, 100), np.float32), crs="EPSG:4326",
+        metadata={"bounds": BOUNDS, "resolution": (0.0009, 0.0008)},
+    )
+    span = map_scene._terrain_frame(terrain)[2]
+    assert 20_000.0 < span < 25_000.0, span
+
+    # Width/height absent: the array shape supplies the grid dimensions.
+    metres = f3d.TerrainSource(
+        data=np.zeros((100, 100), np.float32), crs="EPSG:32632",
+        metadata={"bounds": (500000, 5200000, 510000, 5201000),
+                  "resolution": (100.0, 100.0)},
+    )
+    assert map_scene._terrain_frame(metres)[2] == pytest.approx(10000.0)
+
+
+def test_unequal_pixel_affine_span(tmp_path):
+    import rasterio
+    from affine import Affine
+
+    path = tmp_path / "rect.tif"
+    transform = Affine.translation(500000.0, 5200000.0) * Affine.rotation(30) * Affine.scale(100.0, -25.0)
+    with rasterio.open(
+        path, "w", driver="GTiff", width=100, height=40, count=1,
+        dtype="float32", crs="EPSG:32632", transform=transform,
+    ) as dataset:
+        dataset.write(np.zeros((40, 100), np.float32), 1)
+    span = map_scene._terrain_frame(f3d.TerrainSource(path=str(path), crs="EPSG:32632"))[2]
+    assert span == pytest.approx(10000.0, rel=1e-3)
+
+
+def test_far_clip_covers_exaggerated_elevation():
+    scene = _country_scene([])
+    settings = dict(scene.recipe.lighting.settings or {})
+    settings["exaggeration"] = 4.0
+    scene.recipe.lighting.settings = settings
+    params = map_scene._build_mapscene_terrain_params(
+        scene.recipe, scene.recipe.terrain.data, (128, 128), projection_only=True
+    )
+    high = float(scene.recipe.terrain.data.max())
+    assert params.clip[1] >= 24000.0 * 1.2 + high * 4.0 + 0.5 * METRIC_SPAN - 1.0
+
+
+@engine_required
+def test_mapping_path_without_format_renders_on_projected_terrain(tmp_path):
+    from pyproj import Transformer
+
+    tr = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+    west, south = tr.transform(BOUNDS[0], BOUNDS[1])
+    east, north = tr.transform(BOUNDS[2], BOUNDS[3])
+    path = tmp_path / "campus.geojson"
+    path.write_text(json.dumps(_city_geojson()), encoding="utf-8")
+    layer = f3d.MapSceneBuildingLayer(
+        layer_id="campus", source={"path": str(path)}, support_level="supported",
+    )
+    assert map_scene._building_layer_crs(layer) == "EPSG:4326"
+    scene = f3d.MapScene(
+        terrain=f3d.TerrainSource(
+            data=np.random.default_rng(3).integers(200, 3800, size=(256, 256)).astype(np.float32),
+            crs="EPSG:3857", metadata={"width": 256, "height": 256,
+                                       "bounds": [west, south, east, north],
+                                       "terrain_span": METRIC_SPAN},
+        ),
+        camera=f3d.OrbitCamera(target=(0.0, 0.0, 0.0), distance=24000.0,
+                               azimuth_deg=90.0, elevation_deg=45.0, fov_deg=45.0),
+        lighting=f3d.LightingPreset(name="studio-daylight",
+                                    settings={"screen_space": {"enabled": True, "taa_enabled": True}}),
+        output=f3d.OutputSpec(128, 128, format="png"), layers=[layer],
+    )
+    assert scene.validate().status == "ok"
+    try:
+        scene.render(str(tmp_path / "mapping-path.png"))
+    except f3d.MapSceneNativeUnavailable as exc:
+        pytest.fail(f"mapping path did not reach the shared pass: {exc}")
+
+
+def _assert_changed_inside_projected_campus(diff: np.ndarray) -> None:
+    ys, xs = np.nonzero(diff > 8)
+    assert xs.size > 0, "the building moved no pixels"
+    # Projected campus: x=71..73, y=54..57, with rasterization tolerance.
+    assert 68 <= int(xs.min()) and int(xs.max()) <= 76, (xs.min(), xs.max())
+    assert 51 <= int(ys.min()) and int(ys.max()) <= 60, (ys.min(), ys.max())
+
+
+def test_displaced_footprint_fails_the_pixel_gate():
+    diff = np.zeros((128, 128), dtype=np.int32)
+    # Five pixels west of the projected campus, as Milos's mutation produced.
+    for x, y in ((66, 54), (66, 55), (67, 54), (67, 55), (67, 56)):
+        diff[y, x] = 12
+    with pytest.raises(AssertionError):
+        _assert_changed_inside_projected_campus(diff)
+
+
+def test_geodesic_span_uses_distance_not_azimuth(monkeypatch):
+    class Geod:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def inv(self, *args):
+            # East-west call has equal south/north arguments; the bad code
+            # would take the azimuth 89.93 instead of the distance.
+            if args[1] == args[3]:
+                return (89.93, 180.0, 22189.44)
+            return (0.0, 0.0, 12345.0)
+
+    import pyproj
+
+    monkeypatch.setattr(pyproj, "Geod", Geod)
+    terrain = f3d.TerrainSource(
+        data=np.zeros((100, 100), np.float32), crs="EPSG:4326",
+        metadata={"bounds": BOUNDS, "resolution": (0.0009, 0.0008)},
+    )
+    assert map_scene._terrain_frame(terrain)[2] == pytest.approx(22189.44)
