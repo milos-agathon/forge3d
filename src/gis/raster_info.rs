@@ -124,7 +124,9 @@ pub(crate) fn raster_info_from_decoder<R: std::io::Read + std::io::Seek>(
         )),
     }
 
+    info.registration = crate::gis::raster_tags::read_registration(decoder)?;
     if let Some(transform) = read_transform(decoder)? {
+        let transform = info.registration.shift_origin(transform, -1.0)?;
         if transform.is_rotated_or_sheared() {
             info.warnings.push(RasterWarning::new(
                 WARNING_ROTATED_OR_SHEARED,
@@ -496,6 +498,7 @@ mod tests {
                 creation_options_explicit: false,
                 like_info: None,
                 height_system: crate::gis::types::HEIGHT_SYSTEM_UNSPECIFIED.to_string(),
+                registration: Default::default(),
             },
         )
         .expect("write test raster");
@@ -553,6 +556,7 @@ mod tests {
                 creation_options_explicit: false,
                 like_info: None,
                 height_system: crate::gis::types::HEIGHT_SYSTEM_UNSPECIFIED.to_string(),
+                registration: Default::default(),
             },
         )
         .expect("write metadata fixture");

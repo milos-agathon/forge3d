@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import numpy as np
 from PIL import Image
@@ -52,8 +53,9 @@ def test_independent_height_decode_and_quantization(tmp_path, flat_height):
     assert manifest["geographic"]["vertical_reference"] == "NAP"
 
 
-def test_masks_and_physical_orientation_and_spacing(tmp_path):
-    prepared = prepared_fixture(tmp_path)
+@pytest.mark.parametrize("registration", ["area", "point"])
+def test_masks_and_physical_orientation_and_spacing(tmp_path, registration):
+    prepared = prepared_fixture(tmp_path, source_grid=replace(grid(8, 8, spacing=2), registration=registration))
     root = export(prepared, tmp_path / "landscape")
     manifest = json.loads((root / "landscape.json").read_text())
     settings = manifest["import_settings"]
@@ -61,6 +63,9 @@ def test_masks_and_physical_orientation_and_spacing(tmp_path):
     assert settings["vertex_0_0_base_location_cm"][:2] == [100, 100]
     assert settings["flip_y"] is False
     assert manifest["geographic"]["local_axes"] == ["east", "south", "up"]
+    assert manifest["geographic"]["registration"] == "point"
+    assert manifest["geographic"]["source_registration"] == registration
+    assert manifest["geographic"]["vertex_origin"] == list(prepared.layers["dem"].grid.xy(0, 0))
     water = np.array(Image.open(root / "layer_Water.png"))
     land = np.array(Image.open(root / "layer_Land.png"))
     np.testing.assert_array_equal(water.astype(int) + land.astype(int), 255)

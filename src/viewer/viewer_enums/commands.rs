@@ -62,6 +62,7 @@ pub enum ViewerCmd {
     SetObservation { year: i32, month: u8, day: u8, hour: u8, minute: u8, second: f64, latitude_deg: f64, longitude_deg: f64, height_m: f64 },
     SetIbl { path: String, intensity: f32 },
     SetZScale(f32),
+    SnapshotGeoTiff { path: String, width: u32, height: u32, overwrite: bool },
     SnapshotWithSize { path: String, width: Option<u32>, height: Option<u32> },
     SetTransform { translation: Option<[f64; 3]>, rotation_quat: Option<[f32; 4]>, scale: Option<[f32; 3]> },
     LoadTerrain(String),

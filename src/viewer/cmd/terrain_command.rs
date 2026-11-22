@@ -419,7 +419,7 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
                     z_order,
                 ) {
                     Ok(id) => println!("[overlay] Loaded '{}' from {} (id={})", name, path, id),
-                    Err(e) => eprintln!("[overlay] Failed to load '{}': {}", name, e),
+                    Err(e) => viewer.reject_command(format!("failed to load raster overlay '{name}': {e}")),
                 }
             } else {
                 eprintln!(

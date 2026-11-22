@@ -275,7 +275,7 @@ pub struct VectorOverlayStack {
 mod core;
 mod pipelines;
 
-fn sample_heightmap_bilinear(heightmap: &[f32], dims: (u32, u32), u: f32, v: f32) -> f32 {
+fn sample_heightmap_bilinear(heightmap: &[f32], dims: (u32, u32), u: f32, v: f32, registered: bool) -> f32 {
     let (w, h) = dims;
     if w == 0 || h == 0 || heightmap.is_empty() {
         return 0.0;
@@ -286,8 +286,15 @@ fn sample_heightmap_bilinear(heightmap: &[f32], dims: (u32, u32), u: f32, v: f32
     let v = v.clamp(0.0, 1.0);
 
     // Convert to pixel coordinates
-    let x = u * (w - 1) as f32;
-    let y = v * (h - 1) as f32;
+    let sample_index = |uv: f32, count: u32| {
+        if registered {
+            (uv * count as f32 - 0.5).clamp(0.0, (count - 1) as f32)
+        } else {
+            uv * (count - 1) as f32
+        }
+    };
+    let x = sample_index(u, w);
+    let y = sample_index(v, h);
 
     let x0 = x.floor() as u32;
     let y0 = y.floor() as u32;
@@ -317,6 +324,7 @@ fn compute_terrain_normal(
     u: f32,
     v: f32,
     terrain_span: [f32; 2],
+    registered: bool,
 ) -> [f32; 3] {
     let (w, h) = dims;
     if w < 2 || h < 2 || heightmap.is_empty() {
@@ -326,10 +334,10 @@ fn compute_terrain_normal(
     let du = 1.0 / w as f32;
     let dv = 1.0 / h as f32;
 
-    let h_left = sample_heightmap_bilinear(heightmap, dims, u - du, v);
-    let h_right = sample_heightmap_bilinear(heightmap, dims, u + du, v);
-    let h_down = sample_heightmap_bilinear(heightmap, dims, u, v - dv);
-    let h_up = sample_heightmap_bilinear(heightmap, dims, u, v + dv);
+    let h_left = sample_heightmap_bilinear(heightmap, dims, u - du, v, registered);
+    let h_right = sample_heightmap_bilinear(heightmap, dims, u + du, v, registered);
+    let h_down = sample_heightmap_bilinear(heightmap, dims, u, v - dv, registered);
+    let h_up = sample_heightmap_bilinear(heightmap, dims, u, v + dv, registered);
 
     // Gradient in height per world unit
     let world_du = terrain_span[0] * 2.0 * du;
@@ -362,8 +370,10 @@ pub fn repack_source_vertices(
                 let u = (world.x - terrain.world_origin_xz.x) / terrain.world_span_xz.x;
                 let v = (world.z - terrain.world_origin_xz.y) / terrain.world_span_xz.y;
                 let uv = DVec3::new(u, v, 0.0).as_vec3();
-                let height =
-                    sample_heightmap_bilinear(&terrain.heightmap, terrain.dimensions, uv.x, uv.y);
+                let registered = terrain.uses_registered_grid();
+                let height = sample_heightmap_bilinear(
+                    &terrain.heightmap, terrain.dimensions, uv.x, uv.y, registered,
+                );
                 world.y +=
                     f64::from((height - terrain.domain.0) * terrain.z_scale + layer.drape_offset);
                 let span =
@@ -376,6 +386,7 @@ pub fn repack_source_vertices(
                     uv.x,
                     uv.y,
                     [span.x, span.y],
+                    registered,
                 );
             }
         }

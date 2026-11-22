@@ -272,6 +272,8 @@ def _raster_grid_from_path(path: Path, *, target_crs: str | None = None) -> dict
         return None
     if getattr(rasterio, "__forge3d_stub__", False):
         return None
+    from .raster_registration import geotiff_registration
+
     try:
         with rasterio.open(path) as src:
             if src.crs is None or src.transform is None:
@@ -284,8 +286,10 @@ def _raster_grid_from_path(path: Path, *, target_crs: str | None = None) -> dict
                 "width": int(src.width),
                 "height": int(src.height),
                 "nodata": src.nodata,
+                "registration": geotiff_registration(src),
+                "registered_raster": True,
             }
-    except Exception:
+    except (OSError, rasterio.errors.RasterioIOError):
         return None
 
 
@@ -295,8 +299,18 @@ def _terrain_alignment_grid(
     target_crs: str | None = None,
     fallback_shape: Sequence[int] | None = None,
 ) -> dict[str, Any] | None:
+    from .raster_registration import pixel_registration
+
     metadata = _metadata_dict(terrain.metadata)
-    crs = target_crs or metadata.get("target_crs") or metadata.get("crs") or terrain.crs
+    declared = (metadata.get("crs"), metadata.get("target_crs"), terrain.crs, target_crs)
+    if terrain.data is None and terrain.path:
+        path_grid = _raster_grid_from_path(Path(str(terrain.path)))
+        if path_grid is not None:
+            if "registration" in metadata and pixel_registration(metadata["registration"]) != path_grid["registration"]:
+                raise ValueError("terrain GeoTIFF registration differs from its declaration")
+            _require_terrain_grid_crs(path_grid["crs"], declared)
+            return path_grid
+    crs = metadata.get("crs") or metadata.get("target_crs") or terrain.crs
     transform = metadata.get("transform", metadata.get("geotransform"))
     width = metadata.get("width")
     height = metadata.get("height")
@@ -304,18 +318,63 @@ def _terrain_alignment_grid(
         height = int(fallback_shape[0])
         width = int(fallback_shape[1])
     if crs and transform is not None and width is not None and height is not None:
+        _require_terrain_grid_crs(crs, declared)
+        if "registration" in metadata and fallback_shape is not None and (
+            int(height), int(width)
+        ) != tuple(fallback_shape[:2]):
+            raise ValueError("terrain array dimensions differ from its registration grid")
         return {
             "crs": str(crs),
             "transform": transform,
             "width": int(width),
             "height": int(height),
             "nodata": metadata.get("nodata"),
+            "registration": pixel_registration(metadata.get("registration", "area")),
+            "registered_raster": "registration" in metadata,
         }
-    if terrain.path:
-        path_grid = _raster_grid_from_path(Path(str(terrain.path)), target_crs=target_crs or terrain.crs)
-        if path_grid is not None:
-            return path_grid
     return None
+
+
+def _require_terrain_grid_crs(crs: str, declarations: Sequence[str | None]) -> None:
+    for declared in declarations:
+        if declared and not _same_crs(crs, declared):
+            raise ValueError(
+                f"terrain grid CRS mismatch ({crs} to {declared}); align the terrain before rendering"
+            )
+
+
+def _registered_screen_grid(recipe: "SceneRecipe") -> Any | None:
+    if _mapscene_effective_camera_mode(recipe) != "screen":
+        return None
+    shape = getattr(recipe.terrain.data, "shape", None)
+    grid = _terrain_alignment_grid(
+        recipe.terrain, target_crs=recipe.target_crs or recipe.terrain.crs, fallback_shape=shape,
+    )
+    return grid if grid is not None and grid["registered_raster"] else None
+
+
+def _mapscene_output_grid(recipe: "SceneRecipe") -> Any | None:
+    grid = _registered_screen_grid(recipe)
+    if grid is None or recipe.output is None:
+        return None
+    from .alignment import _affine_from_metadata
+    from .preparation import PreparationGrid
+    from .raster_registration import sample_extent_output_grid
+
+    source = PreparationGrid(
+        grid["crs"], grid["width"], grid["height"],
+        _affine_from_metadata(grid["transform"]).to_gdal(), registration=grid["registration"],
+    )
+    return sample_extent_output_grid(source, recipe.output.width, recipe.output.height)
+
+
+def _require_mapscene_geotiff_grid(recipe: "SceneRecipe") -> Any:
+    if recipe.output.hdr or recipe.output.bit_depth != 8:
+        raise ValueError("MapScene GeoTIFF beauty uses the native 8-bit RGBA frame")
+    grid = _mapscene_output_grid(recipe)
+    if grid is None:
+        raise ValueError("not_georeferenceable: GeoTIFF requires registered orthographic screen terrain")
+    return grid
 
 
 def _resize_nearest_rgba(image: Any, target_shape: Sequence[int] | None) -> Any:
@@ -410,6 +469,7 @@ def _load_native_raster_overlay(
                 target_grid,
                 resampling=resampling,
                 dst_nodata=metadata.get("dst_nodata", metadata.get("nodata")),
+                registration_conversion=metadata.get("registration_conversion"),
             )
             samples = result["array"]
             if samples.ndim == 3:
@@ -434,12 +494,86 @@ def _thematic_source(data: Any, path: Any) -> Any:
     return gis.read_raster(path, masked=True)
 
 
-def _styled_raster_result(layer: "RasterOverlay") -> Any:
+def _styled_raster_result(
+    layer: "RasterOverlay", *, terrain_grid: Mapping[str, Any] | None = None,
+    target_registration: str | None = None,
+) -> Any:
+    from .raster_registration import geotiff_registration, pixel_registration, require_compatible_registration
     from .raster_style import BivariateRasterStyle
-    source = _thematic_source(layer.data, layer.path)
+
+    metadata = _metadata_dict(layer.metadata)
+    conversion = metadata.get("registration_conversion")
+
+    def load(data, path, declared, target):
+        if (data is None and path is not None and terrain_grid is not None
+                and _is_geotiff_path(Path(path)) and Path(path).is_file()):
+            from .alignment import _require_rasterio, resample_raster_to_grid
+
+            with _require_rasterio().open(path) as dataset:
+                stored = geotiff_registration(dataset)
+            if declared is not None and pixel_registration(declared) != stored:
+                raise ValueError("thematic raster registration differs from its declaration")
+            aligned = resample_raster_to_grid(
+                path, dict(terrain_grid, nodata=None), resampling="nearest",
+                registration_conversion=conversion,
+                dst_nodata=metadata.get("dst_nodata"),
+            )
+            return {"array": aligned["array"], "mask": aligned["validity_mask"]}, terrain_grid["registration"]
+        source = _thematic_source(data, path)
+        info = source.get("info") if isinstance(source, Mapping) else None
+        stored = info.get("registration") if isinstance(info, Mapping) else None
+        if stored is not None and declared is not None and stored != declared:
+            raise ValueError("thematic raster registration differs from its declaration")
+        registration = pixel_registration(stored if stored is not None else "area" if declared is None else declared)
+        if target is not None:
+            require_compatible_registration(registration, target, conversion)
+        if terrain_grid is not None and isinstance(info, Mapping):
+            aligned = _align_decoded_thematic(source, info, terrain_grid)
+            if aligned is not source:
+                return aligned, terrain_grid["registration"]
+        return source, registration
+
+    target = terrain_grid["registration"] if terrain_grid is not None else target_registration
+    source, source_registration = load(layer.data, layer.path, metadata.get("registration"), target)
     if isinstance(layer.style, BivariateRasterStyle):
-        return layer.style.apply(source, _thematic_source(layer.secondary_data, layer.secondary_path))
+        secondary, _ = load(
+            layer.secondary_data, layer.secondary_path, metadata.get("secondary_registration"), source_registration,
+        )
+        return layer.style.apply(source, secondary)
     return layer.style.apply(source)
+
+
+def _align_decoded_thematic(source: Mapping[str, Any], info: Mapping[str, Any],
+                            target: Mapping[str, Any]) -> Any:
+    transform = info.get("transform")
+    authority = info.get("crs_authority")
+    crs = info.get("crs_wkt")
+    if not crs and authority and authority.get("name") and authority.get("code"):
+        crs = f"{authority['name']}:{authority['code']}"
+    if transform is None and not crs:
+        return source
+    if transform is None or not crs:
+        raise ValueError("decoded thematic raster requires both CRS and affine for alignment")
+
+    import numpy as np
+    from affine import Affine
+    from rasterio.warp import Resampling, reproject
+    from .alignment import _affine_from_metadata
+    from .raster_style import _single
+
+    values = _single(source)
+    if values.shape != (info.get("height"), info.get("width")):
+        raise ValueError("decoded thematic raster dimensions differ from its grid")
+    affine = Affine(*transform)
+    if not all(np.isfinite(transform)) or affine.determinant == 0:
+        raise ValueError("decoded thematic raster requires a finite, invertible affine")
+    samples = values.astype(np.float64, copy=True)
+    samples[~np.isfinite(samples)] = np.nan
+    destination = np.full((target["height"], target["width"]), np.nan)
+    reproject(samples, destination, src_transform=affine, src_crs=crs, src_nodata=np.nan,
+              dst_transform=_affine_from_metadata(target["transform"]), dst_crs=target["crs"],
+              dst_nodata=np.nan, resampling=Resampling.nearest)
+    return destination
 
 
 def _mapscene_thematic_surface(recipe: "SceneRecipe", shape: Sequence[int]) -> Any | None:
@@ -450,7 +584,8 @@ def _mapscene_thematic_surface(recipe: "SceneRecipe", shape: Sequence[int]) -> A
     if blocks := raster_route_blocks(recipe):
         raise MapSceneNativeUnavailable(blocks)
     if styled:
-        result = _styled_raster_result(styled[0])
+        grid = _terrain_alignment_grid(recipe.terrain, fallback_shape=shape)
+        result = _styled_raster_result(styled[0], terrain_grid=grid, target_registration="area")
     elif recipe.terrain.style is not None:
         result = recipe.terrain.style.apply(_load_raw_heightmap(recipe.terrain))
     else:
@@ -576,7 +711,7 @@ def _aov_arrays_for_rgba(recipe: "SceneRecipe", rgba: Any, requested: Sequence[s
     return result
 
 
-def _resize_nearest_array(array: Any, target_shape: Sequence[int]) -> Any:
+def _resize_nearest_array(array: Any, target_shape: Sequence[int], *, pixel_centres: bool = False) -> Any:
     import numpy as np
 
     arr = np.asarray(array)
@@ -585,16 +720,22 @@ def _resize_nearest_array(array: Any, target_shape: Sequence[int]) -> Any:
     if target_h <= 0 or target_w <= 0 or arr.shape[:2] == (target_h, target_w):
         return np.ascontiguousarray(arr)
     src_h, src_w = arr.shape[:2]
-    sample_y = np.clip(np.arange(target_h) * src_h // target_h, 0, src_h - 1)
-    sample_x = np.clip(np.arange(target_w) * src_w // target_w, 0, src_w - 1)
+    def indices(source_size, target_size):
+        steps = np.arange(target_size)
+        if pixel_centres:
+            return (2 * steps + 1) * source_size // (2 * target_size)
+        return steps * source_size // target_size
+
+    sample_y = indices(src_h, target_h)
+    sample_x = indices(src_w, target_w)
     return np.ascontiguousarray(arr[sample_y[:, None], sample_x[None, :]])
 
 
-def _native_aov_array(aov_frame: Any, name: str, target_shape: Sequence[int]) -> Any:
+def _native_aov_array(aov_frame: Any, name: str, target_shape: Sequence[int], *, pixel_centres: bool = False) -> Any:
     getter = getattr(aov_frame, name, None)
     if getter is None:
         raise RuntimeError(f"Native terrain AOV frame does not expose {name!r}")
-    return _resize_nearest_array(getter(), target_shape)
+    return _resize_nearest_array(getter(), target_shape, pixel_centres=pixel_centres)
 
 
 def _write_mapscene_aovs(
@@ -619,8 +760,9 @@ def _write_mapscene_aovs(
                 "MapScene native AOV export supports only albedo, normal, and depth; "
                 f"unsupported: {', '.join(unsupported)}"
             )
+        pixel_centres = _registered_screen_grid(recipe) is not None
         arrays = {
-            name: _native_aov_array(aov_frame, name, rgba.shape[:2])
+            name: _native_aov_array(aov_frame, name, rgba.shape[:2], pixel_centres=pixel_centres)
             for name in output.aovs
         }
     written: dict[str, str] = {}
@@ -829,7 +971,7 @@ def _mapscene_unlit_albedo(recipe: "SceneRecipe") -> bool:
     return bool(_metadata_dict(recipe.lighting.settings).get("unlit_albedo"))
 
 
-def _unlit_albedo_rgba(aov_frame: Any, output: "OutputSpec") -> Any:
+def _unlit_albedo_rgba(aov_frame: Any, output: "OutputSpec", *, pixel_centres: bool = False) -> Any:
     """Encode the native linear albedo as the opaque sRGB RGBA8 frame."""
     import numpy as np
 
@@ -837,9 +979,8 @@ def _unlit_albedo_rgba(aov_frame: Any, output: "OutputSpec") -> Any:
         raise MapSceneNativeUnavailable(diagnostic_block(
             layer="terrain", reason="unlit_albedo requires the native albedo AOV",
             required_native="TerrainRenderer.render_with_aov"))
-    linear = np.asarray(aov_frame.albedo(), dtype=np.float64)[..., :3]
-    if linear.shape[:2] != (int(output.height), int(output.width)):
-        raise ValueError("Native albedo dimensions do not match the requested output")
+    linear = _native_aov_array(aov_frame, "albedo", (output.height, output.width),
+                               pixel_centres=pixel_centres)[..., :3].astype(np.float64)
     linear = np.clip(linear, 0.0, 1.0)
     srgb = np.where(linear <= 0.0031308, linear * 12.92, 1.055 * linear ** (1 / 2.4) - 0.055)
     rgba = np.full((*linear.shape[:2], 4), 255, np.uint8)
@@ -1603,6 +1744,9 @@ def _build_mapscene_terrain_params(
     configured_material_slope_bias = settings.get("material_slope_bias")
     configured_material_layer_centers = settings.get("material_layer_centers")
     camera_mode = _mapscene_effective_camera_mode(recipe)
+    grid = _terrain_alignment_grid(recipe.terrain, fallback_shape=heightmap.shape)
+    if grid is not None and grid["registered_raster"]:
+        camera_mode += ":registered-raster"
     config = make_terrain_params_config(
         size_px=render_size,
         render_scale=1.0,
@@ -1732,12 +1876,12 @@ def _mapscene_ibl_intensity(ibl: Mapping[str, Any], gi_modes: Sequence[str]) -> 
     return float(ibl.get("intensity", 1.0))
 
 
-def _frame_to_rgba(frame: Any, output: "OutputSpec") -> Any:
+def _frame_to_rgba(frame: Any, output: "OutputSpec", *, pixel_centres: bool = False) -> Any:
     import numpy as np
 
     rgba = np.asarray(frame.to_numpy())
     if rgba.shape[:2] != (int(output.height), int(output.width)):
-        rgba = _resize_nearest_rgba(rgba, (int(output.height), int(output.width)))
+        rgba = _resize_nearest_array(rgba, (output.height, output.width), pixel_centres=pixel_centres)
     if rgba.dtype != np.uint8:
         rgba = rgba.astype(np.uint8)
     return np.ascontiguousarray(rgba)
@@ -2180,9 +2324,10 @@ def _render_terrain_renderer_result_impl(
             metadata["timing_source"] = "python_perf_counter"
         if requested_effects and tuple(frame.size) != (int(output.width),int(output.height)):
             _mapscene_pipeline_block(requested_effects,"native frame dimensions would require a CPU resize")
-        rgba = _frame_to_rgba(frame, output)
+        pixel_centres = _registered_screen_grid(recipe) is not None
+        rgba = _frame_to_rgba(frame, output, pixel_centres=pixel_centres)
         if unlit_albedo:
-            rgba = _unlit_albedo_rgba(aov_frame, output)
+            rgba = _unlit_albedo_rgba(aov_frame, output, pixel_centres=pixel_centres)
             metadata["frame_color_source"] = "native_albedo_srgb"
         if requested_effects:
             readback_info = json.loads(renderer.interactive_pipeline_info())
@@ -2253,8 +2398,13 @@ def _vector_point_to_pixel(point: Sequence[Any], layer: "VectorOverlay", width: 
     column, row = ~_affine_from_metadata(grid["geotransform"]) * (float(point[0]), float(point[1]))
     # Prepared vectors keep geographic coordinates in the recipe. Only this
     # explicit display seam converts them to the shared target-grid footprint.
-    return (int(round(column / grid["width"] * (width - 1))),
-            int(round(row / grid["height"] * (height - 1))))
+    if "registration" not in grid:
+        return (int(round(column / grid["width"] * (width - 1))),
+                int(round(row / grid["height"] * (height - 1))))
+    from .raster_registration import corner_to_node_uv
+
+    u, v = corner_to_node_uv(column, row, grid["width"], grid["height"])
+    return (int(round(u * width - 0.5)), int(round(v * height - 0.5)))
 
 
 def _vector_layer_requires_precise_raster(layer: "VectorOverlay") -> bool:
@@ -6405,6 +6555,8 @@ class MapScene:
         target = path or (output.path if output is not None else None)
         if not target:
             raise ValueError("MapScene.render requires a render path or OutputSpec.path")
+        if output is not None and output.format.lower() == "geotiff":
+            _require_mapscene_geotiff_grid(self.recipe)
         if emit_provenance:
             # VERITAS: opt-in emission of the (source_map.npy, provenance.json)
             # sibling artifacts next to the rendered PNG.
@@ -6476,7 +6628,13 @@ class MapScene:
         )
         output_format = str(output.format if output is not None else "png").lower()
         bit_depth = int(output.bit_depth if output is not None else 8)
-        if output_format == "exr" or bool(output.hdr if output is not None else False):
+        output_grid = _mapscene_output_grid(self.recipe)
+        if output_format == "geotiff":
+            from .export import render_to_geotiff
+
+            render_to_geotiff({"rgba": rgba, "grid": output_grid}, target_path, overwrite=True)
+            self.last_render_path = str(target_path)
+        elif output_format == "exr" or bool(output.hdr if output is not None else False):
             hdr_path = target_path if output_format == "exr" else target_path.with_suffix(".exr")
             if hdr_frame is not None:
                 hdr_frame.save(str(hdr_path))
@@ -6539,6 +6697,8 @@ class MapScene:
             "bit_depth": bit_depth,
             "aa_seed": _mapscene_aa_seed(self.recipe),
         }
+        if output_grid is not None:
+            metadata["georeference"] = output_grid.to_dict()
         for key in ("final_p95_delta", "converged_ratio", "adaptive"):
             if key in native_metadata:
                 metadata[key] = native_metadata[key]
@@ -6656,7 +6816,7 @@ class MapScene:
                 "supported" if metadata.get("native_pipeline", {}).get("temporal_history_used",False) else "underdeveloped")
         if self.recipe.map_furniture is not None:
             report = self._report_with_feature(report, "mapscene.furniture_composite", "supported")
-        render_feature = "mapscene.render_exr" if output_format == "exr" else "mapscene.render_png"
+        render_feature = f"mapscene.render_{output_format}"
         return self._report_with_feature(report, render_feature, "supported")
 
     def _bundle_path(self, path: str | Path) -> Path:

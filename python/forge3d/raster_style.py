@@ -45,18 +45,27 @@ def _nodata(value: float | None) -> float | None:
 def _single(source: Any) -> np.ndarray:
     if isinstance(source, (str, bytes)) or hasattr(source, "__fspath__"):
         source = gis.read_raster(source, masked=True)
-    if isinstance(source, Mapping):
-        arr = np.asarray(source["array"])
-        mask = source.get("mask")
-        if mask is not None:
-            arr = arr.astype(np.float64)
-            arr[~np.asarray(mask, dtype=bool)] = np.nan
-        source = arr
-    arr = np.asarray(source)
+    decoded = source if isinstance(source, Mapping) else {}
+    arr = np.asarray(decoded["array"] if decoded else source)
     if arr.ndim == 3 and arr.shape[0] == 1:
         arr = arr[0]
     if arr.ndim != 2 or not arr.size:
         raise ValueError("shape_mismatch: thematic sources must be nonempty single-band 2D rasters")
+    mask = decoded.get("mask")
+    info = decoded.get("info")
+    nodata = info.get("nodata_per_band") if isinstance(info, Mapping) else None
+    if mask is not None or (nodata and nodata[0] is not None):
+        valid = np.ones(arr.shape, dtype=bool)
+        if mask is not None:
+            mask = np.asarray(mask, dtype=bool)
+            if mask.shape == (1, *arr.shape):
+                mask = mask[0]
+            if mask.shape != arr.shape:
+                raise ValueError("shape_mismatch: thematic raster mask must match its values")
+            valid &= mask
+        if nodata and nodata[0] is not None:
+            valid &= arr != nodata[0]
+        arr = np.where(valid, arr.astype(np.float64), np.nan)
     return arr
 
 
@@ -277,6 +286,19 @@ def raster_style_from_dict(data: Mapping[str, Any] | None):
     raise ValueError(f"invalid_argument: unknown raster style {kind!r}")
 
 
+def _raster_grid_payload(info: Mapping[str, Any]) -> dict[str, Any]:
+    from .raster_registration import pixel_registration
+
+    # The decoded raster is self-contained. Keep its grid and omit the source
+    # path. Invalid cells travel as null values in the existing numeric payload.
+    grid = {name: info[name] for name in ("width", "height", "crs_wkt", "crs_authority")
+            if info.get(name) is not None}
+    if info.get("transform") is not None:
+        grid["transform"] = list(info["transform"])
+    grid["registration"] = pixel_registration(info.get("registration", "area"))
+    return grid
+
+
 def raster_values_to_dict(data: Any) -> dict | None:
     """Encode nonfinite source cells as null holes, never JSON NaN."""
     if data is None:
@@ -287,7 +309,11 @@ def raster_values_to_dict(data: Any) -> dict | None:
     values = arr.astype(object)
     values[~np.isfinite(arr)] = None
     values[arr == 0] = 0  # canonical negative zero
-    return {"dtype": str(arr.dtype), "values": values.tolist()}
+    result = {"dtype": str(arr.dtype), "values": values.tolist()}
+    info = data.get("info") if isinstance(data, Mapping) else None
+    if isinstance(info, Mapping):
+        result["info"] = _raster_grid_payload(info)
+    return result
 
 
 def raster_values_from_dict(data: Mapping | None):
@@ -299,4 +325,7 @@ def raster_values_from_dict(data: Mapping | None):
     finite_input = np.fromiter((v is not None for v in raw.flat), dtype=bool).reshape(raw.shape)
     if np.any(~np.isfinite(values[finite_input])):
         raise ValueError("invalid_argument: nonfinite raster values must be encoded as null nodata cells")
+    info = data.get("info")
+    if info is not None:
+        return {"array": values, "info": _raster_grid_payload(info)}
     return values

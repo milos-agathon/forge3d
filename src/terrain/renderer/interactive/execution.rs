@@ -19,10 +19,14 @@ impl TerrainScene {
         // Reuse the real terrain grid under an orthographic camera. Hardware
         // raster depth then occludes buildings without a fragment-depth write.
         let screen_params;
-        let params = if params.camera_mode == "screen" {
+        let params = if without_registration(&params.camera_mode) == "screen" {
             screen_params = {
                 let mut geometry = params.clone();
-                geometry.camera_mode = SCREEN_GEOMETRY_MODE.to_owned();
+                geometry.camera_mode = if params.camera_mode.ends_with(REGISTERED_RASTER) {
+                    format!("{SCREEN_GEOMETRY_MODE}{REGISTERED_RASTER}")
+                } else {
+                    SCREEN_GEOMETRY_MODE.to_owned()
+                };
                 geometry
             };
             &screen_params

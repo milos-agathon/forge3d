@@ -83,10 +83,19 @@ impl Viewer {
         &mut self,
         frame: crate::viewer::viewer_types::FrameCamera,
     ) -> usize {
+        self.update_labels_for_viewport(frame, self.config.width, self.config.height)
+    }
+
+    pub(crate) fn update_labels_for_viewport(
+        &mut self,
+        frame: crate::viewer::viewer_types::FrameCamera,
+        width: u32,
+        height: u32,
+    ) -> usize {
         let selected_u32 = self.unified_picking.selection_manager().get_selection();
         let selected_ids: std::collections::HashSet<u64> =
             selected_u32.iter().map(|&id| u64::from(id)).collect();
-        let view_proj = frame.view_projection(self.config.width, self.config.height);
+        let view_proj = frame.view_projection(width, height);
         self.label_manager.update_with_camera_anchored(
             view_proj,
             Some(frame.render_eye()),

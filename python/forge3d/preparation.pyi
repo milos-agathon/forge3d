@@ -4,6 +4,8 @@ import numpy as np
 from .diagnostics import Diagnostic
 from .map_scene import MapScene
 
+from .raster_registration import PixelRegistration, RegistrationConversion
+
 class PreparationError(ValueError):
     diagnostic: Diagnostic
     def __init__(self, code: str, message: str, remediation: str, source_id: str | None = ...) -> None: ...
@@ -13,7 +15,8 @@ class PreparationGrid:
     width: int
     height: int
     geotransform: Sequence[float]
-    def __init__(self, crs: str, width: int, height: int, geotransform: Sequence[float]) -> None: ...
+    registration: PixelRegistration
+    def __init__(self, crs: str, width: int, height: int, geotransform: Sequence[float], registration: PixelRegistration | None = ...) -> None: ...
     @property
     def transform(self) -> Any: ...
     def to_dict(self) -> dict[str, Any]: ...
@@ -32,7 +35,8 @@ class PreparationSource:
     mask_path: str | Path | None
     resampling: str | None
     metadata: Mapping[str, Any]
-    def __init__(self, source_id: str, path: str | Path, kind: str, crs: str | None = ..., grid: PreparationGrid | None = ..., units: str | None = ..., vertical_reference: str | None = ..., nodata: float | int | None = ..., mask_path: str | Path | None = ..., resampling: str | None = ..., metadata: Mapping[str, Any] = ...) -> None: ...
+    registration_conversion: RegistrationConversion | None
+    def __init__(self, source_id: str, path: str | Path, kind: str, crs: str | None = ..., grid: PreparationGrid | None = ..., units: str | None = ..., vertical_reference: str | None = ..., nodata: float | int | None = ..., mask_path: str | Path | None = ..., resampling: str | None = ..., metadata: Mapping[str, Any] = ..., registration_conversion: RegistrationConversion | None = ...) -> None: ...
     def to_dict(self) -> dict[str, Any]: ...
 
 class PreparationRecipe:

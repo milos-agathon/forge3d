@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, 
 import numpy as np
 
 if TYPE_CHECKING:
+    from .gis import RasterInfo
     from .media import Medium
 
 from ._viewer_binary import find_viewer_binary as _resolve_viewer_binary
@@ -1084,6 +1085,8 @@ class ViewerHandle:
     ) -> None:
         """Load an image overlay using normalized UV ``(u0, v0, u1, v1)``.
 
+        A georeferenced GeoTIFF must already match the terrain grid and
+        registration. Its affine determines the full-terrain extent.
         ``preserve_colors`` switches raster overlays into a viewer mode that
         composites their source colors after terrain lighting so categorical
         palettes survive unchanged.
@@ -1341,6 +1344,31 @@ class ViewerHandle:
             timeout=max(self._timeout, 2.0),
         )
     
+    def snapshot_geotiff(
+        self,
+        path: Union[str, Path],
+        width: int,
+        height: int,
+        *,
+        overwrite: bool = False,
+    ) -> RasterInfo:
+        """Render the loaded terrain and its overlays as a north-up Area GeoTIFF.
+
+        The orthographic viewport spans the outer terrain samples. The viewer
+        derives the output affine from the same loaded raster that it renders.
+
+        Outside CENSOR's render-certificate scope because this runs in the
+        interactive viewer subprocess.
+        """
+        from .gis import read_raster_info
+
+        path = Path(path).resolve()
+        self._send_command({
+            "cmd": "snapshot_geo_tiff", "path": str(path), "width": width,
+            "height": height, "overwrite": overwrite,
+        })
+        return read_raster_info(path)
+
     def render_animation(
         self,
         animation: "CameraAnimation",

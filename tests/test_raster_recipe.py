@@ -30,6 +30,8 @@ def _source(root, name, data, grid, *, nodata=None):
         nodata=nodata,
     ) as ds:
         ds.write(data, 1)
+        if grid.registration == "point":
+            ds.update_tags(AREA_OR_POINT="Point")
     return RasterRecipeSource.from_file(path, name)
 
 
@@ -262,11 +264,12 @@ def test_physical_recipe_classes_and_release(tmp_path, right):
     assert RasterRecipe.from_json(record).legend()["sources"][1] == "replacement"
 
 
-def test_physical_render_uses_resident_d02_palette(tmp_path):
+@pytest.mark.parametrize("registration", ["area", "point"])
+def test_physical_render_uses_resident_d02_palette(tmp_path, registration):
     import forge3d as f3d
 
     _physical()
-    grid = PreparationGrid("EPSG:32635", 17, 17, (570000, 10, 0, 3980000, 0, -10))
+    grid = PreparationGrid("EPSG:32635", 17, 17, (570000, 10, 0, 3980000, 0, -10), registration)
     a = np.ones((17, 17), dtype="float32")
     b = np.tile(np.repeat([3, 2, 1, 0.25], [4, 4, 4, 5]), (17, 1)).astype("float32")
     mask = np.ones_like(a, dtype="uint8")
@@ -297,6 +300,13 @@ def test_physical_render_uses_resident_d02_palette(tmp_path):
     with pytest.raises(ValueError, match="CRS mismatch"):
         wrong_scene.render(str(rejected), raster_recipe=recipe)
     assert not rejected.exists()
+    wrong_registration = scene()
+    wrong_registration.recipe.terrain.metadata = grid.to_dict() | {
+        "registration": "point" if registration == "area" else "area"
+    }
+    with pytest.raises(ValueError, match="grid mismatch"):
+        wrong_registration.render(str(rejected), raster_recipe=recipe)
+    assert not rejected.exists()
     for i, edges in enumerate([BINS, [-0.25, 0, 0.25]]):
         recipe.set_bins(edges)
         resident = tmp_path / f"resident-{i}.png"
@@ -316,6 +326,7 @@ def test_physical_render_uses_resident_d02_palette(tmp_path):
                 data=ids,
                 crs=grid.crs,
                 style=f3d.CategoricalRasterStyle(dict(enumerate(PALETTE, 1)), nodata=0),
+                metadata={"registration": registration},
             )
         ]
         cpu_scene.render(str(cpu))

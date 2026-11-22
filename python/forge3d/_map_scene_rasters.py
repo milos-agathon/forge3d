@@ -73,6 +73,9 @@ def _overlay_in_terrain_uv(layer, recipe, shape):
     from .map_scene import (_load_native_raster_overlay, _terrain_alignment_grid,
                             _terrain_scene_diagonal, _raster_to_rgba8)
     from ._map_scene_common import _metadata_dict, _same_crs
+    from .raster_registration import (
+        geotiff_registration, pixel_registration, require_compatible_registration,
+    )
     path = Path(layer.path or '')
     metadata = _metadata_dict(layer.metadata)
     grid = _terrain_alignment_grid(recipe.terrain, target_crs=recipe.target_crs or recipe.terrain.crs,
@@ -97,6 +100,12 @@ def _overlay_in_terrain_uv(layer, recipe, shape):
                 source = stack.enter_context(memory.open())
             if source.crs is None:
                 raise ValueError('GeoTIFF draping requires source CRS metadata')
+            source_registration = geotiff_registration(source)
+            if "registration" in metadata and pixel_registration(metadata["registration"]) != source_registration:
+                raise ValueError("GeoTIFF drape registration differs from its declaration")
+            require_compatible_registration(
+                source_registration, grid["registration"], metadata.get("registration_conversion"),
+            )
             raw = source.read()
             valid = np.min(source.read_masks(), axis=0) > 0
             if not np.isfinite(raw[:, valid]).all():
@@ -119,6 +128,11 @@ def _overlay_in_terrain_uv(layer, recipe, shape):
             return output
     if not _same_crs(layer.crs, recipe.target_crs or recipe.terrain.crs):
         raise ValueError('PNG draping requires the terrain CRS; use a georeferenced GeoTIFF for reprojection')
+    if grid is not None:
+        require_compatible_registration(
+            pixel_registration(metadata.get("registration", "area")),
+            grid["registration"], metadata.get("registration_conversion"),
+        )
     rgba = _load_native_raster_overlay(layer)
     if rgba is None:
         raise ValueError('raster source is missing, unreadable, or unsupported')

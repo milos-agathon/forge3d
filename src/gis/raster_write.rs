@@ -97,6 +97,7 @@ pub struct WriteRasterOptions {
     /// MENSURA M-03: vertical datum persisted as a private GeoTIFF ASCII tag
     /// (see `FORGE3D_HEIGHT_SYSTEM_TAG`). "unspecified" is not written.
     pub height_system: String,
+    pub registration: crate::gis::types::PixelRegistration,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -756,6 +757,7 @@ where
     K: TiffKind,
 {
     if let Some(transform) = options.transform {
+        let transform = options.registration.shift_origin(transform, 1.0)?;
         if transform_requires_matrix(transform) {
             let matrix = [
                 transform.a,
@@ -797,8 +799,13 @@ where
                 .write_tag(Tag::GeoAsciiParamsTag, crs_ascii.as_str())
                 .map_err(|err| GisError::WriteFailed(err.to_string()))?;
         }
-        let tags = geokeys_for_crs(crs)?;
-        if let Some(tags) = tags {
+    }
+    let geo_tags = options.crs.as_ref().map(geokeys_for_crs).transpose()?.flatten();
+    if let Some(mut tags) = geo_tags {
+        // The CRS builders encode the GeoTIFF default as an inline short.
+        if let Some(entry) = tags.directory[4..].chunks_exact_mut(4).find(|entry| entry[0] == 1025) {
+            entry[3] = options.registration.geokey();
+        }
             if !tags.doubles.is_empty() {
                 directory
                     .write_tag(Tag::GeoDoubleParamsTag, &tags.doubles[..])
@@ -807,7 +814,10 @@ where
             directory
                 .write_tag(Tag::GeoKeyDirectoryTag, &tags.directory[..])
                 .map_err(|err| GisError::WriteFailed(err.to_string()))?;
-        }
+    } else if options.registration == crate::gis::types::PixelRegistration::Point {
+        let keys = geokey_directory(vec![1025, 0, 1, options.registration.geokey()]);
+        directory.write_tag(Tag::GeoKeyDirectoryTag, &keys[..])
+            .map_err(|err| GisError::WriteFailed(err.to_string()))?;
     }
 
     if let Some(nodata) = uniform_nodata(&options.nodata) {
@@ -1364,6 +1374,11 @@ fn validate_post_write(
             info.dtype_per_band,
             array.dtype().name()
         )));
+    }
+    if info.registration != options.registration {
+        return Err(GisError::PostWriteValidationFailed(
+            "post-write registration differs from requested registration".to_string(),
+        ));
     }
     if info.dtype_per_band.len() != array.bands {
         return Err(GisError::PostWriteValidationFailed(format!(

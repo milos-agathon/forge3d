@@ -61,6 +61,7 @@ impl Viewer {
         {
             let (near, far) = terrain.clip_planes();
             return FrameCamera {
+            orthographic_half_extents: None,
                 kind: ActiveCameraKind::Terrain,
                 anchor: self.camera_anchor,
                 eye_world: terrain.camera_eye(),
@@ -76,6 +77,7 @@ impl Viewer {
             let point_cloud = self.point_cloud.as_ref().expect("activity checked");
             let (eye_world, target_world, near, far) = point_cloud.camera_pose_world();
             return FrameCamera {
+            orthographic_half_extents: None,
                 kind: ActiveCameraKind::PointCloud,
                 anchor: self.camera_anchor,
                 eye_world,
@@ -88,6 +90,7 @@ impl Viewer {
         }
 
         FrameCamera {
+            orthographic_half_extents: None,
             kind: ActiveCameraKind::General,
             anchor: self.camera_anchor,
             eye_world: self.camera.eye(),

@@ -76,7 +76,7 @@ class TerrainProjector:
         size = (max(64,recipe.output.width),max(64,recipe.output.height))
         # Only the interactive route uses the shared camera and building depth.
         # Preserve the legacy projection/terrain-only proxy with effects off.
-        self.shared_frame = bool(ms._mapscene_native_effects(recipe))
+        self.shared_frame = bool(ms._mapscene_native_effects(recipe)) or ms._registered_screen_grid(recipe) is not None
         self.params = ms._build_mapscene_terrain_params(recipe,self.heightmap,size)
         if self.params is None or not callable(getattr(self.params, 'project_terrain_points', None)):
             raise ValueError('native terrain camera projection is unavailable; rebuild the bindings')
@@ -95,8 +95,9 @@ class TerrainProjector:
         east, north = float(point[0]), float(point[1])
         if self._inverse is not None:
             col, row = self._inverse * (east, north)
-            u = (col - 0.5) / max(self.heightmap.shape[1] - 1, 1)
-            v = (row - 0.5) / max(self.heightmap.shape[0] - 1, 1)
+            from .raster_registration import corner_to_node_uv
+
+            u, v = corner_to_node_uv(col, row, self.heightmap.shape[1], self.heightmap.shape[0])
         elif self.bounds is not None:
             west, south, east_edge, north_edge = map(float, self.bounds)
             if not east_edge > west or not north_edge > south:
@@ -219,12 +220,18 @@ def project_vector_recipe(recipe, *, projector=None):
         if coordinates and hasattr(coordinates[0], '__len__'):
             return all(ground(part) for part in coordinates)
         return len(coordinates) == 2
-    if not ms._is_3d_camera_mode(ms._mapscene_effective_camera_mode(recipe)):
+    screen_grid = ms._registered_screen_grid(recipe)
+    if screen_grid is None and not ms._is_3d_camera_mode(ms._mapscene_effective_camera_mode(recipe)):
         return recipe
     projected = copy.copy(recipe)
     layers = []
     for layer in recipe.layers:
         if not isinstance(layer, ms.VectorOverlay):
+            layers.append(layer)
+            continue
+        metadata = layer.metadata or {}
+        if screen_grid is not None and (metadata.get("coordinate_space") != "world"
+                                        and not metadata.get("preparation_grid")):
             layers.append(layer)
             continue
         try:

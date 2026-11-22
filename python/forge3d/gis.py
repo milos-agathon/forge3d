@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Literal, Any
 
 import numpy as np
 
@@ -530,11 +530,16 @@ def write_raster(
     like_path: os.PathLike[str] | str | None = None,
     like_info: Any | None = None,
     height_system: str | None = None,
+    registration: Literal["area", "point"] | None = None,
 ):
     """Write a local GeoTIFF and return reopened metadata.
 
     Accepted array shapes are (height, width) and band-first
     (bands, height, width). HWC arrays are not a separate G-002a1 mode.
+
+    ``registration`` uses the supplied corner-normalized affine and writes the
+    corresponding GeoTIFF key. If omitted, inherit the reference raster's
+    registration or use the GeoTIFF area default.
 
     ``height_system`` (MENSURA) persists the vertical datum
     ("ellipsoidal" / "orthometric_egm96" / "chart_datum") as a private GeoTIFF
@@ -554,6 +559,7 @@ def write_raster(
         like_path=like_path_value,
         like_info=like_info,
         height_system=height_system,
+        **({"registration": registration} if registration is not None else {}),
     )
 
 
@@ -934,6 +940,13 @@ def prepare_dem(
     target_info: os.PathLike[str] | str | Any | None = None,
     nodata: float | None = None,
 ) -> dict[str, Any]:
+    """Prepare elevation samples on their grid or an explicitly aligned target.
+
+    A georeferenced target needs the source CRS and registration. Its pixel
+    centres are sampled through both corner affines with nearest-neighbour
+    interpolation. Align or convert the source explicitly before combining
+    incompatible grids.
+    """
     return _require_native().prepare_dem(
         _path_or_self(source),
         target_info=_path_or_self(target_info) if target_info is not None else None,

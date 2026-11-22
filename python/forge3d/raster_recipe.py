@@ -19,6 +19,7 @@ from ._native import get_native_module
 from .alignment import _affine_from_metadata, _require_rasterio
 from .observation_time import ObservationRecord
 from .preparation import PreparationGrid, _require_render_grid, _sha
+from .raster_registration import geotiff_registration
 from .raster_style import CategoricalRasterStyle
 
 if TYPE_CHECKING:
@@ -32,12 +33,11 @@ def _canonical(value: Any) -> bytes:
 
 
 def _grid(dataset: Any) -> PreparationGrid:
-    if not dataset.crs or dataset.tags().get("AREA_OR_POINT") == "Point":
-        raise ValueError(
-            "Raster recipe inputs require a registered pixel-area CRS and grid"
-        )
+    if not dataset.crs:
+        raise ValueError("Raster recipe inputs require a CRS and registered grid")
     return PreparationGrid(
-        str(dataset.crs), dataset.width, dataset.height, dataset.transform.to_gdal()
+        str(dataset.crs), dataset.width, dataset.height, dataset.transform.to_gdal(),
+        registration=geotiff_registration(dataset),
     )
 
 
@@ -407,7 +407,7 @@ class RasterRecipe:
                 )
             for crs in (terrain.crs, recipe.target_crs):
                 if crs and not self.grid.same_as(
-                    PreparationGrid(crs, self.grid.width, self.grid.height, gt)
+                    PreparationGrid(crs, self.grid.width, self.grid.height, gt, self.grid.registration)
                 ):
                     raise ValueError("Raster recipe CRS mismatch with terrain")
             alignment = _terrain_alignment_grid(terrain)
@@ -418,6 +418,7 @@ class RasterRecipe:
                 alignment["width"],
                 alignment["height"],
                 _affine_from_metadata(alignment["transform"]).to_gdal(),
+                registration=alignment["registration"],
             )
             if not self.grid.same_as(terrain_grid):
                 raise ValueError("Raster recipe grid mismatch with terrain")

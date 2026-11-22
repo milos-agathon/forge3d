@@ -379,6 +379,7 @@ mod tests {
                 creation_options_explicit: false,
                 like_info: None,
                 height_system: crate::gis::types::HEIGHT_SYSTEM_UNSPECIFIED.to_string(),
+                registration: Default::default(),
             },
         )
         .expect("write 2-band raster");

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from functools import wraps
 import hashlib
 from operator import index as _index
-from typing import Any, Dict, Optional, Tuple, Iterable, Mapping, Callable, Sequence
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Iterable, Mapping, Callable, Sequence
 
 import numpy as np
 import time as _time
@@ -25,6 +25,9 @@ from .certificate import _render_capture, emit_render_certificate
 from .denoise import atrous_denoise
 
 from ._native import get_native_symbol
+
+if TYPE_CHECKING:
+    from .preparation import PreparationGrid
 
 
 class ExperimentalSyntheticOutput(RuntimeError):
@@ -1202,6 +1205,78 @@ def hybrid_render_terrain_reference(
     result["sun_source"] = sun_source
     result["solar_azimuth_deg"] = float(sun_azimuth_deg)
     result["solar_elevation_deg"] = float(sun_elevation_deg)
+    return result
+
+
+def render_registered_terrain(
+    heightmap: np.ndarray,
+    grid: PreparationGrid,
+    width: int,
+    height: int,
+    *,
+    pixel_size: float,
+    centre: tuple[float, float] | None = None,
+    drape: tuple[np.ndarray, PreparationGrid] | None = None,
+    world_mesh: tuple[np.ndarray, np.ndarray] | None = None,
+    certificate: bool | str = False,
+    cache: str | None = None,
+    **render_options: Any,
+) -> dict:
+    """Trace a north-up orthographic map with a corner-affine output grid.
+
+    The height field and linear RGB(A) drape share the DEM sample lattice.
+    Prepare the drape on that grid before calling. Optional mesh vertices
+    are in (easting, northing, height) order in the same CRS and height units.
+    The output pixel size is expressed in the projected CRS's units.
+    """
+    from .preparation import PreparationGrid, _require_render_grid
+    from .raster_registration import require_compatible_registration
+
+    _require_render_grid(grid)
+    heightmap = np.asarray(heightmap)
+    if heightmap.shape != (grid.height, grid.width):
+        raise ValueError("heightmap shape must match its registration grid")
+    if width <= 0 or height <= 0 or not np.isfinite(pixel_size) or pixel_size <= 0:
+        raise ValueError("output size and pixel_size must be positive and finite")
+    reserved = {"camera_model", "sensor_rect", "full_width", "full_height", "pixel_offset"}
+    if reserved.intersection(render_options):
+        raise ValueError("registered terrain derives its camera and complete sensor from the output grid")
+
+    albedo_map = None
+    if drape is not None:
+        albedo_map, drape_grid = drape
+        require_compatible_registration(drape_grid.registration, grid.registration)
+        if not grid.same_as(drape_grid):
+            raise ValueError("drape must share the exact terrain grid")
+    origin_x, origin_y = grid.transform * (grid.width * 0.5, grid.height * 0.5)
+    east, north = (origin_x, origin_y) if centre is None else centre
+    if not np.isfinite([east, north]).all():
+        raise ValueError("output centre must be finite")
+    x, z = east - origin_x, origin_y - north
+    exaggeration = float(render_options.get("exaggeration", 1.0))
+    camera_y = float(max(np.max(heightmap), 0)) * exaggeration + max(width, height) * pixel_size
+    camera = {"origin": (x, camera_y, z), "look_at": (x, 0.0, z), "up": (0.0, 0.0, -1.0),
+              "model": "orthographic", "half_height": height * pixel_size * 0.5}
+    vertices = indices = None
+    if world_mesh is not None:
+        world_vertices, indices = world_mesh
+        world_vertices = np.asarray(world_vertices, dtype=np.float64)
+        if world_vertices.ndim != 2 or world_vertices.shape[1] != 3 or world_vertices.shape[0] == 0:
+            raise ValueError("world_mesh vertices must have shape (N, 3)")
+        vertices = np.column_stack((world_vertices[:, 0] - origin_x, world_vertices[:, 2],
+                                    origin_y - world_vertices[:, 1]))
+        camera["origin"] = (x, max(camera_y, float(vertices[:, 1].max()) + pixel_size), z)
+    result = hybrid_render_terrain_reference(
+        heightmap, width, height, camera, spacing=(grid.transform.a, -grid.transform.e),
+        albedo_map=albedo_map, mesh_vertices=vertices, mesh_indices=indices,
+        certificate=certificate, cache=cache, **render_options,
+    )
+    result["grid"] = PreparationGrid(
+        grid.crs, width, height,
+        (east - width * pixel_size * 0.5, pixel_size, 0.0,
+         north + height * pixel_size * 0.5, 0.0, -pixel_size),
+        registration="area",
+    )
     return result
 
 

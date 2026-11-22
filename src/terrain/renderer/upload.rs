@@ -144,7 +144,7 @@ impl TerrainScene {
                     } else {
                         0.0
                     },
-                    0.0,
+                    if params.camera_mode.ends_with(super::interactive::REGISTERED_RASTER) { 1.0 } else { 0.0 },
                     0.0,
                 ],
             },
@@ -403,7 +403,7 @@ impl TerrainScene {
     pub(crate) fn build_camera_matrices(
         params: &render_params::TerrainRenderParams,
     ) -> (glam::Vec3, glam::Mat4, glam::Mat4) {
-        if params.camera_mode == super::interactive::SCREEN_GEOMETRY_MODE {
+        if super::interactive::without_registration(&params.camera_mode) == super::interactive::SCREEN_GEOMETRY_MODE {
             return super::interactive::camera_matrices(params);
         }
         let phi_rad = params.cam_phi_deg.to_radians();

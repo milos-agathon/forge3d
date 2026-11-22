@@ -73,7 +73,12 @@ impl ViewerTerrainScene {
             let shadow_uniforms = ShadowPassUniforms {
                 light_view_proj,
                 terrain_params: [min_h, max_h - min_h, terrain_width, z_scale],
-                grid_params: [grid_res as f32, 0.0, 0.0, 0.0],
+                grid_params: [
+                    grid_res as f32,
+                    if terrain.uses_registered_grid() { 1.0 } else { 0.0 },
+                    0.0,
+                    0.0,
+                ],
                 height_curve: [
                     height_curve_mode,
                     height_curve_strength,

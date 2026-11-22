@@ -69,10 +69,14 @@ pub struct GeoReference {
     pub model_tiepoint: Option<[f64; 6]>,
     pub model_transformation: Option<[f64; 16]>,
     pub epsg: u32,
+    pub registration: crate::gis::types::PixelRegistration,
 }
 
 impl GeoReference {
+    /// Map corner-normalized pixel coordinates to the source CRS.
     pub fn pixel_to_model(&self, x: f64, y: f64) -> Result<(f64, f64), CogError> {
+        let offset = self.registration.native_sample_offset();
+        let (x, y) = (x - offset, y - offset);
         let result = if let Some(matrix) = self.model_transformation {
             (
                 matrix[0] * x + matrix[1] * y + matrix[3],
@@ -131,6 +135,8 @@ impl GeoReference {
                     .to_string(),
             ));
         };
+        let offset = self.registration.native_sample_offset();
+        let result = (result.0 + offset, result.1 + offset);
         if result.0.is_finite() && result.1.is_finite() {
             Ok(result)
         } else {
@@ -514,17 +520,20 @@ async fn parse_ifd(
     } else {
         None
     };
-    let epsg = if let Some((off, count, field_type)) = geo_keys_info {
+    let (epsg, registration) = if let Some((off, count, field_type)) = geo_keys_info {
         let keys = read_u16_array(reader, off, count as usize, field_type, big_endian).await?;
-        parse_epsg_from_geo_keys(&keys)
+        let registration = crate::gis::raster_tags::registration_from_geokeys(&keys)
+            .map_err(|error| CogError::InvalidIfd(error.to_string()))?;
+        (parse_epsg_from_geo_keys(&keys), registration)
     } else {
-        None
+        (None, Default::default())
     };
     let geo_reference = epsg.map(|epsg| GeoReference {
         model_pixel_scale,
         model_tiepoint,
         model_transformation,
         epsg,
+        registration,
     });
 
     let mut tile_offsets = if let Some((off, count, field_type)) = tile_offsets_info {
@@ -908,8 +917,15 @@ mod tests {
             model_tiepoint: Some([0.0, 0.0, 0.0, -123.0, 48.0, 0.0]),
             model_transformation: None,
             epsg: 4326,
+            registration: Default::default(),
         };
         assert_eq!(georef.pixel_to_model(4.0, 6.0).unwrap(), (-122.0, 45.0));
+        let point = GeoReference {
+            registration: crate::gis::types::PixelRegistration::Point,
+            ..georef
+        };
+        assert_eq!(point.pixel_to_model(0.5, 0.5).unwrap(), (-123.0, 48.0));
+        assert_eq!(point.model_to_pixel(-123.0, 48.0).unwrap(), (0.5, 0.5));
     }
 
     #[test]

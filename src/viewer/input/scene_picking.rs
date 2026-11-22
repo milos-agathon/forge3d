@@ -382,6 +382,7 @@ mod scene_pick_tests {
         let mut anchor = Anchor::new();
         assert!(anchor.rebase_if_needed(world));
         let mut frame = FrameCamera {
+            orthographic_half_extents: None,
             kind: ActiveCameraKind::General,
             anchor,
             eye_world: world + DVec3::new(0.0, 0.0, 10.0),

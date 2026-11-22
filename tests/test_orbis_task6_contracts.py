@@ -199,9 +199,14 @@ def test_geographic_root_leaf_and_overview_selection(tmp_path: Path) -> None:
 
     root_full = np.asarray(dataset.read_height_tile(1, 0, 0, 4, 4))
     assert tuple(root_full[[0, 0, 3, 3], [0, 3, 0, 3]]) == (10, 20, 30, 40)
-    for x, y, expected in [(0, 0, 10), (1, 0, 20), (0, 1, 30), (1, 1, 40)]:
+    # Child tiles share border nodes. A node on a TIFF cell edge interpolates
+    # the adjacent samples, including neighbours in the next physical tile.
+    for x, y, expected in [
+        (0, 0, [[10, 15], [20, 25]]), (1, 0, [[15, 20], [25, 30]]),
+        (0, 1, [[20, 25], [30, 35]]), (1, 1, [[25, 30], [35, 40]]),
+    ]:
         leaf = np.asarray(dataset.read_height_tile(2, x, y, 2, 2))
-        assert np.all(leaf == expected)
+        np.testing.assert_array_equal(leaf, expected)
         assert np.all(dataset.read_height_tile_coverage(2, x, y, 2, 2) == 255)
 
     # A 2x2 root needs only the 2x2 IFD; its deliberately distinct values prove
@@ -211,6 +216,31 @@ def test_geographic_root_leaf_and_overview_selection(tmp_path: Path) -> None:
     stats = dataset.stats()
     assert stats["cache_hits"] >= 4
     assert stats["memory_used_bytes"] <= stats["memory_budget_bytes"]
+
+
+@pytest.mark.parametrize("registration", ["Area", "Point"])
+def test_cog_tile_samples_exact_source_and_overview_centres(tmp_path, registration):
+    import rasterio
+    from affine import Affine
+    from rasterio.enums import Resampling
+
+    values = np.arange(16, dtype=np.float32) + 100 * np.arange(16, dtype=np.float32)[:, None]
+    for with_overview, offset, expected in ((False, (5.5, 7.5), 705), (True, (5, 7), 654.5)):
+        # Global tile (2, 2, 1) has centre at (45 E, 22.5 N). The latter
+        # fixture centres that node on overview sample (2, 3), an average
+        # of full-resolution samples (4, 6) through (5, 7).
+        path = tmp_path / f"centres-{with_overview}.tif"
+        transform = Affine.translation(45 - offset[0], 22.5 + offset[1]) * Affine.scale(1, -1)
+        with rasterio.open(path, "w", driver="GTiff", width=16, height=16, count=1,
+                           dtype=values.dtype, crs="EPSG:4326", transform=transform,
+                           tiled=True, blockxsize=16, blockysize=16) as dataset:
+            dataset.write(values, 1)
+            dataset.update_tags(AREA_OR_POINT=registration)
+            if with_overview:
+                dataset.build_overviews([2], Resampling.average)
+        dataset = _native().CogDataset(path.as_uri(), cache_size_mb=1)
+        np.testing.assert_array_equal(dataset.read_height_tile(2, 2, 1, 1, 1), [[expected]])
+        np.testing.assert_array_equal(dataset.read_height_tile_coverage(2, 2, 1, 1, 1), [[255]])
 
 
 def test_projected_cog_maps_global_tile_through_source_crs(tmp_path: Path) -> None:
