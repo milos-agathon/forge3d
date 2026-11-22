@@ -1228,7 +1228,9 @@ def render_registered_terrain(
     Prepare the drape on that grid before calling. Optional mesh vertices
     are in (easting, northing, height) order in the same CRS and height units.
     The output pixel size is expressed in the projected CRS's units.
+    A cache request reports a bypass and the render runs fresh.
     """
+    from ._cache_policy import report_cache_bypass
     from .preparation import PreparationGrid, _require_render_grid
     from .raster_registration import require_compatible_registration
 
@@ -1266,10 +1268,11 @@ def render_registered_terrain(
         vertices = np.column_stack((world_vertices[:, 0] - origin_x, world_vertices[:, 2],
                                     origin_y - world_vertices[:, 1]))
         camera["origin"] = (x, max(camera_y, float(vertices[:, 1].max()) + pixel_size), z)
+    report_cache_bypass(cache, "path_tracing.render_registered_terrain")
     result = hybrid_render_terrain_reference(
         heightmap, width, height, camera, spacing=(grid.transform.a, -grid.transform.e),
         albedo_map=albedo_map, mesh_vertices=vertices, mesh_indices=indices,
-        certificate=certificate, cache=cache, **render_options,
+        certificate=certificate, **render_options,
     )
     result["grid"] = PreparationGrid(
         grid.crs, width, height,

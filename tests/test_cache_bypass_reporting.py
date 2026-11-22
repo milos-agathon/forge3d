@@ -4,7 +4,9 @@ from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+import warnings
 
+import numpy as np
 import pytest
 import forge3d as f3d
 
@@ -119,6 +121,31 @@ def test_every_python_render_cache_request_has_an_owner_or_bypass():
 def test_bare_native_forward_is_not_cache_handling():
     node = ast.parse("def render(cache=None): return native(cache=cache)").body[0]
     assert not _handles_cache("new_module.py", node)
+
+
+@pytest.mark.parametrize("cache", [None, "cache"])
+def test_registered_terrain_reports_cache_bypass_once(monkeypatch, cache):
+    from forge3d import path_tracing
+    from forge3d.preparation import PreparationGrid
+
+    grid = PreparationGrid(
+        "EPSG:32631", 3, 3, (500000, 8, 0, 5200000, 0, -8), registration="point",
+    )
+
+    def trace(*args, **options):
+        assert options.get("cache") is None
+        return {}
+
+    monkeypatch.setattr(path_tracing, "hybrid_render_terrain_reference", trace)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        path_tracing.render_registered_terrain(
+            np.zeros((3, 3)), grid, 3, 3, pixel_size=8, cache=cache,
+        )
+    assert len(caught) == (0 if cache is None else 1)
+    if caught:
+        assert "path_tracing.render_registered_terrain" in str(caught[0].message)
+        assert "render_cache_unsupported" in str(caught[0].message)
 
 
 @pytest.mark.parametrize("entrypoint", ["render_oit", "render_snapshot", "render_pick_map", "render_oit_and_pick"])
