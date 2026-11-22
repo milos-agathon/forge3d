@@ -53,11 +53,16 @@ fn vs_shadow(@builtin(vertex_index) vertex_id: u32) -> VertexOutput {
         else { dx = 0u; dy = 1u; }
     }
 
-    let uv = vec2<f32>(
+    var uv = vec2<f32>(
         f32(quad_x + dx) / f32(grid_res - 1u),
         f32(quad_y + dy) / f32(grid_res - 1u)
     );
     let tex_dims = textureDimensions(height_tex, 0);
+    if (u_shadow.grid_params.y > 0.5) {
+        let dims = vec2<f32>(tex_dims);
+        let sample_uv = (round(uv * (dims - vec2<f32>(1.0))) + vec2<f32>(0.5)) / dims;
+        uv = select(uv, sample_uv, tex_dims > vec2<u32>(1u));
+    }
     let texel = vec2<i32>(uv * vec2<f32>(tex_dims));
     let texel_clamped = clamp(texel, vec2<i32>(0), vec2<i32>(tex_dims) - vec2<i32>(1));
     let h_raw = textureLoad(height_tex, texel_clamped, 0).r;

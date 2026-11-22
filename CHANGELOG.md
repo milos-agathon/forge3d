@@ -12,6 +12,7 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 - Set `camera_mode="mesh:zup:dem"` (or `"mesh:dem"` for the legacy orbit) to render a [terrain mesh at DEM resolution](docs/terrain/dem-mesh.md). Each axis follows its own source samples, and a singleton axis repeats its sample. Beauty, AOV, offline accumulation, planar reflections, shadows, and physical water traversal use the selected grid.
 - The default camera stays `screen`, and existing mesh modes retain their fixed grids. Large DEMs increase GPU geometry work. A 3000 × 3000 DEM uses about 18 million triangles in this mode, compared with about 522,000 in the default mesh. Local rendering and default-output comparisons ran on Windows Vulkan with a physical NVIDIA GeForce RTX 3070.
+- [Raster registration](docs/guides/raster_registration.md) carries pixel-is-area and pixel-is-point through reading, preparation, and export. The viewer, MapScene, and traced terrain place drapes and vectors on the terrain's sample grid. Combining different registrations requires an explicit conversion. GeoTIFF output records the registration of the exported pixels.
 
 ## [1.51.1]
 

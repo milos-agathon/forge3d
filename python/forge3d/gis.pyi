@@ -4,6 +4,7 @@ import os
 from typing import Any, TypedDict
 
 import numpy as np
+from .raster_registration import PixelRegistration
 
 
 class RasterInfo:
@@ -23,6 +24,8 @@ class RasterInfo:
     def crs_wkt(self) -> str | None: ...
     @property
     def crs_authority(self) -> dict[str, str] | None: ...
+    @property
+    def registration(self) -> PixelRegistration: ...
     @property
     def transform(self) -> tuple[float, float, float, float, float, float] | None: ...
     @property
@@ -397,6 +400,7 @@ def write_raster(
     like_path: os.PathLike[str] | str | None = ...,
     like_info: RasterInfo | None = ...,
     height_system: str | None = ...,
+    registration: PixelRegistration | None = ...,
 ) -> RasterInfo: ...
 
 

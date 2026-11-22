@@ -1251,6 +1251,7 @@ mod py {
             .transpose()?
             .flatten();
         info.transform = transform;
+        info.registration = crate::gis::types::PixelRegistration::from_py_dict(dict)?;
         info.bounds = optional_tuple4(dict.get_item("bounds")?)?;
         if info.bounds.is_none() && info.transform.is_some() && width > 0 && height > 0 {
             info.bounds = Some(affine::raster_bounds(&info)?.tuple());

@@ -28,6 +28,8 @@ def raster(path, values, source_grid, *, nodata=None):
                        count=bands.shape[0], dtype=values.dtype, crs=source_grid.crs,
                        transform=source_grid.transform, nodata=nodata) as ds:
         ds.write(bands)
+        if source_grid.registration == "point":
+            ds.update_tags(AREA_OR_POINT="Point")
     return path
 
 

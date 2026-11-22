@@ -253,9 +253,9 @@ def _unsupported_output_format_diagnostic(output_format: str) -> Diagnostic:
         code="unsupported_output_format",
         severity="fatal",
         message="MapScene MVP rendering supports PNG output only.",
-        remediation="Set OutputSpec.format to 'png' before rendering.",
+        remediation="Set OutputSpec.format to 'png', 'exr' or 'geotiff' before rendering.",
         support_level="unsupported",
-        details={"format": output_format, "supported_formats": ["png"]},
+        details={"format": output_format, "supported_formats": ["png", "exr", "geotiff"]},
     )
 
 

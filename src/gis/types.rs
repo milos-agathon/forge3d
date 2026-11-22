@@ -237,6 +237,7 @@ pub struct RasterInfo {
     pub crs_wkt: Option<String>,
     pub crs_authority: Option<HashMap<String, String>>,
     pub transform: Option<(f64, f64, f64, f64, f64, f64)>,
+    pub registration: PixelRegistration,
     pub bounds: Option<(f64, f64, f64, f64)>,
     pub resolution: Option<(f64, f64)>,
     pub nodata_per_band: Vec<Option<f64>>,
@@ -251,6 +252,76 @@ pub struct RasterInfo {
     /// [`HEIGHT_SYSTEM_ORTHOMETRIC_EGM96`], [`HEIGHT_SYSTEM_CHART_DATUM`].
     pub height_system: String,
     pub warnings: Vec<RasterWarning>,
+}
+
+/// Physical meaning of a sample. RasterInfo always stores the corner affine.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PixelRegistration {
+    /// GeoTIFF defines Area as its default when the key is absent.
+    #[default]
+    Area,
+    Point,
+}
+
+impl PixelRegistration {
+    #[cfg(feature = "extension-module")]
+    pub(crate) fn from_py_dict(
+        dict: &pyo3::Bound<'_, pyo3::types::PyDict>,
+    ) -> pyo3::PyResult<Self> {
+        use pyo3::{types::PyDictMethods, types::PyAnyMethods};
+
+        match dict.get_item("registration")? {
+            Some(value) => Ok(Self::parse(&value.extract::<String>()?)?),
+            None => Ok(Self::Area),
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Area => "area",
+            Self::Point => "point",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> GisResult<Self> {
+        match value {
+            "area" => Ok(Self::Area),
+            "point" => Ok(Self::Point),
+            _ => Err(GisError::InvalidArgument(format!(
+                "invalid raster registration {value:?}; expected 'area' or 'point'"
+            ))),
+        }
+    }
+
+    pub(crate) fn geokey(self) -> u16 {
+        match self {
+            Self::Area => 1,
+            Self::Point => 2,
+        }
+    }
+
+    pub(crate) fn native_sample_offset(self) -> f64 {
+        match self {
+            Self::Area => 0.0,
+            Self::Point => 0.5,
+        }
+    }
+
+    /// Shift a native point affine to the corner lattice, or back on write.
+    pub(crate) fn shift_origin(
+        self,
+        transform: AffineTransform,
+        shift: f64,
+    ) -> GisResult<AffineTransform> {
+        let offset = shift * self.native_sample_offset();
+        if offset == 0.0 {
+            return Ok(transform);
+        }
+        let (x, y) = transform.apply(offset, offset);
+        AffineTransform::new([
+            transform.a, transform.b, x, transform.d, transform.e, y,
+        ])
+    }
 }
 
 /// Vertical datum is unknown; must be declared before entering an Earth-fixed
@@ -286,6 +357,7 @@ impl RasterInfo {
             crs_wkt: None,
             crs_authority: None,
             transform: None,
+            registration: PixelRegistration::Area,
             bounds: None,
             resolution: None,
             nodata_per_band: vec![None; band_count as usize],
@@ -383,6 +455,11 @@ impl RasterInfo {
     }
 
     #[getter]
+    fn registration(&self) -> &'static str {
+        self.registration.name()
+    }
+
+    #[getter]
     fn height_system(&self) -> String {
         self.height_system.clone()
     }
@@ -413,6 +490,7 @@ impl RasterInfo {
         dict.set_item("tiling", self.tiling.clone())?;
         dict.set_item("compression", self.compression.clone())?;
         dict.set_item("is_georeferenced", self.is_georeferenced)?;
+        dict.set_item("registration", self.registration.name())?;
         dict.set_item("height_system", self.height_system.clone())?;
         dict.set_item("warnings", warnings_to_py(py, &self.warnings)?)?;
         Ok(dict.into_py(py))

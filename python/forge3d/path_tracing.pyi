@@ -8,6 +8,8 @@ from typing import Tuple, Iterable, Dict, Mapping, Callable, Any, Optional, Sequ
 import numpy as np
 from . import AtmosphereLutHandle
 from .atmosphere import AtmosphereSettings
+from .preparation import PreparationGrid
+import numpy as np
 
 class ExperimentalSyntheticOutput(RuntimeError): ...
 
@@ -109,6 +111,21 @@ def hybrid_render_terrain_reference(
     atmosphere: AtmosphereSettings | Mapping[str, object] | AtmosphereLutHandle | None = ...,
     sdf_scene: object | None = ...,
 ) -> Dict[str, object]: ...
+
+def render_registered_terrain(
+    heightmap: np.ndarray,
+    grid: PreparationGrid,
+    width: int,
+    height: int,
+    *,
+    pixel_size: float,
+    centre: tuple[float, float] | None = ...,
+    drape: tuple[np.ndarray, PreparationGrid] | None = ...,
+    world_mesh: tuple[np.ndarray, np.ndarray] | None = ...,
+    certificate: bool | str | PathLikeStr | None = ...,
+    cache: str | PathLikeStr | None = ...,
+    **render_options: Any,
+) -> dict: ...
 
 def render_terrain_poster(
     heightmap: np.ndarray,

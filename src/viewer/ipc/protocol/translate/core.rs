@@ -81,6 +81,12 @@ pub(super) fn to_viewer_cmd(req: &IpcRequest) -> Option<ViewerCmd> {
             intensity: *intensity,
         }),
         IpcRequest::SetZScale { value } => Some(ViewerCmd::SetZScale(*value)),
+        IpcRequest::SnapshotGeoTiff { path, width, height, overwrite } => Some(ViewerCmd::SnapshotGeoTiff {
+            path: path.clone(),
+            width: *width,
+            height: *height,
+            overwrite: *overwrite,
+        }),
         IpcRequest::Snapshot {
             path,
             width,

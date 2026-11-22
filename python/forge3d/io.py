@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from .raster_registration import PixelRegistration, geotiff_registration
 from typing import Dict, List, Optional, Tuple, Any
 
 import numpy as np
@@ -48,6 +50,7 @@ class DEMData:
     resolution: Tuple[float, float] = (1.0, 1.0)
     bounds: Optional[Tuple[float, float, float, float]] = None
     stats: Dict[str, float] = None  # type: ignore
+    registration: PixelRegistration = "area"
 
     def __post_init__(self):
         """Initialize stats if not provided."""
@@ -336,6 +339,7 @@ def load_dem(
         transform = src.transform
         resolution = (abs(transform.a), abs(transform.e))
         bounds = src.bounds
+        registration = geotiff_registration(src)
 
     # Fill nodata if requested
     if fill_nodata_values and nodata is not None:
@@ -374,6 +378,7 @@ def load_dem(
         nodata_value=nodata,
         crs=crs,
         transform=transform,
+        registration=registration,
         resolution=resolution,
         bounds=(bounds.left, bounds.bottom, bounds.right, bounds.top) if bounds else None,
         stats=calculate_dem_stats(data, nodata),

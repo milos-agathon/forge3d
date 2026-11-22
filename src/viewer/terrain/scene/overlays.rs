@@ -15,27 +15,36 @@ impl ViewerTerrainScene {
         removed_ids: &[u32],
         overlays: &[crate::viewer::scene_review::ViewerRasterOverlayConfig],
     ) -> Result<(super::super::overlay::OverlayStack, Vec<u32>)> {
+        use super::super::overlay::OverlayStack;
+        let terrain_grid = self.terrain.as_ref().map(|terrain| &terrain.raster_info);
         let additions = overlays
             .iter()
             .map(|overlay| {
-                super::super::overlay::OverlayStack::load_image_config(
+                let path = std::path::Path::new(&overlay.path);
+                let grid = OverlayStack::geotiff_grid(path, terrain_grid, overlay.extent)?;
+                let config = OverlayStack::load_image_config(
                     &overlay.name,
-                    std::path::Path::new(&overlay.path),
+                    path,
                     overlay.extent,
                     overlay.opacity.unwrap_or(1.0),
                     crate::viewer::terrain::overlay::BlendMode::Normal,
                     overlay.z_order.unwrap_or(0),
                 )
-                .map_err(anyhow::Error::msg)
+                .map_err(anyhow::Error::msg)?;
+                Ok((config, grid))
             })
             .collect::<Result<Vec<_>>>()?;
+        let (configs, grids): (Vec<_>, Vec<_>) = additions.into_iter().unzip();
         let (mut candidate, ids) = if let Some(stack) = self.overlay_stack.as_ref() {
-            stack.stage_replacement(removed_ids, additions)
+            stack.stage_replacement(removed_ids, configs)
         } else {
             let empty =
-                super::super::overlay::OverlayStack::new(self.device.clone(), self.queue.clone());
-            empty.stage_replacement(removed_ids, additions)
+                OverlayStack::new(self.device.clone(), self.queue.clone());
+            empty.stage_replacement(removed_ids, configs)
         };
+        for (&id, grid) in ids.iter().zip(grids) {
+            candidate.set_registered_grid(id, grid);
+        }
         if let Some(terrain) = self.terrain.as_ref() {
             candidate.build_composite(terrain.dimensions.0, terrain.dimensions.1)?;
         }
@@ -83,11 +92,15 @@ impl ViewerTerrainScene {
         blend_mode: crate::viewer::terrain::overlay::BlendMode,
         z_order: i32,
     ) -> Result<u32> {
+        let grid = super::super::overlay::OverlayStack::geotiff_grid(
+            path, self.terrain.as_ref().map(|terrain| &terrain.raster_info), extent,
+        )?;
         self.ensure_overlay_stack();
         if let Some(ref mut stack) = self.overlay_stack {
             let id = stack
                 .add_image(name, path, extent, opacity, blend_mode, z_order)
                 .map_err(|e| anyhow::anyhow!(e))?;
+            stack.set_registered_grid(id, grid);
             // Rebuild composite after adding layer
             if let Some(ref terrain) = self.terrain {
                 if let Err(e) = stack.build_composite(terrain.dimensions.0, terrain.dimensions.1) {

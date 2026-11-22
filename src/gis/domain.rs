@@ -423,25 +423,6 @@ mod py {
         nodata: Option<f64>,
     ) -> PyResult<PyObject> {
         let mut source = raster_source_from_py(source)?;
-        if let Some(target) = target_info {
-            let target = raster_info_from_py(target)?;
-            if source.array.width != target.width as usize
-                || source.array.height != target.height as usize
-            {
-                source.array = resize_nearest_f32(
-                    &source.array,
-                    target.width as usize,
-                    target.height as usize,
-                )?;
-            }
-            source.info.width = target.width;
-            source.info.height = target.height;
-            source.info.transform = target.transform;
-            source.info.bounds = target.bounds;
-            source.info.resolution = target.resolution;
-            source.info.crs_wkt = target.crs_wkt;
-            source.info.crs_authority = target.crs_authority;
-        }
         // Keep a declared EGM96 DEM in f64 while applying its per-pixel geoid
         // correction.  A float32 sample at ordinary terrain elevations has a
         // several-micrometre ULP, which is larger than the ingestion contract.
@@ -453,6 +434,38 @@ mod py {
         } else {
             to_f32_array(&source.array)?
         };
+        if let Some(target) = target_info {
+            let target = raster_info_from_py(target)?;
+            warp::require_matching_registration(source.info.registration, target.registration)?;
+            if source.info.transform.is_some() || target.transform.is_some() {
+                source.info.nodata_per_band = (0..array.bands)
+                    .map(|band| {
+                        Some(nodata.or_else(|| source.info.nodata_per_band.get(band).copied().flatten())
+                            .unwrap_or(f64::NAN))
+                    })
+                    .collect();
+                let aligned = warp::align_raster_data(
+                    &array, &source.info, &target, warp::ResamplingMethod::Nearest,
+                )?;
+                array = aligned.array;
+                source.info = aligned.info;
+            } else {
+                if target.crs_wkt != source.info.crs_wkt
+                    || target.crs_authority != source.info.crs_authority
+                {
+                    return Err(GisError::CrsMismatch(
+                        "crs_mismatch: DEM target requires a matching CRS and an affine for alignment".into(),
+                    ).into());
+                }
+                if array.width != target.width as usize || array.height != target.height as usize {
+                    array = resize_nearest_f32(&array, target.width as usize, target.height as usize)?;
+                }
+                source.info.width = target.width;
+                source.info.height = target.height;
+                source.info.bounds = target.bounds;
+                source.info.resolution = target.resolution;
+            }
+        }
         let mut datum_warnings = Vec::new();
         if source.height_system == DemHeightSystem::OrthometricEgm96 {
             let is_wgs84 = source.info.crs_authority.as_ref().is_some_and(|crs| {
@@ -1105,6 +1118,7 @@ mod py {
         );
         info.driver = optional_extract::<String>(dict.get_item("driver")?)?
             .unwrap_or_else(|| "memory".to_string());
+        info.registration = crate::gis::types::PixelRegistration::from_py_dict(dict)?;
         info.dtype_per_band = dict
             .get_item("dtype_per_band")?
             .map(|value| value.extract::<Vec<String>>())

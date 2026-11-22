@@ -27,6 +27,7 @@ pub enum IpcRequest {
     SetObservation { year: i32, month: u8, day: u8, hour: u8, minute: u8, second: f64, latitude_deg: f64, longitude_deg: f64, #[serde(default)] height_m: f64 },
     LitIbl { path: String, #[serde(default = "default_intensity")] intensity: f32 },
     SetZScale { value: f32 },
+    SnapshotGeoTiff { path: String, width: u32, height: u32, #[serde(default)] overwrite: bool },
     Snapshot { path: String, #[serde(default)] width: Option<u32>, #[serde(default)] height: Option<u32> },
     Close,
     SaveBundle { path: String, #[serde(default)] name: Option<String> },

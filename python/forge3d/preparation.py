@@ -19,6 +19,10 @@ import numpy as np
 
 from .alignment import _affine_from_metadata, _require_rasterio, _resampling_method
 from .diagnostics import Diagnostic
+from .raster_registration import (
+    PixelRegistration, RegistrationConversion, geotiff_registration,
+    pixel_registration, require_compatible_registration,
+)
 
 __all__ = [
     "PreparationError", "PreparationGrid", "PreparationSource", "PreparationRecipe",
@@ -76,14 +80,19 @@ def _local(path: str | Path, base: Path) -> Path:
 
 @dataclass(frozen=True)
 class PreparationGrid:
-    """Pixel-area grid. ``geotransform`` uses GDAL order, at pixel corners."""
+    """Registered raster grid with a GDAL corner-normalized transform."""
 
     crs: str
     width: int
     height: int
     geotransform: Sequence[float]
+    registration: PixelRegistration | None = None
+    _registration_declared: bool = field(init=False, compare=False, repr=False)
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "_registration_declared", self.registration is not None)
+        registration = "area" if self.registration is None else pixel_registration(self.registration)
+        object.__setattr__(self, "registration", registration)
         rasterio = _require_rasterio()
         try:
             parsed_crs = rasterio.crs.CRS.from_user_input(self.crs)
@@ -119,12 +128,16 @@ class PreparationGrid:
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
         result["geotransform"] = list(self.geotransform)
+        if not result.pop("_registration_declared"):
+            # Preserve the legacy schema-1 encoding for its implicit area grid.
+            result.pop("registration")
         return result
 
     def same_as(self, other: PreparationGrid) -> bool:
         crs = _require_rasterio().crs.CRS
         return (self.width == other.width and self.height == other.height
                 and self.geotransform == other.geotransform
+                and self.registration == other.registration
                 and crs.from_user_input(self.crs) == crs.from_user_input(other.crs))
 
     def xy(self, column: float, row: float) -> tuple[float, float]:
@@ -146,7 +159,11 @@ class PreparationSource:
     resampling: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
+    registration_conversion: RegistrationConversion | None = None
+
     def __post_init__(self) -> None:
+        if self.registration_conversion is not None:
+            require_compatible_registration("area", "area", self.registration_conversion)
         if not self.source_id or self.kind not in _KINDS:
             _fail("invalid_source", "A stable source_id and supported kind are required.", f"Choose one of {sorted(_KINDS)}.")
         if self.kind in {"elevation", "continuous", "count", "observation"} and not self.units:
@@ -160,6 +177,8 @@ class PreparationSource:
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
+        if self.registration_conversion is None:
+            result.pop("registration_conversion")
         result["path"] = str(self.path)
         result["mask_path"] = str(self.mask_path) if self.mask_path is not None else None
         if self.grid:
@@ -295,7 +314,8 @@ def _decode_raster(source: PreparationSource, path: Path, base: Path) -> tuple[n
                 _fail("missing_crs", "GeoTIFF has no CRS.", "Assign the verified source CRS in an external preparation step.", source.source_id)
             if source.crs and _require_rasterio().crs.CRS.from_user_input(source.crs) != ds.crs:
                 _fail("conflicting_crs", "Declared CRS differs from GeoTIFF metadata.", "Correct the input metadata or source declaration; do not relabel coordinates.", source.source_id)
-            grid = PreparationGrid(str(ds.crs), ds.width, ds.height, ds.transform.to_gdal())
+            grid = PreparationGrid(str(ds.crs), ds.width, ds.height, ds.transform.to_gdal(),
+                                   geotiff_registration(ds))
             if source.grid and not source.grid.same_as(grid):
                 _fail("conflicting_grid", "Declared grid differs from GeoTIFF metadata.", "Correct the grid declaration or the source geotransform.", source.source_id)
             data = ds.read()
@@ -316,7 +336,7 @@ def _decode_raster(source: PreparationSource, path: Path, base: Path) -> tuple[n
             if file_vertical and source.kind == "elevation" and file_vertical.casefold() != str(source.vertical_reference).casefold():
                 _fail("conflicting_vertical_reference", f"File height reference {file_vertical!r} differs from {source.vertical_reference!r}.",
                       "Correct the declaration or supply a documented external datum conversion.", source.source_id)
-            extra["source_pixel_registration"] = ds.tags().get("AREA_OR_POINT", "not declared")
+            extra["source_pixel_registration"] = grid.registration.title()
             extra["source_geotransform_convention"] = "GDAL corner-normalized; samples at half-pixel centres"
             extra["ancillary_identities"] = [{"path": str(Path(p).resolve()), "sha256": _sha(Path(p))}
                                              for p in ds.files if Path(p).resolve() != path]
@@ -478,6 +498,21 @@ def prepare_scene(recipe: PreparationRecipe, *, base_dir: str | Path = ".") -> P
             data, valid, original_grid, extra = _read_raster(source, path, base)
             metadata.update(extra)
             metadata["source_grid"] = original_grid.to_dict()
+            try:
+                shift = require_compatible_registration(
+                    original_grid.registration, recipe.target_grid.registration,
+                    source.registration_conversion,
+                )
+            except ValueError as exc:
+                raise PreparationError("registration_mismatch", str(exc),
+                                       "Declare how samples are converted to the target registration.",
+                                       source.source_id) from exc
+            if shift:
+                operations.append({"operation": "registration_conversion",
+                                   "from": original_grid.registration, "to": recipe.target_grid.registration,
+                                   "native_origin_shift_pixels": [shift, shift],
+                                   "method": source.registration_conversion,
+                                   "measurements_converted": source.kind != "count"})
             if source.kind == "count":
                 if source.resampling not in {None, "native"}:
                     _fail("count_resampling_refused", "Resampling counts would change cell meaning.", "Keep native cells or externally perform documented conservative aggregation.", source.source_id)
@@ -516,7 +551,7 @@ def prepare_scene(recipe: PreparationRecipe, *, base_dir: str | Path = ".") -> P
             if data.shape[0] == 1:
                 data, valid = data[0], valid[0]
             metadata.update({"crs": grid.crs, "source_crs": original_grid.crs, "grid": grid.to_dict(),
-                             "nodata_policy": "separate_validity_mask", "pixel_registration": "area"})
+                             "nodata_policy": "separate_validity_mask", "pixel_registration": grid.registration})
             layer = PreparedLayer(source.source_id, source.kind, grid, data, valid, None, metadata)
             coverage = {"valid_samples": int(np.count_nonzero(valid)), "total_samples": int(valid.size),
                         "valid_fraction": float(np.count_nonzero(valid) / valid.size),
@@ -743,9 +778,13 @@ class PreparedScene:
                 with rasterio.open(path, "w", driver="GTiff", width=layer_grid.width, height=layer_grid.height,
                                    count=4, dtype="uint8", crs=layer_grid.crs, transform=layer_grid.transform) as ds:
                     ds.write(np.moveaxis(rgba, -1, 0))
+                    ds.update_tags(AREA_OR_POINT=layer_grid.registration.title())
                 overlays.append(RasterOverlay(layer.source_id, path=path, crs=layer_grid.crs,
                                              metadata={**layer.metadata, "display_style": styles.get(layer.source_id),
-                                                       "alignment_resampling": "nearest"}))
+                                                       "alignment_resampling": "nearest",
+                                                       **({"registration_conversion": "preserve_sample_locations"}
+                                                          if layer_grid.registration != self.recipe.target_grid.registration
+                                                          else {})}))
         return MapScene(terrain=terrain, lighting=lighting, output=output, camera=camera,
                         layers=overlays, target_crs=self.recipe.target_grid.crs)
 
@@ -801,7 +840,7 @@ class PreparedScene:
         with _require_rasterio().open(terrain_path, "w", driver="GTiff", width=grid.width, height=grid.height,
                                      count=1, dtype=str(heights.dtype), crs=grid.crs, transform=grid.transform) as ds:
             ds.write(heights, 1)
-            ds.update_tags(AREA_OR_POINT="Area", vertical_reference=self.recipe.vertical_reference, units="m")
+            ds.update_tags(AREA_OR_POINT=grid.registration.title(), vertical_reference=self.recipe.vertical_reference, units="m")
         overlays = []
         for index, (layer, rgba) in enumerate(images):
             path = root / f"overlay_{index}.png"
@@ -809,7 +848,8 @@ class PreparedScene:
             overlays.append({"source_id": layer.source_id, "path": str(path), "extent": [0, 0, 1, 1],
                              "sha256": _sha(path), "operation": "display_only_on_target_grid"})
         result = {"schema_version": 1, "terrain_path": str(terrain_path), "terrain_sha256": _sha(terrain_path),
-                  "overlays": overlays, "preparation": self.report, "display_styles": styles,
+                  "overlays": overlays, "grid": grid.to_dict(),
+                  "preparation": self.report, "display_styles": styles,
                   "terrain_void_fill": terrain_void_fill, "viewer_render_verified": False}
         (root / "viewer-assets.json").write_text(_json(result) + "\n", encoding="utf-8")
         return result

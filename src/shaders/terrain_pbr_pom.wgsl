@@ -192,7 +192,7 @@ struct OverlayUniforms {
     params4 : vec4<f32>, // detail_enabled, detail_scale, detail_normal_strength, detail_albedo_noise
     params5 : vec4<f32>, // detail_fade_start, detail_fade_end, output_srgb_eotf, offline_hdr_output
     params6 : vec4<f32>, // material_slope_bias, nodata_height_below, nodata_enabled, raster_rgba
-    params7 : vec4<f32>, // DEM detail strength, terrain_shading_model, reserved, reserved
+    params7 : vec4<f32>, // DEM detail strength, terrain_shading_model, registered raster, reserved
 };
 
 struct IblUniforms {
@@ -826,6 +826,11 @@ fn water_surface_sample(uv: vec2<f32>) -> vec4<f32> {
                    textureLoad(water_mask_tex, b, 0), w.x), w.y);
 }
 
+fn water_coverage(uv: vec2<f32>) -> f32 {
+    let tex_uv = raster_texture_uv(uv, textureDimensions(water_mask_tex));
+    return textureSampleLevel(water_mask_tex, height_samp, tex_uv, 0.0).r;
+}
+
 fn water_surface_normal(uv: vec2<f32>) -> vec3<f32> {
     let p = water_surface_sample(uv).yz;
     let squared = det_barrier(det_dot2(p, p));
@@ -834,7 +839,7 @@ fn water_surface_normal(uv: vec2<f32>) -> vec3<f32> {
 
 fn water_geometry_height(uv: vec2<f32>, terrain_height: f32) -> f32 {
     if (physical_water_enabled() && water_reflection_uniforms.optics.y > 0.5 &&
-        textureSampleLevel(water_mask_tex, height_samp, uv, 0.0).r > 0.001) {
+        water_coverage(uv) > 0.001) {
         return water_surface_sample(uv).w;
     }
     return terrain_height;
@@ -987,6 +992,17 @@ var material_map_samp: sampler;
 // SUTURA: straight-alpha raster drape in the heightmap UV frame.
 @group(6) @binding(17)
 var material_drape_tex: texture_2d<f32>;
+
+// Geometry UV spans the first and last height nodes. Hardware texture UV
+// spans the outer texel edges. Drape texels were baked on the height lattice.
+fn raster_texture_uv(node_uv: vec2<f32>, dimensions: vec2<u32>) -> vec2<f32> {
+    if (u_overlay.params7.z <= 0.5) {
+        return node_uv;
+    }
+    let dims = vec2<f32>(dimensions);
+    let node = det_barrier2(node_uv * (dims - vec2<f32>(1.0)));
+    return det_div2(node + vec2<f32>(0.5), dims);
+}
 
 struct TerrainFrameCounters {
     material_invocations: atomic<u32>,
@@ -4324,7 +4340,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     // Raster sources use row-zero-north coordinates. Reconstruct that
     // orientation from the fullscreen XY plane; ordinary terrain UVs now
     // cover the complete tile after vertex interpolation.
-    if (u_overlay.params6.w > 0.5 && u_terrain.camera_mode_params.x < 0.5) {
+    if ((u_overlay.params6.w > 0.5 || u_overlay.params7.z > 0.5) && u_terrain.camera_mode_params.x < 0.5) {
         let inv_span = det_div(1.0, u_terrain.spacing_h_exag.x);
         uv = det_barrier2(vec2<f32>(det_barrier(input.world_position.x * inv_span) + 0.5,
                                   0.5 - det_barrier(input.world_position.y * inv_span)));
@@ -4434,7 +4450,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     );
     var view_dir = det_normalize3(det_barrier3(camera_pos) - input.world_position);
     let physical_water_here = physical_water_enabled() &&
-        textureSampleLevel(water_mask_tex, height_samp, uv, 0.0).r > 0.001;
+        water_coverage(uv) > 0.001;
     if (physical_water_here) {
         let center_z = det_barrier((u_shading.clamp0.x + u_shading.clamp0.y) * 0.5) * u_terrain.spacing_h_exag.z;
         view_dir = det_normalize3(det_barrier3(camera_pos + det_barrier3(vec3<f32>(0.0, 0.0, center_z))) - input.world_position);
@@ -4470,7 +4486,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     let parallax_uv = clamp(pom_uv, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
     // Water mask is already flipud'd on the Python side to match heightmap orientation,
     // so sample with the same UV as the heightmap (no additional V flip needed).
-    let water_mask_value = textureSampleLevel(water_mask_tex, height_samp, parallax_uv, 0.0).r;
+    let water_mask_value = water_coverage(parallax_uv);
     // Water mask: 0.0 = not water, >0.0 = water (value is shore-distance ratio)
     // Use small epsilon to detect any water, not just shore-distance > 0.5
     let is_water = water_mask_value > 0.001;
@@ -4822,7 +4838,8 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     var overlay_rgba = textureSample(colormap_tex, colormap_samp, lut_uv);
     if (u_overlay.params6.w > 0.5) {
         let dims = textureDimensions(colormap_tex);
-        let cell = clamp(vec2<u32>(clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)) * vec2<f32>(dims)), vec2<u32>(0u), dims - vec2<u32>(1u));
+        let tex_uv = raster_texture_uv(uv, dims);
+        let cell = clamp(vec2<u32>(clamp(tex_uv, vec2<f32>(0.0), vec2<f32>(1.0)) * vec2<f32>(dims)), vec2<u32>(0u), dims - vec2<u32>(1u));
         overlay_rgba = textureLoad(colormap_tex, vec2<i32>(cell), 0);
         if (overlay_rgba.a == 0.0) { discard; }
     }
@@ -4886,7 +4903,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             // image's top-to-bottom row convention, without the old zoom.
             drape_uv = vec2<f32>(input.tex_coord.x, 1.0 - input.tex_coord.y);
         }
-        let drape = textureSampleLevel(material_drape_tex, material_map_samp, drape_uv, 0.0);
+        let drape = textureSampleLevel(material_drape_tex, material_map_samp, raster_texture_uv(drape_uv, textureDimensions(material_drape_tex)), 0.0);
         final_albedo = det_mix3(final_albedo, drape.rgb, drape.a);
     }
 
@@ -6362,8 +6379,10 @@ fn water_reflected_terrain(hit: vec3<f32>, light_dir: vec3<f32>, roughness: f32)
     let t = clamp((raw_height - u_overlay.params0.x) * u_overlay.params0.y, 0.0, 1.0);
     var overlay = textureSampleLevel(colormap_tex, colormap_samp, vec2<f32>(t, 0.5), 0.0).rgb;
     if (u_overlay.params6.w > 0.5) {
-        let dims = vec2<i32>(textureDimensions(colormap_tex));
-        let texel = clamp(vec2<i32>(uv * vec2<f32>(dims)), vec2<i32>(0), dims - vec2<i32>(1));
+        let dimensions = textureDimensions(colormap_tex);
+        let dims = vec2<i32>(dimensions);
+        let tex_uv = raster_texture_uv(uv, dimensions);
+        let texel = clamp(vec2<i32>(tex_uv * vec2<f32>(dims)), vec2<i32>(0), dims - vec2<i32>(1));
         overlay = textureLoad(colormap_tex, texel, 0).rgb;
     }
     let normal = calculate_normal(uv, calculate_texel_size());
@@ -6392,7 +6411,7 @@ fn water_reflected_terrain(hit: vec3<f32>, light_dir: vec3<f32>, roughness: f32)
         albedo = det_mix3(material, overlay, clamp(u_overlay.params0.z, 0.0, 1.0));
     }
     if (material_layer_uniforms.map_flags.w > 0.5) {
-        let drape = textureSampleLevel(material_drape_tex, material_map_samp, uv, 0.0);
+        let drape = textureSampleLevel(material_drape_tex, material_map_samp, raster_texture_uv(uv, textureDimensions(material_drape_tex)), 0.0);
         albedo = det_mix3(albedo, drape.rgb, drape.a);
     }
     let env_normal = rotate_y(terrain_to_env(normal), u_ibl.sin_theta, u_ibl.cos_theta);
