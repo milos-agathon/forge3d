@@ -215,14 +215,14 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "4c64e0f50779",
-    "version": "1.47.1",
+    "git_sha": "569c5a85d9cd",
+    "version": "1.52.0",
     "wgsl_module_hashes": {
       "concordia.ao_filter.shader": "b78182a96a1e3913a29f7d6af1baf83a00b1ccceee6109b6c67cfc6a3e08c8ad",
-      "concordia.atmosphere.shader": "35eff75b79b15dd5f700bf442fda80873b1d3f33f1f3f027119c550f35663a3e",
+      "concordia.atmosphere.shader": "18bca3bc87f5245c292922c191081bf4205aabafa52b35e31f964b0cb29f67f5",
       "concordia.compose.shader": "7a4be4fae4608d5bf09c510aa59c6314536e68e88f0123a771d3ce5a8da9c462",
       "concordia.froxel.shader": "34d669986d8b73d1a5d4c7ab2f39ff98337dc06f314de1e3b3b2404dbe22a08d",
-      "concordia.geometry.shader": "5c81a83571c63a39c123ccb55f33da093ed4ef3e5faa0b8b2021ea1081fffb45",
+      "concordia.geometry.shader": "50eaecb2e594e1df4e928d88796fe45e0d8bf08dfad979510a31b53e7945920e",
       "concordia.gtao.shader": "a17a39c8baf66585c6d892574488a81cb0bc8a100263da51fe53008713589ed0",
       "concordia.gtao_contacts.shader": "50e66f036036a9e1bdb7a283c2e455cbff643f133a04c8af3a5d16b242c70eef",
       "concordia.height_ao.shader": "d98c5153d76c008dac883e56ae9669d07ffdc6c3f09249ffb3cd25111aafffd4",
@@ -231,7 +231,7 @@
       "concordia.scatter.shader": "4cf71b6e2eb469aab514f6596f6d4c55e277e7f23ada5ac2fd5c8370b13195b1",
       "concordia.taa.shader": "59e5f02dc3e1d9cd81ea10076170c4cc36179e8fa22a36efaa0d81e5ed6cd925",
       "terrain.offline.tonemap.pipeline": "621a5f156ac352a671a78e65d7599e5ef974efdc8426829f8975d16af668fe7a",
-      "terrain.shadow_depth.shader": "228860457ad33e87fa6b6523a947453b1bdd65f09e6795746556b2cae94fc5b3",
+      "terrain.shadow_depth.shader": "a64a0899cf40592f95068b62ffbd40212d8f8440d11ef6a3aa1c8682ea943eed",
       "text_overlay_shader": "b21d02a2f703089b81e02e776ef228819aaca8d05f0dd9de1d1108f1da063925"
     }
   },
@@ -245,37 +245,37 @@
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 0.03481600061058998,
+      "gpu_ms": 0.09318400174379349,
       "label": "concordia.resources"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.030719999223947525,
+      "gpu_ms": 0.08806400001049042,
       "label": "concordia.cloud_shadows"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 1.4929920434951782,
+      "gpu_ms": 1.0424319505691528,
       "label": "concordia.shadows"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 7.4792962074279785,
+      "gpu_ms": 8.861696243286133,
       "label": "concordia.geometry"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 3.707904100418091,
+      "gpu_ms": 4.481023788452148,
       "label": "concordia.cartography_depth"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.sky"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 2.32857608795166,
+      "gpu_ms": 4.40115213394165,
       "label": "terrain.main"
     },
     {
@@ -285,67 +285,67 @@
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 2.292736053466797,
+      "gpu_ms": 4.325376033782959,
       "label": "terrain.main"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.06860800087451935,
+      "gpu_ms": 0.22015999257564545,
       "label": "concordia.depth_pyramid"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.08191999793052673,
+      "gpu_ms": 0.2314240038394928,
       "label": "concordia.ao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.060416001826524734,
+      "gpu_ms": 0.17203199863433838,
       "label": "p5.ssao"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0655359998345375,
+      "gpu_ms": 0.2088959962129593,
       "label": "concordia.ssgi"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.053247999399900436,
+      "gpu_ms": 0.17817600071430206,
       "label": "p5.ssgi"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.06963200122117996,
+      "gpu_ms": 0.2017280012369156,
       "label": "concordia.ssr"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.05939200147986412,
+      "gpu_ms": 0.17203199863433838,
       "label": "p5.ssr"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.01228800043463707,
+      "gpu_ms": 0.05632000043988228,
       "label": "concordia.atmosphere"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.035840000957250595,
+      "gpu_ms": 0.11366400122642517,
       "label": "concordia.froxels"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.01228800043463707,
+      "gpu_ms": 0.03379200026392937,
       "label": "concordia.temporal"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.011264000087976456,
+      "gpu_ms": 0.02969600073993206,
       "label": "concordia.output_transform"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 0.006144000217318535,
+      "gpu_ms": 0.027648000046610832,
       "label": "concordia.vectors"
     },
     {
@@ -358,7 +358,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "54390c66c732f73a888ecd73fc59eb75de00eec1208516ea6394aa1d9be34d3faa454aaca8a9458e299520a22cd05049433ffe7ab0f261ba226a53ec5e26f30d",
+    "sig": "9c4e99685d724a9dc6f922172c7b61ba55a051b681b3871f26ddc0352e53bde75a65d489e2c66b717462ffbf2dceb753a7fa20ec7c7c45d81e909fec384a3906",
     "signed_fields": [
       "adapter",
       "allocations",
