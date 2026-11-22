@@ -583,9 +583,14 @@ def _complete_conversion_inventory():
     return sites
 
 
-def _scanned_with_autochiron():
+def _current_production_inventory():
     """The scanned inventory, excluding the exact lossless DD split."""
     return [site for site in _complete_conversion_inventory() if site not in SANCTIONED_DD_SPLITS]
+
+
+def _scanned_with_autochiron():
+    transition = _ledger_data()["registratio"]
+    return _restore_file_inventories(_current_production_inventory(), transition["files"], "REGISTRATIO")
 
 
 def _undo_autochiron_transition(sites):
@@ -1453,22 +1458,25 @@ def _undo_reviewed_transition(current, transition):
     return current
 
 
-def _undo_sync_side(sites, side):
-    """Restore one branch's exact inventory from the merged tree.
+def _restore_file_inventories(sites, files, transition):
+    """Restore a previous exact inventory from the scanned tree.
 
-    Each changed file's ordered merged sites must match the record exactly;
-    they are replaced by that branch's ordered sites for the same file. Files
-    keep the scanner's sorted-path order, so the digest is reproduced exactly.
+    Each changed file's ordered sites must match the result in the ledger. Keep
+    the scanner's sorted-path order when replacing them with the base sites.
     """
-    files = _ledger_data()["nephele_main_sync"][side]["files"]
     by_file = {}
     for site in sites:
         by_file.setdefault(site[0], []).append(site)
     for rel, change in files.items():
-        assert by_file.get(rel, []) == list(map(tuple, change["result"])), f"{side} sync drift in {rel}"
+        assert by_file.get(rel, []) == list(map(tuple, change["result"])), f"{transition} drift in {rel}"
         by_file[rel] = list(map(tuple, change["base"]))
     # Match the scanner's `sorted(Path)` file order, not plain string order.
     return [site for rel in sorted(by_file, key=Path) for site in by_file[rel]]
+
+
+def _undo_sync_side(sites, side):
+    files = _ledger_data()["nephele_main_sync"][side]["files"]
+    return _restore_file_inventories(sites, files, f"{side} sync")
 
 
 def _main_side_inventory():
@@ -2027,5 +2035,23 @@ def test_autochiron_inventory_transition_is_exact():
     )
     base = _undo_autochiron_transition(sites)
     assert (len(base), _inventory_digest(base)) == (
+        transition["base_count"], transition["base_digest"],
+    )
+
+
+def test_registratio_inventory_transition_is_exact():
+    ledger = _ledger_data()
+    transition = ledger["registratio"]
+    previous = ledger["autochiron_main_integration"]
+    assert transition["review"].startswith("APPROVED by Milos")
+    assert (transition["base_count"], transition["base_digest"]) == (
+        previous["result_count"], previous["result_digest"],
+    )
+    sites = _current_production_inventory()
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    restored = _restore_file_inventories(sites, transition["files"], "REGISTRATIO")
+    assert (len(restored), _inventory_digest(restored)) == (
         transition["base_count"], transition["base_digest"],
     )
