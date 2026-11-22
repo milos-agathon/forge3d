@@ -32,6 +32,14 @@ def test_c06_publication_python_surface():
         assert getattr(f3d, name) is getattr(publication, name)
 
 
+def test_iunctura_python_preparation_surface():
+    from forge3d import terrain_fusion
+
+    for name in ("TerrainFusion", "fuse_terrain"):
+        assert name in terrain_fusion.__all__ and name in f3d.__all__
+        assert getattr(f3d, name) is getattr(terrain_fusion, name)
+
+
 def test_d04_python_composition_public_surface():
     from forge3d.map_scene import RenderPassInput, RenderPassSpec
 

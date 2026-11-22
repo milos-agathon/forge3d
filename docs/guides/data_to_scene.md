@@ -56,6 +56,142 @@ aggregation, catalogue/network acquisition, NetCDF/HDF5, generic scientific
 resampling and 3D vector height transformations are outside this local route.
 Unknown routes fail instead of selecting a replacement provider or algorithm.
 
+## Fuse detailed terrain with regional context
+
+`fuse_terrain` takes local single-band elevation sources in priority order,
+highest first. Declare each input as `bare_earth` or `DSM` and supply height
+units and a vertical reference. GeoTIFF georeferencing and masks are read by the
+same path as `prepare_scene`. For a NumPy grid, supply the affine, CRS and
+dimensions in `PreparationSource.grid`. GDAL reports corner transforms for both
+PixelIsArea and PixelIsPoint files. Sample positions are always computed from
+the reported corners at `(column + 0.5, row + 0.5)`.
+
+The target must be projected and axis-aligned. Non-square cells and projected
+linear units such as survey feet are supported. `transition_width_m` is in
+metres in the projected plane. Source grids may be rotated or georeferenced in
+a different horizontal CRS. Choose a north-up target in metres when using the
+existing `PreparedScene.to_scene` and `PreparedScene.viewer_assets` routes.
+
+```python
+import forge3d as f3d
+
+target = f3d.PreparationGrid("EPSG:2056", 2000, 2000, (2560000, 1, 0, 1142000, 0, -1))
+fine = f3d.PreparationSource("fine", "lidar.tif", "elevation", units="m", vertical_reference="LN02")
+regional = f3d.PreparationSource("regional", "regional.tif", "elevation",
+                                 units="m", vertical_reference="LN02")
+fusion = f3d.fuse_terrain(
+    (fine, regional), target, vertical_reference="LN02",
+    surface_kinds={"fine": "bare_earth", "regional": "bare_earth"},
+    transition_width_m=100,
+)
+directory = fusion.save("fused-terrain")
+recipe = f3d.PreparationRecipe.load(directory / "recipe.json")
+prepared = f3d.prepare_scene(recipe)
+prepared.save("prepared-scene")
+```
+
+The example assumes two local GeoTIFFs with the declared reference and coverage.
+Fusion checks vertical reference and surface tags at the dataset and band levels.
+To blend bare earth and surface models deliberately, set
+`allow_mixed_surfaces=True`. The result carries the `mixed` surface tag. For
+inputs without a common verified datum, set `vertical_reference="unresolved"`
+and `allow_unresolved_vertical_reference=True`. Fusion converts heights to
+metres, retains the source declarations in the receipt, and labels the result
+`unresolved`. Both options still require the input declarations to agree with
+the file tags.
+Fusion intersects the available validity masks and excludes samples matching
+either file or explicit nodata before decoding scale and offset. Only finite
+measurements contribute.
+
+Choose a grid and width for your data. Where both a higher-priority DEM and the
+lower-priority composite are valid, measure the Euclidean distance `d` from
+the higher-priority sample centre to the nearest exposed edge of its union of
+valid warped cells. Internal holes have exposed edges. A target crop retains
+exterior validity wherever an edge could affect the transition.
+For width `w`, use `t = clamp(d / w, 0, 1)` and higher-priority weight `t²(3 − 2t)`. This
+weight has zero slope at both endpoints. The raster samples that continuous
+weight at cell centres. Where just one surface is valid, it supplies the
+height directly. Cells with no valid source have a false mask and NaN height.
+
+The declared target centre determines which source pixel supplies coverage.
+Across CRSs, fusion transforms that centre with PyProj from `forge3d[raster]`.
+Centres outside the source or its projection domain, or in a masked source
+pixel, are invalid. Nearest sampling copies the decoded value of the containing
+pixel. Whole-cell windows at matching resolution copy values and validity
+directly.
+
+Bilinear and cubic interpolation use fixed GDAL windows on the target lattice
+and exact coordinate transforms when reprojecting. If a window loses a sample
+whose declared centre has coverage, fusion retries it on the original parent
+affine with the same interpolator and an exact transform. An unresolved sample
+raises `fusion_interpolation_failed` with the source and parent cell.
+Parallel same-CRS grids use the source-to-target pixel scale for their filters.
+For crops, derive the target as
+`whole_grid.window(column, row, width, height)`. It carries the parent origin
+and integer offsets into saved recipes and fusion receipts. Shared cells then
+read the same resampled values and exterior context. Independently calculated
+crop corners can differ from the parent lattice due to floating-point
+translation.
+For a standalone reference through `prepare_scene`, set the elevation source's
+`resampling` to `fusion_nearest`, `fusion_bilinear`, or `fusion_cubic` in the
+recipe. Use the method and target lattice from fusion. These options use
+fusion's input validation, mask policy, datum conversion, and resampler. They
+give the uncorrected height from the source before weighting or calibration.
+For a surface model, declare `metadata={"surface_kind": "DSM"}` on the source.
+Use an `unresolved` recipe reference for a units-only comparison.
+The usual `nearest`, `bilinear`, and `cubic` preparation methods derive their
+warp from the requested extent.
+
+`fusion.height` and `fusion.weights` use Float64. Weight planes follow
+`fusion.source_ids` and retain each source's effective contribution through
+all the blends. `fusion.source_index` gives the index of the largest
+contribution and uses `-1` for voids. Ties follow input priority.
+`fusion.dominant_source_id` gives the corresponding source ID or `None`.
+
+Each source reports all-overlap statistics against the accumulated
+lower-priority surface. For a bias estimate, pass a boolean mask of known
+stable, low-slope target cells in `bias_estimation_masks`, keyed by source ID.
+The `bias_estimate` entry reports the eligible sample count, signed median of
+higher minus lower heights, median absolute deviation, and selection checksum.
+When no mask is supplied, the estimate is null. A supplied mask with no
+eligible overlap has zero samples and null median and spread.
+
+An optional `max_bias_slope` in metres of rise per metre of run filters the
+selection on both surfaces. A sample then needs four valid cardinal neighbours.
+For each axis the larger absolute one-cell slope is used, and the magnitude of
+the two axis slopes must meet the limit. Use `calibration_masks` for the same
+estimator with correction applied. Fusion subtracts the selected median from
+the source's valid heights and records the applied offset. An unresolved result
+continues to carry its unresolved datum label after any local bias correction.
+
+For each blend stage, `overlap_statistics[source_id]["blend_steps"]` counts
+horizontal and vertical neighbour pairs with valid output, at least one cell
+in the overlap, and a fractional or changing source weight. Along with
+`pair_count`, it records the absolute maxima `max_total_step_m`,
+`max_blend_step_m`, and `max_blend_step_bound_m` in metres. The maxima can come from
+different pairs. Fusion accounts for the terrain's own slope by evaluating the
+overlap endpoint at the neighbouring cell's weight. It checks each remaining
+step against the local source height difference times the weight change, with a
+Float64 roundoff allowance. Magnitudes beyond the Float64 range use JSON
+integers. A stage with no comparable pairs has no step record.
+
+`TerrainFusion.save` publishes a new directory with these files.
+
+| File | Contents |
+| --- | --- |
+| `terrain.tif` | Float64 heights in metres, internal validity mask, target georeference, surface tag, and vertical-reference tag |
+| `weights.npy` | Float64 contribution planes in recorded priority order |
+| `source_index.npy` | Int64 dominant-source index on the same grid, with `-1` for voids |
+| `fusion.json` | Versioned receipt with input and auxiliary hashes, registration, conversions, warp settings, overlap statistics, and output checksums |
+| `recipe.json` | Standard single-elevation preparation recipe pointing to the fused GeoTIFF |
+
+`TerrainFusion.load(directory)` verifies the receipt against the checksum in
+`recipe.json`, then verifies the raster and attribution checksums. It reopens the
+original fusion without its DEMs. Use the regular preparation
+route for layers, display and rendering. For a fused snapshot with voids, the
+usual explicit `terrain_void_fill` applies only when building render assets.
+Fusion works on one whole target grid and keeps one weight plane per DEM.
+
 ## Declare once, inspect, reuse
 
 Grids use horizontal two-dimensional coordinate systems. Compound/vertical,
