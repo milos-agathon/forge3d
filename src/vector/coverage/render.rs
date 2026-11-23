@@ -4,7 +4,7 @@ use super::{
 };
 use crate::core::error::{RenderError, RenderResult};
 use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Instant;
 
 const COVERAGE_MEMORY_BUDGET: u64 = 512 * 1024 * 1024;
@@ -40,6 +40,28 @@ pub(crate) struct CoverageCompiledScene {
     geometry: CoverageGeometry,
     bin_layout: BinLayout,
     raster_plan: CoverageRasterPlan,
+    pipelines: Mutex<Option<DevicePipelines>>,
+}
+
+struct DevicePipelines {
+    device: Weak<wgpu::Device>,
+    pipelines: Arc<CoveragePipelines>,
+}
+
+struct CoveragePipelines {
+    binner: CoverageBinner,
+    rasterizer: CoverageRasterizer,
+    resolver: CoverageResolver,
+}
+
+impl CoveragePipelines {
+    fn new(device: &wgpu::Device) -> Self {
+        Self {
+            binner: CoverageBinner::new(device),
+            rasterizer: CoverageRasterizer::new(device),
+            resolver: CoverageResolver::new(device),
+        }
+    }
 }
 
 impl CoverageCompiledScene {
@@ -55,6 +77,7 @@ pub(crate) fn compile_coverage(geometry: CoverageGeometry) -> RenderResult<Cover
         geometry,
         bin_layout,
         raster_plan,
+        pipelines: Mutex::new(None),
     })
 }
 
@@ -69,7 +92,9 @@ pub fn render_coverage(
 ) -> RenderResult<CoverageRenderOutput> {
     let bin_layout = BinLayout::measure(geometry)?;
     let raster_plan = CoverageRasterPlan::compile(geometry)?;
-    render_prepared_coverage(device, queue, geometry, bin_layout, &raster_plan)
+    let started = Instant::now();
+    let pipelines = CoveragePipelines::new(device);
+    render_prepared_coverage(device, queue, geometry, bin_layout, &raster_plan, &pipelines, started)
 }
 
 pub(crate) fn render_compiled_coverage(
@@ -77,13 +102,41 @@ pub(crate) fn render_compiled_coverage(
     queue: &Arc<wgpu::Queue>,
     compiled: &CoverageCompiledScene,
 ) -> RenderResult<CoverageRenderOutput> {
-    render_prepared_coverage(
-        device,
-        queue,
-        &compiled.geometry,
-        compiled.bin_layout,
-        &compiled.raster_plan,
-    )
+    let started = Instant::now();
+    let device_key = Arc::downgrade(device);
+    let cached = compiled
+        .pipelines
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .as_ref()
+        .filter(|entry| Weak::ptr_eq(&entry.device, &device_key))
+        .map(|entry| Arc::clone(&entry.pipelines));
+    let render = |pipelines: &CoveragePipelines| {
+        render_prepared_coverage(
+            device,
+            queue,
+            &compiled.geometry,
+            compiled.bin_layout,
+            &compiled.raster_plan,
+            pipelines,
+            started,
+        )
+    };
+    if let Some(pipelines) = cached {
+        return render(&pipelines);
+    }
+
+    let pipelines = Arc::new(CoveragePipelines::new(device));
+    let output = render(&pipelines)?;
+    // Cache only pipelines that executed successfully on this device without a
+    // degradation. Buffers and bind groups are still created for each frame.
+    if crate::core::degradation::active_capture_is_clean() {
+        *compiled.pipelines.lock().unwrap_or_else(|error| error.into_inner()) = Some(DevicePipelines {
+            device: device_key,
+            pipelines,
+        });
+    }
+    Ok(output)
 }
 
 fn render_prepared_coverage(
@@ -92,13 +145,12 @@ fn render_prepared_coverage(
     geometry: &CoverageGeometry,
     bin_layout: BinLayout,
     raster_plan: &CoverageRasterPlan,
+    pipelines: &CoveragePipelines,
+    started: Instant,
 ) -> RenderResult<CoverageRenderOutput> {
-    let started = Instant::now();
-    let binner = CoverageBinner::new(device);
+    let CoveragePipelines { binner, rasterizer, resolver } = pipelines;
     let bins = binner.prepare_compiled(device, geometry, bin_layout)?;
-    let rasterizer = CoverageRasterizer::new(device);
     let raster = rasterizer.prepare_compiled(device, geometry, &bins, raster_plan)?;
-    let resolver = CoverageResolver::new(device);
     let resolved = resolver.prepare(device, geometry, &bins, &raster)?;
 
     // `prepare` initializes primitive, baseline, rule, color, and parameter
@@ -427,19 +479,18 @@ fn map_buffer<T: bytemuck::Pod>(
 }
 
 fn linear_to_straight_rgba8(linear: &[f32]) -> Vec<u8> {
-    // Writes through a pre-sized buffer instead of pushing one byte at a time.
-    // At 1920x1080 the push form spent 18.7 ms on 8.3M capacity-checked pushes
-    // against 14.6 ms here. The per-channel arithmetic and its order are
-    // unchanged, so the RGBA8 output and its provenance hash are identical.
     let mut output = vec![0_u8; (linear.len() / 4) * 4];
     for (bytes, pixel) in output.chunks_exact_mut(4).zip(linear.chunks_exact(4)) {
         let alpha = pixel[3].clamp(0.0, 1.0);
-        let inverse_alpha = if alpha > 0.0 { alpha.recip() } else { 0.0 };
-        for channel in 0..3 {
-            let straight = (pixel[channel] * inverse_alpha).clamp(0.0, 1.0);
-            bytes[channel] = (straight * 255.0).round() as u8;
+        // The zero-filled buffer already contains transparent pixels.
+        if alpha > 0.0 {
+            let inverse_alpha = alpha.recip();
+            for channel in 0..3 {
+                let straight = (pixel[channel] * inverse_alpha).clamp(0.0, 1.0);
+                bytes[channel] = (straight * 255.0).round() as u8;
+            }
+            bytes[3] = (alpha * 255.0).round() as u8;
         }
-        bytes[3] = (alpha * 255.0).round() as u8;
     }
     output
 }
