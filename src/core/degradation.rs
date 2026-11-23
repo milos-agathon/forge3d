@@ -47,6 +47,10 @@ pub fn begin_degradation_capture() {
     CAPTURE.with(|capture| *capture.borrow_mut() = Some(Vec::new()));
 }
 
+pub(crate) fn active_capture_is_clean() -> bool {
+    CAPTURE.with(|capture| capture.borrow().as_ref().is_some_and(Vec::is_empty))
+}
+
 pub fn finish_degradation_capture() -> Vec<Degradation> {
     CAPTURE.with(|capture| capture.borrow_mut().take().unwrap_or_default())
 }
