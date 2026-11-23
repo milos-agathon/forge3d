@@ -7,6 +7,7 @@ import copy
 import hashlib
 import importlib.util
 import json
+import shutil
 import struct
 import subprocess
 import sys
@@ -95,8 +96,9 @@ def _render_memory(*samples: tuple[int, int]) -> dict:
     }
 
 
-def _make_fixture(tmp_path: Path) -> tuple[argparse.Namespace, dict]:
-    repo = tmp_path / "repo"
+@pytest.fixture(scope="module")
+def evidence_template(tmp_path_factory) -> tuple[Path, str, dict]:
+    repo = tmp_path_factory.mktemp("substratia-evidence-template")
     artifacts = repo / "artifacts"
     golden_dir = repo / "tests" / "golden" / "terrain"
     golden_dir.mkdir(parents=True)
@@ -210,6 +212,17 @@ def _make_fixture(tmp_path: Path) -> tuple[argparse.Namespace, dict]:
     _write_json(artifacts / "adapter-probe.json", probe)
     _write_json(artifacts / "render-process-adapter.json", probe["probe"])
     (artifacts / "pytest-junit.xml").write_text(_junit(), encoding="utf-8")
+    return repo, candidate_sha, results
+
+
+@pytest.fixture
+def evidence_fixture(tmp_path, evidence_template) -> tuple[argparse.Namespace, dict]:
+    template, candidate_sha, results = evidence_template
+    # Copy the committed repository and artifacts so each negative control can
+    # corrupt its own inputs without paying for another git init and commit.
+    repo = tmp_path / "repo"
+    shutil.copytree(template, repo)
+    artifacts = repo / "artifacts"
     args = argparse.Namespace(
         artifact_dir=artifacts,
         repository=repo,
@@ -219,15 +232,15 @@ def _make_fixture(tmp_path: Path) -> tuple[argparse.Namespace, dict]:
         junit=artifacts / "pytest-junit.xml",
         expected_backend="vulkan",
     )
-    return args, results
+    return args, copy.deepcopy(results)
 
 
 def _rewrite_results(args: argparse.Namespace, results: dict) -> None:
     _write_json(args.artifact_dir / "results.json", results)
 
 
-def test_valid_physical_evidence_writes_bound_pass_and_lane_marker(tmp_path: Path) -> None:
-    args, _ = _make_fixture(tmp_path)
+def test_valid_physical_evidence_writes_bound_pass_and_lane_marker(evidence_fixture) -> None:
+    args, _ = evidence_fixture
     report = reporter.verify(args)
     assert report["status"] == "PASS"
     assert report["candidate_sha"] == args.candidate_sha
@@ -247,8 +260,8 @@ def test_valid_physical_evidence_writes_bound_pass_and_lane_marker(tmp_path: Pat
     assert metrics["render_memory_sample_count"] == 8
 
 
-def test_render_memory_at_exact_limit_passes(tmp_path: Path) -> None:
-    args, results = _make_fixture(tmp_path)
+def test_render_memory_at_exact_limit_passes(evidence_fixture) -> None:
+    args, results = evidence_fixture
     results["gates"]["partial_normal_residency"]["render_memory"] = _render_memory(
         (reporter.MEMORY_LIMIT_BYTES, 0), (1 << 20, 0), (1 << 20, 0)
     )
@@ -342,9 +355,9 @@ def _mutate_render_memory(memory: dict, mutation: str) -> None:
     ],
 )
 def test_render_memory_evidence_has_hard_negative_controls(
-    tmp_path: Path, gate: str, mutation: str, message: str
+    evidence_fixture, gate: str, mutation: str, message: str
 ) -> None:
-    args, results = _make_fixture(tmp_path)
+    args, results = evidence_fixture
     if mutation == "missing_block":
         results["gates"][gate].pop("render_memory")
     else:
@@ -356,15 +369,15 @@ def test_render_memory_evidence_has_hard_negative_controls(
 
 
 @pytest.mark.parametrize("candidate", ["HEAD", "abc123", "A" * 40, "0" * 40])
-def test_candidate_sha_must_be_explicit_exact_clean_head(tmp_path: Path, candidate: str) -> None:
-    args, _ = _make_fixture(tmp_path)
+def test_candidate_sha_must_be_explicit_exact_clean_head(evidence_fixture, candidate: str) -> None:
+    args, _ = evidence_fixture
     args.candidate_sha = candidate
     with pytest.raises(reporter.EvidenceError):
         reporter.verify(args)
 
 
-def test_tracked_dirty_tree_is_rejected(tmp_path: Path) -> None:
-    args, _ = _make_fixture(tmp_path)
+def test_tracked_dirty_tree_is_rejected(evidence_fixture) -> None:
+    args, _ = evidence_fixture
     (args.repository / "README.md").write_text("dirty\n", encoding="utf-8")
     with pytest.raises(reporter.EvidenceError, match="working-tree changes"):
         reporter.verify(args)
@@ -380,9 +393,9 @@ def test_tracked_dirty_tree_is_rejected(tmp_path: Path) -> None:
     ],
 )
 def test_software_virtual_and_paravirtual_adapters_are_rejected(
-    tmp_path: Path, device_type: str, name: str
+    evidence_fixture, device_type: str, name: str
 ) -> None:
-    args, _ = _make_fixture(tmp_path)
+    args, _ = evidence_fixture
     probe = _read(args.adapter_probe)
     probe["probe"]["device_type"] = device_type
     probe["probe"]["name"] = name
@@ -395,8 +408,8 @@ def _read(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_wrong_backend_is_rejected(tmp_path: Path) -> None:
-    args, _ = _make_fixture(tmp_path)
+def test_wrong_backend_is_rejected(evidence_fixture) -> None:
+    args, _ = evidence_fixture
     probe = _read(args.adapter_probe)
     probe["requested_backend"] = "metal"
     probe["probe"]["backend"] = "metal"
@@ -407,9 +420,9 @@ def test_wrong_backend_is_rejected(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("fallback", [True, None])
 def test_nvidia_probe_must_explicitly_reject_software_fallback(
-    tmp_path: Path, fallback: bool | None
+    evidence_fixture, fallback: bool | None
 ) -> None:
-    args, _ = _make_fixture(tmp_path)
+    args, _ = evidence_fixture
     probe = _read(args.adapter_probe)
     if fallback is None:
         probe["probe"].pop("software_fallback")
@@ -420,8 +433,8 @@ def test_nvidia_probe_must_explicitly_reject_software_fallback(
         reporter.verify(args)
 
 
-def test_nvidia_probe_requires_discrete_gpu(tmp_path: Path) -> None:
-    args, _ = _make_fixture(tmp_path)
+def test_nvidia_probe_requires_discrete_gpu(evidence_fixture) -> None:
+    args, _ = evidence_fixture
     probe = _read(args.adapter_probe)
     probe["probe"]["device_type"] = "integratedgpu"
     _write_json(args.adapter_probe, probe)
@@ -429,8 +442,8 @@ def test_nvidia_probe_requires_discrete_gpu(tmp_path: Path) -> None:
         reporter.verify(args)
 
 
-def test_nvidia_name_cannot_spoof_non_nvidia_vendor(tmp_path: Path) -> None:
-    args, _ = _make_fixture(tmp_path)
+def test_nvidia_name_cannot_spoof_non_nvidia_vendor(evidence_fixture) -> None:
+    args, _ = evidence_fixture
     probe = _read(args.adapter_probe)
     probe["probe"]["vendor"] = 0x1002
     _write_json(args.adapter_probe, probe)
@@ -438,8 +451,8 @@ def test_nvidia_name_cannot_spoof_non_nvidia_vendor(tmp_path: Path) -> None:
         reporter.verify(args)
 
 
-def test_nvidia_vendor_cannot_spoof_non_nvidia_name(tmp_path: Path) -> None:
-    args, _ = _make_fixture(tmp_path)
+def test_nvidia_vendor_cannot_spoof_non_nvidia_name(evidence_fixture) -> None:
+    args, _ = evidence_fixture
     probe = _read(args.adapter_probe)
     probe["probe"]["name"] = "AMD Radeon RX 7900 XT"
     _write_json(args.adapter_probe, probe)
@@ -447,8 +460,8 @@ def test_nvidia_vendor_cannot_spoof_non_nvidia_name(tmp_path: Path) -> None:
         reporter.verify(args)
 
 
-def test_render_process_adapter_must_match_workflow_probe(tmp_path: Path) -> None:
-    args, _ = _make_fixture(tmp_path)
+def test_render_process_adapter_must_match_workflow_probe(evidence_fixture) -> None:
+    args, _ = evidence_fixture
     render_probe = _read(args.render_adapter)
     render_probe["device"] += 1
     _write_json(args.render_adapter, render_probe)
@@ -456,8 +469,8 @@ def test_render_process_adapter_must_match_workflow_probe(tmp_path: Path) -> Non
         reporter.verify(args)
 
 
-def test_corrupt_png_crc_is_rejected(tmp_path: Path) -> None:
-    args, _ = _make_fixture(tmp_path)
+def test_corrupt_png_crc_is_rejected(evidence_fixture) -> None:
+    args, _ = evidence_fixture
     path = args.artifact_dir / "actual_normal.png"
     data = bytearray(path.read_bytes())
     data[-8] ^= 0x01
@@ -466,8 +479,8 @@ def test_corrupt_png_crc_is_rejected(tmp_path: Path) -> None:
         reporter.verify(args)
 
 
-def test_artifact_golden_must_be_candidate_tracked_bytes(tmp_path: Path) -> None:
-    args, _ = _make_fixture(tmp_path)
+def test_artifact_golden_must_be_candidate_tracked_bytes(evidence_fixture) -> None:
+    args, _ = evidence_fixture
     (args.artifact_dir / "golden_normal.png").write_bytes(
         (args.artifact_dir / "golden_baseline.png").read_bytes()
     )
@@ -475,24 +488,24 @@ def test_artifact_golden_must_be_candidate_tracked_bytes(tmp_path: Path) -> None
         reporter.verify(args)
 
 
-def test_noncanonical_golden_filename_is_rejected(tmp_path: Path) -> None:
-    args, results = _make_fixture(tmp_path)
+def test_noncanonical_golden_filename_is_rejected(evidence_fixture) -> None:
+    args, results = evidence_fixture
     results["gates"]["normal_lighting_ssim"]["golden_normal"] = "golden_baseline.png"
     _rewrite_results(args, results)
     with pytest.raises(reporter.EvidenceError, match="non-canonical"):
         reporter.verify(args)
 
 
-def test_declared_image_metrics_are_recomputed(tmp_path: Path) -> None:
-    args, results = _make_fixture(tmp_path)
+def test_declared_image_metrics_are_recomputed(evidence_fixture) -> None:
+    args, results = evidence_fixture
     results["gates"]["normal_lighting_ssim"]["ssim_delta"] = 0.99
     _rewrite_results(args, results)
     with pytest.raises(reporter.EvidenceError, match="does not match recomputation"):
         reporter.verify(args)
 
 
-def test_declared_rgba_hash_is_recomputed_from_decoded_pixels(tmp_path: Path) -> None:
-    args, results = _make_fixture(tmp_path)
+def test_declared_rgba_hash_is_recomputed_from_decoded_pixels(evidence_fixture) -> None:
+    args, results = evidence_fixture
     results["gates"]["normal_lighting_ssim"][
         "actual_normal_rgba_sha256"
     ] = "0" * 64
@@ -501,8 +514,8 @@ def test_declared_rgba_hash_is_recomputed_from_decoded_pixels(tmp_path: Path) ->
         reporter.verify(args)
 
 
-def test_actual_image_cannot_be_replaced_while_keeping_claimed_hash(tmp_path: Path) -> None:
-    args, _ = _make_fixture(tmp_path)
+def test_actual_image_cannot_be_replaced_while_keeping_claimed_hash(evidence_fixture) -> None:
+    args, _ = evidence_fixture
     (args.artifact_dir / "actual_normal.png").write_bytes(
         (args.artifact_dir / "actual_baseline.png").read_bytes()
     )
@@ -511,15 +524,15 @@ def test_actual_image_cannot_be_replaced_while_keeping_claimed_hash(tmp_path: Pa
 
 
 @pytest.mark.parametrize("junit_status", ["failure", "error", "skipped"])
-def test_junit_requires_each_core_test_to_pass(tmp_path: Path, junit_status: str) -> None:
-    args, _ = _make_fixture(tmp_path)
+def test_junit_requires_each_core_test_to_pass(evidence_fixture, junit_status: str) -> None:
+    args, _ = evidence_fixture
     args.junit.write_text(_junit(junit_status), encoding="utf-8")
     with pytest.raises(reporter.EvidenceError, match="did not pass"):
         reporter.verify(args)
 
 
-def test_junit_requires_all_four_exact_core_tests(tmp_path: Path) -> None:
-    args, _ = _make_fixture(tmp_path)
+def test_junit_requires_all_four_exact_core_tests(evidence_fixture) -> None:
+    args, _ = evidence_fixture
     args.junit.write_text(_junit(omitted=reporter.CORE_TESTS[-1]), encoding="utf-8")
     with pytest.raises(reporter.EvidenceError, match="exactly one"):
         reporter.verify(args)
@@ -536,9 +549,9 @@ def test_junit_requires_all_four_exact_core_tests(tmp_path: Path) -> None:
     ],
 )
 def test_non_image_claims_have_hard_negative_controls(
-    tmp_path: Path, mutation: str, message: str
+    evidence_fixture, mutation: str, message: str
 ) -> None:
-    args, original = _make_fixture(tmp_path)
+    args, original = evidence_fixture
     results = copy.deepcopy(original)
     gates = results["gates"]
     if mutation == "zero_family":
@@ -559,8 +572,8 @@ def test_non_image_claims_have_hard_negative_controls(
         reporter.verify(args)
 
 
-def test_failed_verification_never_writes_ran_or_pass_markers(tmp_path: Path) -> None:
-    args, results = _make_fixture(tmp_path)
+def test_failed_verification_never_writes_ran_or_pass_markers(evidence_fixture) -> None:
+    args, results = evidence_fixture
     results["candidate_sha"] = "0" * 40
     _rewrite_results(args, results)
     with pytest.raises(reporter.EvidenceError):
