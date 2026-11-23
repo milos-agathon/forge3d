@@ -525,7 +525,19 @@ def test_analytic_output_is_byte_identical_across_two_runs():
     print(f"LIMES_DETERMINISM first={first_hash} second={second_hash}")
     assert first_hash == second_hash
     assert np.array_equal(first["rgba"], second["rgba"])
+    first_report = json.loads(first["report"]["execution_report_json"])
     report = json.loads(second["report"]["execution_report_json"])
+    first_allocations = first_report["allocations"]["by_label"]
+    assert first_allocations["vf.Vector.Coverage.PixelDispatch"] > 0
+    assert {
+        label: size
+        for label, size in first_allocations.items()
+        if label.startswith("vf.Vector.Coverage.")
+    } == {
+        label: size
+        for label, size in report["allocations"]["by_label"].items()
+        if label.startswith("vf.Vector.Coverage.")
+    }
     assert set(report["engine"]["wgsl_module_hashes"]) == {
         "vector_coverage_bin.wgsl",
         "vector_coverage_raster.wgsl",
