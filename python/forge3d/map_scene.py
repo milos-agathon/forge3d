@@ -1771,17 +1771,17 @@ def _build_mapscene_terrain_params(
         # elevation range above the aim, not just the colour domain.
         import numpy as np
 
-        heights = np.asarray(heightmap, dtype=np.float64)
-        finite = heights[np.isfinite(heights)]
-        if finite.size:
-            vertical = max(abs(float(finite.min())), abs(float(finite.max()))) * float(
-                settings.get("exaggeration") or 1.0
-            )
-        else:
-            vertical = 0.0
+        # Reuse the original array: a float64 copy plus a finite mask cost
+        # tens of MiB on a 2048² DEM.
+        try:
+            low = float(np.nanmin(heightmap))
+            high = float(np.nanmax(heightmap))
+        except (ValueError, TypeError):
+            low = high = 0.0
+        vertical = (max(high, 0.0) - min(low, 0.0)) * float(settings.get("exaggeration") or 1.0)
         clip = (
             clip[0],
-            max(clip[1], float(recipe.camera.distance) * 1.2 + vertical + 0.5 * terrain_span),
+            max(clip[1], float(recipe.camera.distance) * 1.2) + vertical + 0.5 * terrain_span,
         )
     preset_albedo = "mix" if preset_name else "colormap"
     preset_colormap_strength = 0.5 if preset_name else 1.0
@@ -4100,7 +4100,9 @@ def _terrain_grid_frame(
             height = float(array_shape[0])
     transform = None
     shape: tuple[int, int] | None = None
-    grid = _terrain_alignment_grid(terrain)
+    # A metadata affine without width/height still describes a grid: use the
+    # inline array shape so the transform is recognised.
+    grid = _terrain_alignment_grid(terrain, fallback_shape=(int(height), int(width)))
     if grid is not None:
         if crs is None:
             crs = str(grid.get("crs") or "") or None
@@ -4138,13 +4140,24 @@ def _terrain_grid_frame(
             raster_crs = rasterio.crs.CRS.from_user_input(crs)
             if raster_crs.is_projected:
                 span *= float(raster_crs.linear_units_factor[1])
-            elif raster_crs.is_geographic and bounds is not None:
+            elif raster_crs.is_geographic:
                 from pyproj import Geod
 
                 geod = Geod(ellps="WGS84")
-                west, south, east, north = bounds
-                _, _, span_x = geod.inv(west, south, east, south)
-                _, _, span_y = geod.inv(west, south, west, north)
+                if transform is not None:
+                    # Measure along the raster edges, not the axis-aligned bbox:
+                    # a rotated degree grid's diagonal overstates its span.
+                    origin = transform * (0.0, 0.0)
+                    col_end = transform * (width, 0.0)
+                    row_end = transform * (0.0, height)
+                    _, _, span_x = geod.inv(origin[0], origin[1], col_end[0], col_end[1])
+                    _, _, span_y = geod.inv(origin[0], origin[1], row_end[0], row_end[1])
+                elif bounds is not None:
+                    west, south, east, north = bounds
+                    _, _, span_x = geod.inv(west, south, east, south)
+                    _, _, span_y = geod.inv(west, south, west, north)
+                else:
+                    span_x = span_y = 0.0
                 span = max(span_x, span_y)
         except Exception:
             pass

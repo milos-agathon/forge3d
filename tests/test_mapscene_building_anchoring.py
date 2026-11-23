@@ -588,3 +588,95 @@ def test_geodesic_span_uses_distance_not_azimuth(monkeypatch):
         metadata={"bounds": BOUNDS, "resolution": (0.0009, 0.0008)},
     )
     assert map_scene._terrain_frame(terrain)[2] == pytest.approx(22189.44)
+
+
+# --- Milos's fourth review ---------------------------------------------------
+
+def test_inline_dem_shape_matches_explicit_dimensions(tmp_path):
+    from affine import Affine
+
+    path = tmp_path / "inline.tif"
+    transform = Affine.translation(500000.0, 5200000.0) * Affine.scale(100.0, -100.0)
+    import rasterio
+
+    with rasterio.open(
+        path, "w", driver="GTiff", width=100, height=100, count=1,
+        dtype="float32", crs="EPSG:32632", transform=transform,
+    ) as dataset:
+        dataset.write(np.zeros((100, 100), np.float32), 1)
+
+    inline = f3d.TerrainSource(
+        data=np.zeros((100, 100), np.float32), crs="EPSG:32632",
+        metadata={"transform": transform},
+    )
+    explicit = f3d.TerrainSource(
+        data=np.zeros((100, 100), np.float32), crs="EPSG:32632",
+        metadata={"transform": transform, "width": 100, "height": 100},
+    )
+    frame_inline = map_scene._terrain_grid_frame(inline)
+    frame_explicit = map_scene._terrain_grid_frame(explicit)
+    assert frame_inline[2] == frame_explicit[2] == pytest.approx(10000.0)
+    assert frame_inline[4] == frame_explicit[4] == (100, 100)
+
+    path_geo = tmp_path / "corner.geojson"
+    path_geo.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature", "id": "small",
+            "properties": {"height": 100.0, "roof:shape": "flat"},
+            "geometry": {"type": "Polygon", "coordinates": [[
+                [509900.0, 5199900.0], [510000.0, 5199900.0],
+                [510000.0, 5200000.0], [509900.0, 5200000.0],
+                [509900.0, 5199900.0],
+            ]]},
+        }],
+    }), encoding="utf-8")
+    layer = f3d.MapSceneBuildingLayer.from_geojson(path_geo, metadata={"source_crs": "EPSG:32632"})
+    for frame in (frame_inline, frame_explicit):
+        batches = map_scene._native_building_mesh_batches_for_layers(
+            [layer], frame[0], frame[2], frame[1], frame[3], frame[4]
+        )
+        positions = np.asarray(batches[0]["positions"], dtype=np.float64)
+        assert np.ptp(positions[:, [0, 2]], axis=0) == pytest.approx((0.017, 0.017), abs=1e-3)
+
+
+def test_rotated_geographic_grid_measures_raster_edges(tmp_path):
+    from affine import Affine
+
+    path = tmp_path / "geo_rot.tif"
+    transform = Affine.translation(0.0, 0.0) * Affine.rotation(45) * Affine.scale(0.00078, -0.00078)
+    import rasterio
+
+    with rasterio.open(
+        path, "w", driver="GTiff", width=128, height=128, count=1,
+        dtype="float32", crs="EPSG:4326", transform=transform,
+    ) as dataset:
+        dataset.write(np.zeros((128, 128), np.float32), 1)
+
+    span = map_scene._terrain_frame(f3d.TerrainSource(path=str(path), crs="EPSG:4326"))[2]
+    assert span == pytest.approx(11095.0, rel=0.05)
+
+
+@engine_required
+def test_mixed_elevation_stays_inside_the_far_plane(tmp_path):
+    scene = _country_scene([])
+    dem = np.full((128, 128), -1800.0, dtype=np.float32)
+    dem[:64, :] = 1800.0
+    scene.recipe.terrain.data = dem
+    settings = dict(scene.recipe.lighting.settings or {})
+    settings["exaggeration"] = 4.0
+    scene.recipe.lighting.settings = settings
+
+    params = map_scene._build_mapscene_terrain_params(
+        scene.recipe, dem, (128, 128), projection_only=True
+    )
+    required = 24000.0 * 1.2 + (1800.0 - (-1800.0)) * 4.0 + 0.5 * METRIC_SPAN
+    assert params.clip[1] >= required - 1.0
+
+    out = tmp_path / "mixed.png"
+    scene.render(str(out))
+    from PIL import Image
+
+    frame = np.asarray(Image.open(out).convert("RGB"), dtype=np.float32)
+    assert float(frame[:64].std()) > 1.0, "the high half did not render"
+    assert float(frame[64:].std()) > 1.0, "the low half was clipped to background"
