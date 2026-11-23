@@ -1,9 +1,12 @@
 use super::{
-    raster::CoverageRasterPlan, BinLayout, CoverageBinner, CoverageGeometry, CoverageRasterizer,
-    CoverageResolver, PrimitiveKind,
+    raster::CoverageRasterPlan, BinLayout, CoverageBinner, CoverageBins, CoverageGeometry,
+    CoverageRasterResources, CoverageRasterizer, CoverageResolveResources, CoverageResolver,
+    PrimitiveKind,
 };
 use crate::core::error::{RenderError, RenderResult};
-use crate::core::resource_tracker::{tracked_create_buffer, TrackedBuffer};
+use crate::core::resource_tracker::{
+    extend_ledger_capture, tracked_create_buffer, AllocationOwner, TrackedBuffer,
+};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Instant;
 
@@ -40,33 +43,65 @@ pub(crate) struct CoverageCompiledScene {
     geometry: CoverageGeometry,
     bin_layout: BinLayout,
     raster_plan: CoverageRasterPlan,
-    pipelines: Mutex<Option<DevicePipelines>>,
+    device_resources: Mutex<Option<DeviceCoverageResources>>,
 }
 
-struct DevicePipelines {
+struct DeviceCoverageResources {
     device: Weak<wgpu::Device>,
-    pipelines: Arc<CoveragePipelines>,
+    owner: AllocationOwner,
+    frame: CoverageFrameResources,
 }
 
-struct CoveragePipelines {
+struct CoverageFrameResources {
     binner: CoverageBinner,
     rasterizer: CoverageRasterizer,
     resolver: CoverageResolver,
+    bins: CoverageBins,
+    raster: CoverageRasterResources,
+    resolved: CoverageResolveResources,
 }
 
-impl CoveragePipelines {
-    fn new(device: &wgpu::Device) -> Self {
-        Self {
-            binner: CoverageBinner::new(device),
-            rasterizer: CoverageRasterizer::new(device),
-            resolver: CoverageResolver::new(device),
-        }
+impl CoverageFrameResources {
+    fn prepare(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        geometry: &CoverageGeometry,
+        bin_layout: BinLayout,
+        raster_plan: &CoverageRasterPlan,
+    ) -> RenderResult<Self> {
+        let binner = CoverageBinner::new(device);
+        let rasterizer = CoverageRasterizer::new(device);
+        let resolver = CoverageResolver::new(device);
+        let bins = binner.prepare_compiled(device, geometry, bin_layout)?;
+        let raster = rasterizer.prepare_compiled(device, geometry, &bins, raster_plan)?;
+        let resolved = resolver.prepare(device, geometry, &bins, &raster)?;
+
+        // Metal needs the initialization writes committed before the first
+        // dispatch consumes these buffers. A reused frame has no pending uploads.
+        let upload = queue.submit(std::iter::empty());
+        device.poll(wgpu::Maintain::WaitForSubmissionIndex(upload));
+
+        Ok(Self {
+            binner,
+            rasterizer,
+            resolver,
+            bins,
+            raster,
+            resolved,
+        })
     }
 }
 
 impl CoverageCompiledScene {
     pub(crate) fn geometry(&self) -> &CoverageGeometry {
         &self.geometry
+    }
+
+    pub(crate) fn release_device_resources(&self) {
+        *self
+            .device_resources
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = None;
     }
 }
 
@@ -77,7 +112,7 @@ pub(crate) fn compile_coverage(geometry: CoverageGeometry) -> RenderResult<Cover
         geometry,
         bin_layout,
         raster_plan,
-        pipelines: Mutex::new(None),
+        device_resources: Mutex::new(None),
     })
 }
 
@@ -93,8 +128,8 @@ pub fn render_coverage(
     let bin_layout = BinLayout::measure(geometry)?;
     let raster_plan = CoverageRasterPlan::compile(geometry)?;
     let started = Instant::now();
-    let pipelines = CoveragePipelines::new(device);
-    render_prepared_coverage(device, queue, geometry, bin_layout, &raster_plan, &pipelines, started)
+    let frame = CoverageFrameResources::prepare(device, queue, geometry, bin_layout, &raster_plan)?;
+    render_prepared_coverage(device, queue, geometry, &frame, started)
 }
 
 pub(crate) fn render_compiled_coverage(
@@ -104,37 +139,43 @@ pub(crate) fn render_compiled_coverage(
 ) -> RenderResult<CoverageRenderOutput> {
     let started = Instant::now();
     let device_key = Arc::downgrade(device);
-    let cached = compiled
-        .pipelines
+    // Serialize access to the scratch buffers until every readback is finished.
+    let mut cache = compiled
+        .device_resources
         .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .as_ref()
-        .filter(|entry| Weak::ptr_eq(&entry.device, &device_key))
-        .map(|entry| Arc::clone(&entry.pipelines));
-    let render = |pipelines: &CoveragePipelines| {
-        render_prepared_coverage(
-            device,
-            queue,
-            &compiled.geometry,
-            compiled.bin_layout,
-            &compiled.raster_plan,
-            pipelines,
-            started,
-        )
+        .unwrap_or_else(|error| error.into_inner());
+    let cached = cache.take().filter(|entry| Weak::ptr_eq(&entry.device, &device_key));
+    let resources = match cached {
+        Some(resources) => {
+            extend_ledger_capture(&[resources.owner.id()]);
+            resources
+        }
+        None => {
+            let owner = AllocationOwner::new();
+            let frame = {
+                let _allocation_owner = owner.activate();
+                CoverageFrameResources::prepare(
+                    device,
+                    queue,
+                    &compiled.geometry,
+                    compiled.bin_layout,
+                    &compiled.raster_plan,
+                )?
+            };
+            DeviceCoverageResources {
+                device: device_key,
+                owner,
+                frame,
+            }
+        }
     };
-    if let Some(pipelines) = cached {
-        return render(&pipelines);
-    }
 
-    let pipelines = Arc::new(CoveragePipelines::new(device));
-    let output = render(&pipelines)?;
-    // Cache only pipelines that executed successfully on this device without a
-    // degradation. Buffers and bind groups are still created for each frame.
+    let output =
+        render_prepared_coverage(device, queue, &compiled.geometry, &resources.frame, started)?;
+    // Clear or rewrite the scratch outputs on every dispatch and keep the frame
+    // resources only after a verified execution without a degradation.
     if crate::core::degradation::active_capture_is_clean() {
-        *compiled.pipelines.lock().unwrap_or_else(|error| error.into_inner()) = Some(DevicePipelines {
-            device: device_key,
-            pipelines,
-        });
+        *cache = Some(resources);
     }
     Ok(output)
 }
@@ -143,23 +184,17 @@ fn render_prepared_coverage(
     device: &Arc<wgpu::Device>,
     queue: &Arc<wgpu::Queue>,
     geometry: &CoverageGeometry,
-    bin_layout: BinLayout,
-    raster_plan: &CoverageRasterPlan,
-    pipelines: &CoveragePipelines,
+    frame: &CoverageFrameResources,
     started: Instant,
 ) -> RenderResult<CoverageRenderOutput> {
-    let CoveragePipelines { binner, rasterizer, resolver } = pipelines;
-    let bins = binner.prepare_compiled(device, geometry, bin_layout)?;
-    let raster = rasterizer.prepare_compiled(device, geometry, &bins, raster_plan)?;
-    let resolved = resolver.prepare(device, geometry, &bins, &raster)?;
-
-    // `prepare` initializes primitive, baseline, rule, color, and parameter
-    // buffers before this dispatch. Commit those staging writes explicitly:
-    // Metal can otherwise begin a later render against zero-filled buffers
-    // even though the command buffer submission is queue-ordered. This matches
-    // the established vector upload boundary in `UploadedVectorScene`.
-    let upload = queue.submit(std::iter::empty());
-    device.poll(wgpu::Maintain::WaitForSubmissionIndex(upload));
+    let CoverageFrameResources {
+        binner,
+        rasterizer,
+        resolver,
+        bins,
+        raster,
+        resolved,
+    } = frame;
 
     let tile_count_bytes = u64::from(bins.layout.tile_count)
         .checked_mul(u64::from(bins.layout.layer_count))
@@ -210,7 +245,7 @@ fn render_prepared_coverage(
     let bin_scope = timing.begin(&mut bin_encoder, "vector.coverage.bin");
     binner.encode(
         &mut bin_encoder,
-        &bins,
+        bins,
         u32::try_from(geometry.primitives.len()).map_err(|_| {
             RenderError::Budget("vector_coverage_render: primitive count exceeds u32".into())
         })?,
@@ -219,7 +254,7 @@ fn render_prepared_coverage(
     let bin_submission = queue.submit(Some(bin_encoder.finish()));
     device.poll(wgpu::Maintain::WaitForSubmissionIndex(bin_submission));
     let mut tile_counts =
-        read_bin_counts(device, queue, &bins, &tile_count_readback, tile_count_bytes)?;
+        read_bin_counts(device, queue, bins, &tile_count_readback, tile_count_bytes)?;
     let mut written_memberships = tile_counts.iter().map(|&count| u64::from(count)).sum();
     let mut retry_count = 0_u32;
     while written_memberships != bins.layout.measured_memberships && retry_count < 3 {
@@ -229,7 +264,7 @@ fn render_prepared_coverage(
         });
         binner.encode(
             &mut retry_encoder,
-            &bins,
+            bins,
             u32::try_from(geometry.primitives.len()).map_err(|_| {
                 RenderError::Budget("vector_coverage_render: primitive count exceeds u32".into())
             })?,
@@ -237,7 +272,7 @@ fn render_prepared_coverage(
         let retry_submission = queue.submit(Some(retry_encoder.finish()));
         device.poll(wgpu::Maintain::WaitForSubmissionIndex(retry_submission));
         tile_counts =
-            read_bin_counts(device, queue, &bins, &tile_count_readback, tile_count_bytes)?;
+            read_bin_counts(device, queue, bins, &tile_count_readback, tile_count_bytes)?;
         written_memberships = tile_counts.iter().map(|&count| u64::from(count)).sum();
     }
     if written_memberships != bins.layout.measured_memberships {
@@ -268,13 +303,13 @@ fn render_prepared_coverage(
         let raster_scope = (raster_retry_count == 0)
             .then(|| timing.begin(&mut raster_encoder, "vector.coverage.raster"))
             .flatten();
-        rasterizer.encode(&mut raster_encoder, &raster, geometry);
+        rasterizer.encode(&mut raster_encoder, raster, geometry);
         if raster_retry_count == 0 {
             timing.end(&mut raster_encoder, raster_scope, 1);
         }
         let raster_submission = queue.submit(Some(raster_encoder.finish()));
         device.poll(wgpu::Maintain::WaitForSubmissionIndex(raster_submission));
-        let stage_words = read_error_words(device, queue, &bins, &error_readback)?;
+        let stage_words = read_error_words(device, queue, bins, &error_readback)?;
         if raster.active_pixel_count == 0 || stage_words[3] & 1 != 0 {
             break;
         }
@@ -294,13 +329,13 @@ fn render_prepared_coverage(
         let resolve_scope = (resolve_retry_count == 0)
             .then(|| timing.begin(&mut resolve_encoder, "vector.coverage.resolve"))
             .flatten();
-        resolver.encode(&mut resolve_encoder, &resolved);
+        resolver.encode(&mut resolve_encoder, resolved);
         if resolve_retry_count == 0 {
             timing.end(&mut resolve_encoder, resolve_scope, 1);
         }
         let resolve_submission = queue.submit(Some(resolve_encoder.finish()));
         device.poll(wgpu::Maintain::WaitForSubmissionIndex(resolve_submission));
-        let stage_words = read_error_words(device, queue, &bins, &error_readback)?;
+        let stage_words = read_error_words(device, queue, bins, &error_readback)?;
         if resolved.active_pixel_count == 0 || stage_words[3] & 2 != 0 {
             break;
         }
