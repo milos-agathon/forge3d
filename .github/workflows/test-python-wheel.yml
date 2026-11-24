@@ -28,6 +28,11 @@ on:
         required: false
         default: false
         type: boolean
+      prebuilt_vtpack:
+        description: Use the VT-store fixture tool built for this platform and commit.
+        required: false
+        default: false
+        type: boolean
       physical_windows_gpu:
         description: Run the full Windows matrix on the required NVIDIA Vulkan runner.
         required: false
@@ -91,6 +96,30 @@ jobs:
           expected = os.environ["EXPECTED_HEAD"]
           if actual != expected:
               raise SystemExit(f"Checkout mismatch: expected {expected}, got {actual}")
+
+      - name: Download exact VT-store fixture tool
+        if: inputs.prebuilt_vtpack
+        uses: actions/download-artifact@v4
+        with:
+          name: vtpack-fixture-${{ runner.os }}-${{ inputs.ref }}
+          path: ci-fixture-tools/
+
+      - name: Set the prebuilt VT-store fixture tool path
+        if: inputs.prebuilt_vtpack
+        shell: python
+        run: |
+          import os
+          import stat
+          from pathlib import Path
+
+          name = "forge3d-vtpack.exe" if os.name == "nt" else "forge3d-vtpack"
+          tool = (Path("ci-fixture-tools") / name).resolve(strict=True)
+          if not tool.is_file():
+              raise SystemExit(f"Expected a fixture executable at {tool}")
+          if os.name != "nt":
+              tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as env:
+              env.write(f"FORGE3D_TEST_VTPACK={tool}\n")
 
       - name: Configure physical Windows acceptance
         if: inputs.physical_windows_gpu

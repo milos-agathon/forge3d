@@ -793,6 +793,34 @@ def test_full_python_lane_records_measured_timings_and_skips(tmp_path) -> None:
     assert "ABSENT" in summarize(tmp_path / "missing.xml")
 
 
+def test_full_python_matrix_uses_the_required_exact_head_vtpack_fixture() -> None:
+    jobs = _workflow_data("ci.yml")["jobs"]
+    fixture = jobs["build-vtpack-fixture"]
+    assert fixture["strategy"]["matrix"]["runner"] == [
+        "ubuntu-24.04", "windows-latest", "macos-latest"
+    ]
+    exact_head = "github.event.pull_request.head.sha || github.sha"
+    assert fixture["steps"][0]["with"]["ref"] == "${{ " + exact_head + " }}"
+    build = next(step for step in fixture["steps"] if "cargo build" in step.get("run", ""))
+    assert "cargo build --locked --release --bin forge3d-vtpack" in build["run"]
+    upload = next(
+        step for step in fixture["steps"] if step.get("uses") == "actions/upload-artifact@v4"
+    )
+    steps = _workflow_data("test-python-wheel.yml")["jobs"]["test"]["steps"]
+    download = next(
+        step for step in steps if step.get("name") == "Download exact VT-store fixture tool"
+    )
+    assert download["if"] == "inputs.prebuilt_vtpack"
+    assert download["with"]["name"] == upload["with"]["name"].replace(exact_head, "inputs.ref")
+    assert "build-vtpack-fixture" in jobs["full-acceptance-summary"]["needs"]
+    for platform in ("linux", "windows", "macos"):
+        matrix = jobs[f"test-python-full-{platform}"]
+        assert matrix["if"] == fixture["if"]
+        assert "build-vtpack-fixture" in matrix["needs"]
+        assert matrix["with"]["prebuilt_vtpack"] == "true"
+    assert "prebuilt_vtpack" not in jobs["test-python-core"]["with"]
+
+
 def test_full_windows_python_requires_physical_adapter_without_reducing_coverage() -> None:
     jobs = _workflow_data("ci.yml")["jobs"]
     windows = jobs["test-python-full-windows"]
