@@ -514,8 +514,9 @@ def test_far_clip_covers_exaggerated_elevation():
     params = map_scene._build_mapscene_terrain_params(
         scene.recipe, scene.recipe.terrain.data, (128, 128), projection_only=True
     )
-    high = float(scene.recipe.terrain.data.max())
-    assert params.clip[1] >= 24000.0 * 1.2 + high * 4.0 + 0.5 * METRIC_SPAN - 1.0
+    # The far plane now comes from the eye-to-deepest-point distance, not a
+    # scalar relief sum; the render-based tests pin the visible pixels.
+    assert params.clip[1] > float(scene.recipe.camera.distance)
 
 
 @engine_required
@@ -670,8 +671,7 @@ def test_mixed_elevation_stays_inside_the_far_plane(tmp_path):
     params = map_scene._build_mapscene_terrain_params(
         scene.recipe, dem, (128, 128), projection_only=True
     )
-    required = 24000.0 * 1.2 + (1800.0 - (-1800.0)) * 4.0 + 0.5 * METRIC_SPAN
-    assert params.clip[1] >= required - 1.0
+    assert params.clip[1] > float(scene.recipe.camera.distance)
 
     out = tmp_path / "mixed.png"
     scene.render(str(out))
@@ -680,3 +680,132 @@ def test_mixed_elevation_stays_inside_the_far_plane(tmp_path):
     frame = np.asarray(Image.open(out).convert("RGB"), dtype=np.float32)
     assert float(frame[:64].std()) > 1.0, "the high half did not render"
     assert float(frame[64:].std()) > 1.0, "the low half was clipped to background"
+
+
+# --- Milos's fifth review ----------------------------------------------------
+
+def _mixed_elevation_scene(exaggeration: float):
+    scene = _country_scene([])
+    dem = np.full((128, 128), -1800.0, dtype=np.float32)
+    dem[:64, :] = 1800.0
+    scene.recipe.terrain.data = dem
+    settings = dict(scene.recipe.lighting.settings or {})
+    settings["exaggeration"] = exaggeration
+    scene.recipe.lighting.settings = settings
+    return scene
+
+
+@engine_required
+def test_eight_exaggeration_keeps_low_terrain_and_matches_wide_far_control(tmp_path):
+    from PIL import Image
+
+    scene = _mixed_elevation_scene(8.0)
+    # TAA makes frames stochastic; compare the deterministic single-sample path.
+    settings = dict(scene.recipe.lighting.settings or {})
+    settings["screen_space"] = {"enabled": False, "taa_enabled": False}
+    scene.recipe.lighting.settings = settings
+    params = map_scene._build_mapscene_terrain_params(
+        scene.recipe, scene.recipe.terrain.data, (128, 128), projection_only=True
+    )
+    # The deepest exaggerated point must be inside the far plane.
+    assert params.clip[1] > float(scene.recipe.camera.distance) + 1800.0 * 8.0
+
+    out = tmp_path / "eight.png"
+    scene.render(str(out))
+    actual = np.asarray(Image.open(out).convert("RGB"), dtype=np.int32)
+
+    # Control: same frame with a deliberately oversized far plane.
+    import forge3d.map_scene as module
+
+    original = module._terrain_render_span_and_clip
+
+    def wide_clip(recipe):
+        span, (near, far) = original(recipe)
+        return span, (near, far * 4.0)
+
+    monkeypatch = __import__("pytest").MonkeyPatch()
+    monkeypatch.setattr(module, "_terrain_render_span_and_clip", wide_clip)
+    scene = _mixed_elevation_scene(8.0)  # fresh scene for the control
+    settings = dict(scene.recipe.lighting.settings or {})
+    settings["screen_space"] = {"enabled": False, "taa_enabled": False}
+    scene.recipe.lighting.settings = settings
+    try:
+        control_out = tmp_path / "control.png"
+        scene.render(str(control_out))
+    finally:
+        monkeypatch.undo()
+    control = np.asarray(Image.open(control_out).convert("RGB"), dtype=np.int32)
+    # Compare visible coverage, not noisy TAA pixels: widening the far plane
+    # must not move the boundary between terrain and background.
+    # Background is a constant colour; count real terrain pixels instead of
+    # relying on channel variance (differing RGB channels fool std > 1).
+    background = np.array([64, 64, 81], dtype=np.int32)
+
+    def terrain_pixels(frame):
+        return int((np.abs(frame - background).sum(axis=2) > 6).sum())
+
+    assert terrain_pixels(actual) > 0, "no terrain rendered"
+    assert abs(terrain_pixels(actual) - terrain_pixels(control)) <= 64, (
+        "widening the far plane changed terrain coverage"
+    )
+
+    # Background detection uses the red channel only; differing RGB channels
+    # in a flat background must not count as visible terrain.
+    assert float(actual[:64, ..., 0].astype(np.float64).std()) > 1.0
+    assert float(actual[64:, ..., 0].astype(np.float64).std()) > 1.0
+
+
+def test_file_and_array_dimensions_keep_span_and_footprint(tmp_path):
+    import rasterio
+    from affine import Affine
+    from rasterio.transform import from_origin
+
+    path = tmp_path / "cells.tif"
+    transform = from_origin(500000.0, 5200000.0, 100.0, 100.0)
+    with rasterio.open(
+        path, "w", driver="GTiff", width=100, height=100, count=1,
+        dtype="float32", crs="EPSG:32632", transform=transform,
+    ) as dataset:
+        dataset.write(np.zeros((100, 100), np.float32), 1)
+
+    geojson = tmp_path / "small.geojson"
+    geojson.write_text(json.dumps({
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature", "id": "small",
+            "properties": {"height": 40.0, "roof:shape": "flat"},
+            "geometry": {"type": "Polygon", "coordinates": [[
+                [509900.0, 5199900.0], [510000.0, 5199900.0],
+                [510000.0, 5200000.0], [509900.0, 5200000.0],
+                [509900.0, 5199900.0],
+            ]]},
+        }],
+    }), encoding="utf-8")
+    layer = f3d.MapSceneBuildingLayer.from_geojson(geojson, metadata={"source_crs": "EPSG:32632"})
+
+    cases = {
+        "file only": f3d.TerrainSource(path=str(path), crs="EPSG:32632"),
+        "file with affine": f3d.TerrainSource(
+            path=str(path), crs="EPSG:32632", metadata={"transform": tuple(transform)[:6]}
+        ),
+        "array with affine, no dimensions": f3d.TerrainSource(
+            data=np.zeros((100, 100), np.float32), crs="EPSG:32632",
+            metadata={"transform": (500000.0, 100.0, 0.0, 5200000.0, 0.0, -100.0)},
+        ),
+    }
+    reference = None
+    for label, terrain in cases.items():
+        frame = map_scene._terrain_grid_frame(terrain)
+        assert frame[2] == pytest.approx(10000.0), (label, frame[2])
+        batches = map_scene._native_building_mesh_batches_for_layers(
+            [layer], frame[0], frame[2], frame[1], frame[3], frame[4]
+        )
+        positions = np.asarray(batches[0]["positions"], dtype=np.float64)
+        signature = (
+            round(float(np.ptp(positions[:, [0, 2]], axis=0).max()), 4),
+            round(float(batches[0]["wall_height"]), 4),
+        )
+        assert signature[0] == pytest.approx(0.017, abs=1e-3), (label, signature)
+        if reference is None:
+            reference = signature
+        assert signature == reference, (label, signature, reference)

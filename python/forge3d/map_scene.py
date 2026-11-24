@@ -1778,11 +1778,23 @@ def _build_mapscene_terrain_params(
             high = float(np.nanmax(heightmap))
         except (ValueError, TypeError):
             low = high = 0.0
-        vertical = (max(high, 0.0) - min(low, 0.0)) * float(settings.get("exaggeration") or 1.0)
-        clip = (
-            clip[0],
-            max(clip[1], float(recipe.camera.distance) * 1.2) + vertical + 0.5 * terrain_span,
-        )
+        z_scale = float(settings.get("exaggeration") or 1.0)
+        # Derive the far plane from the native screen camera's eye and the
+        # deepest exaggerated terrain point, not from a scalar relief sum.
+        polar = math.radians(90.0 - float(recipe.camera.elevation_deg))
+        radius = float(recipe.camera.distance)
+        target = _mapscene_camera_target(recipe)
+        # Worst case over all azimuths: a camera turn must not change the clip
+        # planes, or it resets the temporal history of the shared renderer.
+        vertical_offset = target[2] + radius * math.sin(polar) - min(low, 0.0) * z_scale
+        reach = math.hypot(radius * math.cos(polar), vertical_offset) + 0.5 * terrain_span
+        # Keep the previous relief-based floor: the eye-to-deepest distance
+        # alone can shrink the far plane for positive-only DEMs and change
+        # shadow/lighting behaviour that already passed.
+        legacy_floor = max(clip[1], radius * 1.2) + (
+            max(high, 0.0) - min(low, 0.0)
+        ) * z_scale + 0.5 * terrain_span
+        clip = (clip[0], max(legacy_floor, reach + 1.0, radius * 1.2))
     preset_albedo = "mix" if preset_name else "colormap"
     preset_colormap_strength = 0.5 if preset_name else 1.0
     configured_colormap_strength = settings.get("colormap_strength")
@@ -4100,9 +4112,16 @@ def _terrain_grid_frame(
             height = float(array_shape[0])
     transform = None
     shape: tuple[int, int] | None = None
-    # A metadata affine without width/height still describes a grid: use the
-    # inline array shape so the transform is recognised.
-    grid = _terrain_alignment_grid(terrain, fallback_shape=(int(height), int(width)))
+    # A metadata affine with no dimensions cannot resolve a grid on its own.
+    # Prefer the file's own header, then the inline array shape.
+    if terrain.path and (not metadata.get("width") and not metadata.get("height")):
+        path_grid = _raster_grid_from_path(Path(str(terrain.path)))
+        if path_grid is not None:
+            grid = path_grid
+        else:
+            grid = _terrain_alignment_grid(terrain, fallback_shape=(int(height), int(width)))
+    else:
+        grid = _terrain_alignment_grid(terrain, fallback_shape=(int(height), int(width)))
     if grid is not None:
         if crs is None:
             crs = str(grid.get("crs") or "") or None
