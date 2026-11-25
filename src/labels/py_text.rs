@@ -1,7 +1,7 @@
 use crate::labels::font::{FontCollection, FontRequest, TextError as FontError};
 use crate::labels::msdf::{bake_msdf_atlas, bake_msdf_atlas_from_shaped, BakedMsdfAtlas};
 use crate::labels::positioned::{positioned_glyphs, positioned_outlines, svg_path_data};
-use crate::labels::raster::rasterize;
+use crate::labels::raster::rasterize_with_halo;
 use crate::labels::shape::{self, Direction, FeatureSetting, ShapedText, TextError};
 use numpy::{PyArray2, PyArray3};
 use pyo3::exceptions::PyValueError;
@@ -205,15 +205,16 @@ impl PyShapedText {
         Ok(output.into())
     }
 
-    #[pyo3(signature = (line_ranges = None, precision = 4))]
+    #[pyo3(signature = (line_ranges = None, precision = 4, positioned_glyphs = None))]
     fn svg_path(
         &self,
         line_ranges: Option<Vec<(usize, usize)>>,
         precision: u8,
+        positioned_glyphs: Option<Vec<Py<PyDict>>>,
+        py: Python<'_>,
     ) -> PyResult<String> {
         let ranges = concrete_line_ranges(&self.inner, line_ranges)?;
-        let outlines = positioned_outlines(&self.inner, &ranges)
-            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let outlines = render_outlines(py, &self.inner, &ranges, positioned_glyphs)?;
         Ok(svg_path_data(&outlines, precision))
     }
 
@@ -237,6 +238,79 @@ impl PyShapedText {
             self.inner.size
         )
     }
+}
+
+/// Apply compiled geometry to the immutable shaped outlines. The explicit
+/// stream must retain exactly the visual glyph identities owned by shaping.
+fn render_outlines(
+    py: Python<'_>,
+    shaped: &ShapedText,
+    ranges: &[Range<usize>],
+    geometry: Option<Vec<Py<PyDict>>>,
+) -> PyResult<Vec<crate::labels::positioned::PositionedOutline>> {
+    let Some(geometry) = geometry else {
+        return positioned_outlines(shaped, ranges)
+            .map_err(|error| PyValueError::new_err(error.to_string()));
+    };
+    let glyphs = positioned_glyphs(shaped, ranges)
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    if glyphs.len() != geometry.len() {
+        return Err(PyValueError::new_err(
+            "compiled geometry must preserve the shaped glyph count",
+        ));
+    }
+    let mut outlines = Vec::new();
+    for (glyph, record) in glyphs.into_iter().zip(geometry) {
+        let record = record.bind(py);
+        let required = |key: &str| {
+            record
+                .get_item(key)?
+                .ok_or_else(|| PyValueError::new_err(format!("compiled glyph requires {key}")))
+        };
+        if required("glyph_id")?.extract::<u16>()? != glyph.glyph_id
+            || required("font_index")?.extract::<usize>()? != glyph.font_index
+        {
+            return Err(PyValueError::new_err(
+                "compiled geometry must preserve shaped glyph identities",
+            ));
+        }
+        let values = required("origin")?.extract::<Vec<f32>>()?;
+        if values.len() != 2 {
+            return Err(PyValueError::new_err(
+                "compiled glyph origin must be a 2-sequence",
+            ));
+        }
+        let origin = (values[0], values[1]);
+        let rotation = record
+            .get_item("rotation")?
+            .map(|value| value.extract::<f32>())
+            .transpose()?
+            .unwrap_or(0.0);
+        if !origin.0.is_finite() || !origin.1.is_finite() || !rotation.is_finite() {
+            return Err(PyValueError::new_err(
+                "compiled glyph origin and rotation must be finite",
+            ));
+        }
+        if let Some(path) = glyph.path {
+            let (sin, cos) = rotation.sin_cos();
+            let transform = lyon_path::math::Transform::new(
+                cos,
+                sin,
+                -sin,
+                cos,
+                origin.0 * shaped.size - cos * glyph.origin[0] + sin * glyph.origin[1],
+                origin.1 * shaped.size - sin * glyph.origin[0] - cos * glyph.origin[1],
+            );
+            outlines.push(crate::labels::positioned::PositionedOutline {
+                glyph_id: glyph.glyph_id,
+                font_index: glyph.font_index,
+                cluster: glyph.cluster,
+                line_index: glyph.line_index,
+                path: path.transformed(&transform),
+            });
+        }
+    }
+    Ok(outlines)
 }
 
 fn concrete_line_ranges(
@@ -437,7 +511,7 @@ pub(crate) fn text_shape_py(
 
 #[pyfunction]
 #[pyo3(name = "rasterize_shaped_run")]
-#[pyo3(signature = (shaped, width, height, origin = (0.0, 0.0), line_ranges = None))]
+#[pyo3(signature = (shaped, width, height, origin = (0.0, 0.0), line_ranges = None, positioned_glyphs = None, halo_width = 0.0))]
 pub(crate) fn rasterize_shaped_run_py<'py>(
     py: Python<'py>,
     shaped: PyRef<'_, PyShapedText>,
@@ -445,13 +519,104 @@ pub(crate) fn rasterize_shaped_run_py<'py>(
     height: usize,
     origin: (f32, f32),
     line_ranges: Option<Vec<(usize, usize)>>,
+    positioned_glyphs: Option<Vec<Py<PyDict>>>,
+    halo_width: f32,
 ) -> PyResult<Bound<'py, PyArray2<f32>>> {
     let ranges = concrete_line_ranges(&shaped.inner, line_ranges)?;
-    let outlines = positioned_outlines(&shaped.inner, &ranges)
-        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    let outlines = render_outlines(py, &shaped.inner, &ranges, positioned_glyphs)?;
     Ok(PyArray2::from_owned_array_bound(
         py,
-        rasterize(&outlines, width, height, origin),
+        rasterize_with_halo(&outlines, width, height, origin, halo_width)
+            .map_err(PyValueError::new_err)?,
+    ))
+}
+
+#[pyfunction]
+#[pyo3(name = "_compiled_label_svg_path")]
+#[pyo3(signature = (font_chain, expected_sha256, size, origin, geometry, precision))]
+pub(crate) fn compiled_label_svg_path_py(
+    py: Python<'_>,
+    font_chain: Vec<String>,
+    expected_sha256: Vec<String>,
+    size: f32,
+    origin: (f32, f32),
+    geometry: Vec<Py<PyDict>>,
+    precision: u8,
+) -> PyResult<String> {
+    if !size.is_finite() || size <= 0.0 || !origin.0.is_finite() || !origin.1.is_finite() {
+        return Err(PyValueError::new_err("invalid label size or origin"));
+    }
+    let fonts = load_fonts(py, font_chain)?;
+    let hashes = fonts.descriptors().into_iter().map(|face| {
+        face.sha256.iter().map(|byte| format!("{byte:02x}")).collect::<String>()
+    }).collect::<Vec<_>>();
+    if hashes != expected_sha256 {
+        return Err(exception_with_diagnostic::<PyValueError>(
+            py, "font contents do not match the compiled label".to_owned(),
+            diagnostic(py, "font_hash_mismatch"),
+        ));
+    }
+    let mut outlines = Vec::new();
+    for record in &geometry {
+        let record = record.bind(py);
+        let required = |key: &str| {
+            record.get_item(key)?.ok_or_else(|| {
+                PyValueError::new_err(format!("compiled glyph requires {key}"))
+            })
+        };
+        let glyph_id = required("glyph_id")?.extract::<u16>()?;
+        let font_index = required("font_index")?.extract::<usize>()?;
+        let [x, y] = required("origin")?.extract::<[f32; 2]>()?;
+        let rotation = record.get_item("rotation")?
+            .map(|value| value.extract::<f32>()).transpose()?.unwrap_or(0.0);
+        if !x.is_finite() || !y.is_finite() || !rotation.is_finite() {
+            return Err(PyValueError::new_err("compiled glyph origin and rotation must be finite"));
+        }
+        let has_outline = record.get_item("has_outline")?
+            .map(|value| value.extract::<bool>()).transpose()?.unwrap_or(true);
+        if !has_outline {
+            continue;
+        }
+        let em = fonts.metrics(font_index).map_err(|error| PyValueError::new_err(error.to_string()))?.units_per_em;
+        let path = fonts.outline(font_index, ttf_parser::GlyphId(glyph_id))
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        let scale = size / f32::from(em);
+        let (sin, cos) = rotation.sin_cos();
+        let transform = lyon_path::math::Transform::new(
+            cos * scale, sin * scale, -sin * scale, cos * scale,
+            origin.0 + x * size, origin.1 + y * size,
+        );
+        outlines.push(crate::labels::positioned::PositionedOutline {
+            glyph_id, font_index, cluster: 0, line_index: 0,
+            path: path.transformed(&transform),
+        });
+    }
+    Ok(svg_path_data(&outlines, precision))
+}
+
+#[pyfunction]
+#[pyo3(name = "rasterize_svg_path")]
+#[pyo3(signature = (path_data, width, height, origin = (0.0, 0.0), halo_width = 0.0))]
+pub(crate) fn rasterize_svg_path_py<'py>(
+    py: Python<'py>,
+    path_data: &str,
+    width: usize,
+    height: usize,
+    origin: (f32, f32),
+    halo_width: f32,
+) -> PyResult<Bound<'py, PyArray2<f32>>> {
+    let path = crate::labels::svg_outline::parse(path_data).map_err(PyValueError::new_err)?;
+    let outlines = [crate::labels::positioned::PositionedOutline {
+        glyph_id: 0,
+        font_index: 0,
+        cluster: 0,
+        line_index: 0,
+        path,
+    }];
+    Ok(PyArray2::from_owned_array_bound(
+        py,
+        rasterize_with_halo(&outlines, width, height, origin, halo_width)
+            .map_err(PyValueError::new_err)?,
     ))
 }
 

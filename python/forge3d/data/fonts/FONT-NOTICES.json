@@ -13,6 +13,11 @@
       "sha256": "d6509fc1f37caf01184e8f9a4f150b606f2164a90df6354258adac42e125fb7c",
       "upstream": "https://github.com/google/fonts/tree/main/ofl/notosansdevanagari"
     },
+    "NotoSansHebrew-marks-subset.ttf": {
+      "copyright_notice": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/hebrew)",
+      "sha256": "06dffb6483277cb91ad4ecfefa5b2c8527399d2914e225b64ee6a0816f80244d",
+      "upstream": "https://github.com/google/fonts/tree/4c1913251a6dd1ba34a6ef4b7a630178d01b88ff/ofl/notosanshebrew"
+    },
     "NotoSansHebrew-subset.ttf": {
       "copyright_notice": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/hebrew)",
       "sha256": "da63572372a6c876e38d9c17575527cab7752dd93dfa414fbbbb338d6ccca7e9",
@@ -31,6 +36,8 @@
   },
   "generated_assets": {
     "atlas_latin_default.json": "d28d280511fc89b5dae2cadb00f64ec48150561d59ceaeb5bc021d9c26b5dc67",
-    "atlas_latin_default.png": "2360e58d97aa24d436693d3481e87b3728b76b4c1adeb453dbd87e2a4e7f0290"
+    "atlas_latin_default.png": "2360e58d97aa24d436693d3481e87b3728b76b4c1adeb453dbd87e2a4e7f0290",
+    "atlas_latin_rgba.json": "e38d9f3dd879232e636a174a837c99a628025b2d7bdc5ae641a3ff937d432c6e",
+    "atlas_latin_rgba.png": "bec2e50df6787552ea42afb31ff2ddba4716638931eb617449598fd0ef47f2da"
   }
 }

@@ -1,11 +1,18 @@
 # HarfBuzz shaping goldens
 
-The six JSON files contain 216 distinct identities and 216 distinct exact
-shaping expectations (36 each for Latin, Arabic, Hebrew, Devanagari, CJK, and
-mixed-direction text).
-They were generated
-on 2026-07-13 with uharfbuzz 0.51.5, backed by HarfBuzz, against the committed
-Noto subsets in `assets/fonts/`.
+The six JSON files contain 221 shaping identities. Latin, Arabic,
+Devanagari, CJK and mixed-direction text each have 36 cases. Hebrew has 41,
+including five cases with the approved vowel/dagesh/shin-dot coverage.
+The original cases were generated on 2026-07-13. The updated Hebrew and
+mixed cases use the expanded Hebrew fixture. All six files were independently
+verified with uharfbuzz 0.51.5 and HarfBuzz 11.5.0 against the pinned Noto
+subsets in `assets/fonts/`.
+
+From the repository root, run `python tests/data/shaping/verify_harfbuzz.py`
+in an offline oracle environment with uharfbuzz 0.51.5. The script uses the
+stored run ranges, direction, script, language and expected face selection
+as inputs. It derives glyph IDs, clusters and positions with HarfBuzz.
+The Hebrew cases also pin both advance and offset axes.
 
 HarfBuzz fonts were scaled to `(64, 64)`, so `x_advance` and `x_offset` are the
 same deterministic 1/64-em integers returned by LITTERA. Buffers were populated
@@ -29,7 +36,7 @@ invariance is also locked separately.
 |---|---:|---|
 | `latin.json` | 36 | `a2903c92e2070ab860e36734deaa861384e508d389b77c8202d59b826ebd0ac1` |
 | `arabic.json` | 36 | `bca82a0213fd7e7bbc2ce08d926f2cee35e52d520f8eaffa6b49738f95e9f862` |
-| `hebrew.json` | 36 | `85cc93bdf8a22d8905a08c4924dacea9d636f5c73839a5894ee0ee3bcab8a8b8` |
+| `hebrew.json` | 41 | `eff5403d28da27797afdb17943746e261699f16f10a43cbae1a1858d676ab7f8` |
 | `devanagari.json` | 36 | `073c1407eeb13c9430f851c1e2dd54eb33cbcee8e09749deb55d092edcc31b7f` |
 | `cjk.json` | 36 | `09557fddc9f1daa4ef4ab32032ad52d8b81b34588abc05f82f4df3ea6f9d916a` |
-| `mixed.json` | 36 | `82f0202a6c30dadc909fc0025ae4e9c3c9478c8d2d8e42ac41eca1c38074f5e2` |
+| `mixed.json` | 36 | `b2d762379d2ef77edcd7830a3b833983bbd9add27edc381123e9b8ca21467700` |

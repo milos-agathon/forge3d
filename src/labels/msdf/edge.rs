@@ -6,7 +6,6 @@ pub const MAGENTA: u8 = 0b101;
 pub const YELLOW: u8 = 0b011;
 const COLORS: [u8; 3] = [CYAN, MAGENTA, YELLOW];
 const CORNER_ANGLE_RADIANS: f32 = 0.75;
-const FLATTENING_TOLERANCE: f32 = 0.125;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Edge {
@@ -181,8 +180,60 @@ pub fn color_contours(contours: &[Contour]) -> Vec<Edge> {
 }
 
 pub fn flatten_path(path: &Path, scale: f32, offset: Point) -> Vec<Contour> {
+    // Preserve the existing helper's tolerance for callers outside the baker.
+    flatten_path_with_tolerance(path, scale, offset, 0.125)
+}
+
+pub(crate) fn flatten_path_with_tolerance(
+    path: &Path,
+    scale: f32,
+    offset: Point,
+    tolerance: f32,
+) -> Vec<Contour> {
     let transform =
         |point: Point| Point::new(offset.x + point.x * scale, offset.y + point.y * scale);
+    let coordinate_scale = path
+        .iter()
+        .map(|event| match event {
+            Event::Begin { at } => at.x.abs().max(at.y.abs()),
+            Event::Line { from, to }
+            | Event::End {
+                last: from,
+                first: to,
+                ..
+            } => from
+                .x
+                .abs()
+                .max(from.y.abs())
+                .max(to.x.abs())
+                .max(to.y.abs()),
+            Event::Quadratic { from, ctrl, to } => from
+                .x
+                .abs()
+                .max(from.y.abs())
+                .max(ctrl.x.abs())
+                .max(ctrl.y.abs())
+                .max(to.x.abs())
+                .max(to.y.abs()),
+            Event::Cubic {
+                from,
+                ctrl1,
+                ctrl2,
+                to,
+            } => from
+                .x
+                .abs()
+                .max(from.y.abs())
+                .max(ctrl1.x.abs())
+                .max(ctrl1.y.abs())
+                .max(ctrl2.x.abs())
+                .max(ctrl2.y.abs())
+                .max(to.x.abs())
+                .max(to.y.abs()),
+        })
+        .fold(1.0f32, f32::max)
+        * scale.abs();
+    let tolerance = tolerance.max(coordinate_scale.max(1.0) * f32::EPSILON);
     let mut contours = Vec::new();
     let mut points = Vec::new();
     for event in path.iter() {
@@ -202,7 +253,7 @@ pub fn flatten_path(path: &Path, scale: f32, offset: Point) -> Vec<Contour> {
                     ctrl: transform(ctrl),
                     to: transform(to),
                 }
-                .for_each_flattened(FLATTENING_TOLERANCE, &mut |line: &LineSegment<f32>| {
+                .for_each_flattened(tolerance, &mut |line: &LineSegment<f32>| {
                     points.push(line.to)
                 });
             }
@@ -211,17 +262,15 @@ pub fn flatten_path(path: &Path, scale: f32, offset: Point) -> Vec<Contour> {
                 ctrl1,
                 ctrl2,
                 to,
-            } => {
-                CubicBezierSegment {
-                    from: transform(from),
-                    ctrl1: transform(ctrl1),
-                    ctrl2: transform(ctrl2),
-                    to: transform(to),
-                }
-                .for_each_flattened(FLATTENING_TOLERANCE, &mut |line: &LineSegment<f32>| {
-                    points.push(line.to)
-                })
+            } => CubicBezierSegment {
+                from: transform(from),
+                ctrl1: transform(ctrl1),
+                ctrl2: transform(ctrl2),
+                to: transform(to),
             }
+            .for_each_flattened(tolerance, &mut |line: &LineSegment<f32>| {
+                points.push(line.to)
+            }),
             Event::End { first, close, .. } => {
                 let first = transform(first);
                 if close && points.last().copied() != Some(first) {

@@ -47,6 +47,15 @@ def test_d02_native_raster_overlay_constructor_registered():
         assert name in f3d.__all__ and hasattr(f3d, name)
 
 
+def test_rgba_text_label_boundary_is_registered_and_stubbed():
+    from pathlib import Path
+
+    assert callable(get_native_module().Scene.begin_native_text_label)
+    stub = Path(f3d.__file__).with_name("__init__.pyi").read_text(encoding="utf-8")
+    assert "def begin_native_text_label(self) -> None:" in stub
+    assert "px_range: float = 8.0" in stub
+
+
 # ---------------------------------------------------------------------------
 # Skip entire module when native extension is absent (e.g., pure-Python CI)
 # ---------------------------------------------------------------------------
@@ -361,6 +370,8 @@ class TestNativeModuleSymbols:
         # LITTERA: native text pipeline registration seam
         "text_shape",
         "rasterize_shaped_run",
+        "rasterize_svg_path",
+        "_compiled_label_svg_path",
         "bake_msdf_atlas",
         "bake_msdf_atlas_shaped",
         # CENSOR: global degradation sink

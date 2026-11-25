@@ -16,6 +16,7 @@ class ShapedText:
         self,
         line_ranges: Sequence[tuple[int, int]] | None = ...,
         precision: int = ...,
+        positioned_glyphs: Sequence[Mapping[str, Any]] | None = ...,
     ) -> str: ...
     def outline_bounds(
         self, line_ranges: Sequence[tuple[int, int]] | None = ...
@@ -38,11 +39,21 @@ def rasterize_shaped_run(
     height: int,
     origin: tuple[float, float] = ...,
     line_ranges: Sequence[tuple[int, int]] | None = ...,
+    positioned_glyphs: Sequence[Mapping[str, Any]] | None = ...,
+    halo_width: float = ...,
 ) -> npt.NDArray[np.float32]: ...
+def rasterize_svg_path(
+    path_data: str, width: int, height: int,
+    origin: tuple[float, float] = ..., halo_width: float = ...,
+) -> npt.NDArray[np.float32]: ...
+
+
 def bake_msdf_atlas(
     font_chain: Sequence[str | Path],
     charset: str | ShapedText,
     font_size: float,
     px_range: float = ...,
     padding: int = ...,
+    *,
+    channels: int = ...,
 ) -> dict[str, Any]: ...

@@ -19,6 +19,7 @@ pub(crate) struct LabelCompositor {
     text_overlay_enabled: bool,
     text_overlay_alpha: f32,
     text_instances: Vec<crate::core::text_overlay::TextInstance>,
+    text_label_starts: Vec<usize>,
     allocation_owner: AllocationOwner,
 }
 
@@ -78,6 +79,7 @@ impl LabelCompositor {
             text_overlay_enabled: false,
             text_overlay_alpha: 1.0,
             text_instances: Vec::new(),
+            text_label_starts: Vec::new(),
             allocation_owner,
         })
     }

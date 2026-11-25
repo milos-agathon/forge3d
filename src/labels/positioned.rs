@@ -1,5 +1,5 @@
 use crate::labels::shape::bidi::{resolve_bidi, visual_order_groups, BidiError};
-use crate::labels::shape::{ShapedGlyph, ShapedText, TextError};
+use crate::labels::shape::{Direction, ShapedGlyph, ShapedText, TextError};
 use crate::labels::unicode::{bidi_class, line_break_class, BidiClass, LineBreakClass};
 use lyon_path::{math::point, Event, Path};
 use std::collections::HashMap;
@@ -97,7 +97,14 @@ fn transformed(path: &Path, scale: f32, x: f32, y: f32) -> Path {
 
 struct GlyphGroup<'a> {
     logical_character: usize,
-    glyphs: Vec<&'a ShapedGlyph>,
+    glyphs: Vec<GroupGlyph<'a>>,
+}
+
+struct GroupGlyph<'a> {
+    glyph: &'a ShapedGlyph,
+    starts_attachment_group: bool,
+    attached: bool,
+    right_to_left: bool,
 }
 
 fn attachment_root(glyphs: &[ShapedGlyph], index: usize) -> usize {
@@ -134,6 +141,7 @@ fn glyph_groups(shaped: &ShapedText) -> Vec<GlyphGroup<'_>> {
     let characters = shaped.text.chars().collect::<Vec<_>>();
     let mut groups = Vec::new();
     for run in &shaped.runs {
+        let right_to_left = run.direction == Direction::RightToLeft;
         let mut roots = Vec::new();
         for index in 0..run.glyphs.len() {
             let root = attachment_root(&run.glyphs, index);
@@ -146,7 +154,12 @@ fn glyph_groups(shaped: &ShapedText) -> Vec<GlyphGroup<'_>> {
             let Some(&character) = byte_to_character.get(&(root_glyph.cluster as usize)) else {
                 continue;
             };
-            let mut glyphs = vec![root_glyph];
+            let mut glyphs = vec![GroupGlyph {
+                glyph: root_glyph,
+                starts_attachment_group: true,
+                attached: false,
+                right_to_left,
+            }];
             glyphs.extend(
                 run.glyphs
                     .iter()
@@ -154,7 +167,12 @@ fn glyph_groups(shaped: &ShapedText) -> Vec<GlyphGroup<'_>> {
                     .filter(|(index, _)| {
                         *index != root && attachment_root(&run.glyphs, *index) == root
                     })
-                    .map(|(_, glyph)| glyph),
+                    .map(|(_, glyph)| GroupGlyph {
+                        glyph,
+                        starts_attachment_group: false,
+                        attached: true,
+                        right_to_left,
+                    }),
             );
             if is_logical_mark(characters[character]) {
                 if let Some(base) = groups.iter_mut().rfind(|group: &&mut GlyphGroup<'_>| {
@@ -211,7 +229,12 @@ pub fn positioned_glyphs(
             continue;
         };
         let mut mirror_pending = true;
-        for glyph in &group.glyphs {
+        let mut attachment_origin = cursors[line_index];
+        for group_glyph in &group.glyphs {
+            if group_glyph.starts_attachment_group {
+                attachment_origin = cursors[line_index];
+            }
+            let glyph = group_glyph.glyph;
             let mirrored = if mirror_pending {
                 paragraph.mirrored[character]
                     .map(|character| shaped.fonts.glyph_for(character))
@@ -225,9 +248,15 @@ pub fn positioned_glyphs(
             let metrics = shaped.fonts.metrics(font_index)?;
             let scale = shaped.size / f32::from(metrics.units_per_em);
             let line_origin_y = line_index as f32 * shaped.size * 1.2;
-            let x = cursors[line_index][0] + glyph.x_offset as f32 * shaped.size / 64.0;
-            let y =
-                line_origin_y + cursors[line_index][1] - glyph.y_offset as f32 * shaped.size / 64.0;
+            // Backward GPOS resolves attached offsets against the attachment root's
+            // pre-advance pen. Unattached and LTR glyphs retain the stream cursor.
+            let origin = if group_glyph.right_to_left && group_glyph.attached {
+                attachment_origin
+            } else {
+                cursors[line_index]
+            };
+            let x = origin[0] + glyph.x_offset as f32 * shaped.size / 64.0;
+            let y = line_origin_y + origin[1] - glyph.y_offset as f32 * shaped.size / 64.0;
             let advance = [
                 glyph.x_advance as f32 * shaped.size / 64.0,
                 glyph.y_advance as f32 * shaped.size / 64.0,
@@ -450,7 +479,7 @@ mod tests {
                         cluster: 2,
                         x_advance: 0,
                         y_advance: 0,
-                        x_offset: -48,
+                        x_offset: 16,
                         y_offset: 24,
                         attached_to: Some(0),
                     },
@@ -460,7 +489,7 @@ mod tests {
                         cluster: 4,
                         x_advance: 0,
                         y_advance: 0,
-                        x_offset: -32,
+                        x_offset: 32,
                         y_offset: 32,
                         attached_to: Some(0),
                     },
@@ -495,7 +524,8 @@ mod tests {
         let advances: Vec<_> = positioned.iter().map(|glyph| glyph.advance).collect();
 
         // L2 reverses the character groups. L3 keeps both marks after the base,
-        // in their original attachment order, while retaining exact GPOS data.
+        // in their original attachment order. Backward GPOS offsets use the
+        // root's pre-advance pen, so no base advance is subtracted from them.
         assert_eq!(clusters, vec![6, 0, 2, 4]);
         assert_eq!(glyph_ids, vec![trailing, base, first_mark, second_mark]);
         assert_eq!(
@@ -505,6 +535,27 @@ mod tests {
         assert_eq!(
             advances,
             vec![[16.0, 0.0], [16.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
+        );
+
+        // The forward convention remains cursor-relative for attachments.
+        let mut forward = shaped.clone();
+        forward.levels.fill(0);
+        forward.runs[0].bidi_levels.fill(0);
+        forward.runs[0].direction = Direction::LeftToRight;
+        let positioned = positioned_glyphs(&forward, std::slice::from_ref(&line)).unwrap();
+        assert_eq!(
+            positioned
+                .iter()
+                .map(|glyph| glyph.glyph_id)
+                .collect::<Vec<_>>(),
+            vec![base, first_mark, second_mark, trailing]
+        );
+        assert_eq!(
+            positioned
+                .iter()
+                .map(|glyph| glyph.origin)
+                .collect::<Vec<_>>(),
+            vec![[0.0, 0.0], [20.0, -6.0], [24.0, -8.0], [16.0, 0.0]]
         );
     }
 

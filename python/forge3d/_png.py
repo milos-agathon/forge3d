@@ -242,7 +242,7 @@ def _decode_row_to_rgba(
     raise ValueError(f"Unsupported PNG color type: {color_type}")
 
 
-def decode_png(data: bytes) -> np.ndarray:
+def decode_png(data: bytes, *, require_rgba8: bool = False) -> np.ndarray:
     if data[:8] != _PNG_SIGNATURE:
         raise ValueError("Not a PNG file")
 
@@ -296,6 +296,8 @@ def decode_png(data: bytes) -> np.ndarray:
 
     if width is None or height is None or bit_depth is None or color_type is None or interlace is None:
         raise ValueError("PNG is missing an IHDR chunk")
+    if require_rgba8 and (color_type != 6 or bit_depth != 8):
+        raise ValueError("Expected an 8-bit RGBA PNG")
 
     raw = zlib.decompress(bytes(idat))
     output = np.empty((height, width, 4), dtype=np.uint8)

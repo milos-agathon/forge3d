@@ -3475,6 +3475,50 @@ def _native_glyph_box(
     return x, y, float(glyph["w"]) * scale, float(glyph["h"]) * scale
 
 
+def _label_atlas_paths(layer: "LabelLayer") -> tuple[Path, Path, bool]:
+    from .text_atlas import default_latin_atlas_paths
+
+    atlas = _metadata_dict(layer.glyph_atlas)
+    image_path = atlas.get("image_path")
+    metrics_path = atlas.get("metrics_path") or atlas.get("source_path")
+    if image_path and metrics_path and Path(str(image_path)).exists() and Path(str(metrics_path)).exists():
+        return Path(str(image_path)), Path(str(metrics_path)), True
+    return (*default_latin_atlas_paths(), False)
+
+
+def _compiled_label_render_style(accepted, layer_id, width, height, default_size):
+    typography = accepted.typography or {}
+    fill = _render_color(typography.get("color") or typography.get("text_color"), (255, 255, 255, 255))
+    halo = _render_color(
+        typography.get("halo_color") or typography.get("text_halo_color"), (0, 0, 0, 190),
+    )
+    alpha = _render_number(typography.get("chronos_alpha"), 1.0)
+    alpha = min(max(alpha if math.isfinite(alpha) else 1.0, 0.0), 1.0)
+    halo_width = _render_number(
+        typography.get("halo_width_px", typography.get("halo_width", typography.get("text_halo_width"))),
+        1.0,
+    )
+    size = _render_number(
+        typography.get("font_size", typography.get("size", typography.get("text_size"))),
+        default_size,
+    )
+    positioned = tuple(accepted.positioned_glyphs or ())
+    reason = None
+    if not math.isfinite(size) or size <= 0.0:
+        reason = "invalid_text_size"
+    elif not math.isfinite(halo_width) or halo_width < 0.0:
+        reason = "invalid_halo_width"
+    elif not positioned:
+        reason = "missing_positioned_glyphs"
+    if reason:
+        raise MapSceneTextLayoutError({
+            "status": "diagnostic_block", "reason": reason,
+            "layer": layer_id, "object_id": accepted.label_id,
+        })
+    origin = _label_pen_origin(accepted, positioned, size, width, height)
+    return positioned, origin, size, fill, halo, halo_width, alpha
+
+
 def _mapscene_native_label_batches(
     recipe: "SceneRecipe", plans: Mapping[str, Any], width: int, height: int, *,
     atlas_sources: Mapping[str, tuple[Path, Path, bool]] | None = None,
@@ -3485,8 +3529,8 @@ def _mapscene_native_label_batches(
     This authoring step never renders, reads back a texture, or changes a plan.
     The ordinary compositor and the unified frame share this exact glyph stream.
     """
-    from ._png import load_png_rgba
-    from .text_atlas import default_latin_atlas_paths, load_atlas_metrics
+    from numpy import float32
+    from .text_atlas import _load_atlas_image, load_atlas_metrics
 
     batches: list[dict[str, Any]] = []
     for layer in (item for item in recipe.layers if isinstance(item, LabelLayer)):
@@ -3495,26 +3539,21 @@ def _mapscene_native_label_batches(
         if plan is None or not plan.accepted:
             continue
 
-        if atlas_sources is not None:
-            atlas_png, atlas_json, custom_atlas_bound = atlas_sources[layer_id]
-        else:
-            atlas_png, atlas_json = default_latin_atlas_paths()
-            atlas_payload = _metadata_dict(layer.glyph_atlas)
-            image_path = atlas_payload.get("image_path")
-            metrics_path = atlas_payload.get("metrics_path") or atlas_payload.get("source_path")
-            custom_atlas_bound = bool(
-                image_path
-                and metrics_path
-                and Path(str(image_path)).exists()
-                and Path(str(metrics_path)).exists()
-            )
-            if custom_atlas_bound:
-                atlas_png, atlas_json = Path(str(image_path)), Path(str(metrics_path))
+        atlas_png, atlas_json, custom_atlas_bound = (
+            atlas_sources[layer_id] if atlas_sources is not None else _label_atlas_paths(layer)
+        )
 
-        if atlas_data is None:
-            atlas, metrics = load_png_rgba(atlas_png), load_atlas_metrics(atlas_json)
-        else:
-            atlas, metrics = atlas_data[layer_id]
+        try:
+            if atlas_data is None:
+                metrics = load_atlas_metrics(atlas_json)
+                atlas = _load_atlas_image(atlas_png, metrics)
+            else:
+                atlas, metrics = atlas_data[layer_id]
+        except (OSError, ValueError) as error:
+            raise MapSceneTextLayoutError({
+                "status": "diagnostic_block", "reason": "invalid_text_atlas",
+                "layer": layer_id, "object_id": None, "message": str(error),
+            }) from error
         glyphs_by_id = metrics.get("glyphs_by_id")
         if not isinstance(glyphs_by_id, Mapping) or not glyphs_by_id:
             raise MapSceneTextLayoutError({
@@ -3544,7 +3583,7 @@ def _mapscene_native_label_batches(
             })
 
         # (chronos_alpha, rect) in plan order; rects carry full-opacity colors.
-        pending_text_rects: list[tuple[float, tuple[float, ...]]] = []
+        pending_text_rects: list[tuple[float, str, tuple[float, ...]]] = []
         for accepted in plan.accepted:
             typography = dict(getattr(accepted, "typography", None) or {})
             shaped_hashes = tuple(
@@ -3559,57 +3598,30 @@ def _mapscene_native_label_batches(
                     "expected_sha256": list(shaped_hashes),
                     "atlas_sha256": list(atlas_hashes),
                 })
-            text_color = _rgba01(
-                _render_color(typography.get("color") or typography.get("text_color"), (255, 255, 255, 255))
-            )
-            halo_color = _rgba01(
-                _render_color(
-                    typography.get("halo_color") or typography.get("text_halo_color"),
-                    (0, 0, 0, 190),
+            positioned, (anchor_x, anchor_y), render_size, fill, halo, halo_width, chronos_alpha = (
+                _compiled_label_render_style(
+                    accepted, layer_id, width, height, atlas_font_size if custom_atlas_bound else 12.0,
                 )
             )
-            try:
-                chronos_alpha = float(typography.get("chronos_alpha", 1.0))
-            except (TypeError, ValueError):
-                chronos_alpha = 1.0
-            if not math.isfinite(chronos_alpha):
-                chronos_alpha = 1.0
-            chronos_alpha = min(max(chronos_alpha, 0.0), 1.0)
-            halo_width = _render_number(
-                typography.get("halo_width_px")
-                if "halo_width_px" in typography
-                else typography.get("halo_width", typography.get("text_halo_width")),
-                1.0,
-            )
-            # The packaged atlas bake resolution is an implementation detail,
-            # not the public default label size. Keep MapScene's default at
-            # 12 px there. An explicitly bound custom atlas retains its own
-            # declared size unless typography overrides it.
-            render_size = _render_number(
-                typography.get("font_size", typography.get("size", typography.get("text_size"))),
-                atlas_font_size if custom_atlas_bound else 12.0,
-            )
-            if not math.isfinite(render_size) or render_size <= 0.0:
-                raise MapSceneTextLayoutError({
-                    "status": "diagnostic_block",
-                    "reason": "invalid_text_size",
-                    "layer": layer_id,
-                    "object_id": accepted.label_id,
-                    "font_size": render_size,
-                })
+            if metrics["channels"] == 4:
+                # The signed field encodes half the declared range on either
+                # side of the outline. Coverage needs the halo and a pixel's
+                # half diagonal, expressed on the same f32 bake scale.
+                radius = halo_width if halo[3] else 0.0
+                required_range = float(float32(2.0 * (radius + math.sqrt(0.5)) * atlas_font_size / render_size))
+                if float(metrics["px_range"]) < required_range:
+                    raise MapSceneTextLayoutError({
+                        "status": "diagnostic_block",
+                        "reason": "insufficient_atlas_range",
+                        "layer": layer_id,
+                        "object_id": accepted.label_id,
+                        "px_range": metrics["px_range"],
+                        "required_px_range": required_range,
+                        "font_size": render_size,
+                        "halo_width_px": radius,
+                    })
+            text_color, halo_color = _rgba01(fill), _rgba01(halo)
             atlas_scale = render_size / atlas_font_size
-            positioned = tuple(getattr(accepted, "positioned_glyphs", ()) or ())
-            anchor_x, anchor_y = _label_pen_origin(
-                accepted, positioned, render_size, int(width), int(height)
-            )
-            if not positioned:
-                raise MapSceneTextLayoutError({
-                    "status": "diagnostic_block",
-                    "reason": "missing_positioned_glyphs",
-                    "layer": layer_id,
-                    "object_id": accepted.label_id,
-                    "required_mapping": "font_index:glyph_id",
-                })
             for positioned_glyph in positioned:
                 font_index = int(positioned_glyph["font_index"])
                 glyph_id = int(positioned_glyph["glyph_id"])
@@ -3695,7 +3707,7 @@ def _mapscene_native_label_batches(
                         "object_id": accepted.label_id,
                         "identity": identity,
                     })
-                pending_text_rects.append((chronos_alpha, rect))
+                pending_text_rects.append((chronos_alpha, accepted.label_id, rect))
 
         if not pending_text_rects:
             raise MapSceneTextLayoutError({
@@ -3705,12 +3717,20 @@ def _mapscene_native_label_batches(
                 "object_id": None,
             })
         for alpha, run in itertools.groupby(pending_text_rects, key=lambda item: item[0]):
-            rects = [rect for _, rect in run]
+            rects = []
+            label_starts = []
+            previous_label = None
+            for _, label_id, rect in run:
+                if label_id != previous_label:
+                    label_starts.append(len(rects))
+                    previous_label = label_id
+                rects.append(rect)
             if alpha > 0.0:
                 batches.append({
                     "layer": layer_id, "atlas": atlas,
                     "channels": int(metrics.get("channels", 1)),
-                    "alpha": alpha, "rects": rects,
+                    "alpha": alpha, "rects": rects, "label_starts": label_starts,
+                    "px_range": float(metrics.get("px_range", 8.0)),
                 })
     return batches
 
@@ -3742,9 +3762,14 @@ def _composite_native_label_layers(
         if hasattr(native_scene, "disable_terrain"):
             native_scene.disable_terrain()
         native_scene.set_raster_overlay(composited, 1.0, None, None)
-        native_scene.set_native_text_atlas(batch["atlas"], batch["channels"], 1.0)
+        native_scene.set_native_text_atlas(
+            batch["atlas"], batch["channels"], 1.0, px_range=batch["px_range"],
+        )
         native_scene.enable_native_text()
-        for rect in batch["rects"]:
+        label_starts = set(batch["label_starts"])
+        for index, rect in enumerate(batch["rects"]):
+            if index in label_starts and hasattr(native_scene, "begin_native_text_label"):
+                native_scene.begin_native_text_label()
             native_scene.add_native_text_rect_uv_halo(*rect)
         rgba = np.asarray(native_scene.render_rgba())
         if rgba.ndim != 3 or rgba.shape[2] != 4:
@@ -6338,6 +6363,17 @@ class MapScene:
         Rendering and bundle saving reuse them until the recipe changes.
         """
         return self._compiler.compile(self.recipe)
+
+    def label_svg(self, *, precision: int = 6) -> str:
+        """Export the current compiled labels as positioned SVG outlines.
+
+        The viewBox matches the render viewport. Reuses accepted labels and
+        visibility decisions from the current plan and verifies font content
+        before extracting outlines. No fonts are required to display the SVG.
+        """
+        from .export import _mapscene_label_svg
+
+        return _mapscene_label_svg(self.recipe, self._compiled_plan_for_current_recipe(), precision)
 
     def _rehydrate_compiled_plan(self, manifest: Any) -> CompiledScenePlan:
         """Restore persisted decisions without running fresh label planning."""

@@ -1,0 +1,89 @@
+name: LITTERA hosted CPU shaping equality
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  wheel:
+    if: >-
+      github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'codex/littera-shaping-evidence'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {leg: linux, runner: ubuntu-24.04, target: x86_64-unknown-linux-gnu, args: '--release --out dist -i python3.10', manylinux: 'off'}
+          - {leg: macos, runner: macos-latest, target: universal2-apple-darwin, args: '--release --out dist', manylinux: 'auto'}
+          - {leg: windows, runner: windows-latest, target: x86_64-pc-windows-msvc, args: '--release --out dist', manylinux: 'auto'}
+    uses: ./.github/workflows/build-wheel.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha }}
+      runner: ${{ matrix.runner }}
+      target: ${{ matrix.target }}
+      maturin_args: ${{ matrix.args }}
+      manylinux: ${{ matrix.manylinux }}
+      artifact: littera-wheel-${{ matrix.leg }}
+
+  shaping:
+    needs: wheel
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {leg: linux, runner: ubuntu-24.04}
+          - {leg: macos, runner: macos-latest}
+          - {leg: windows, runner: windows-latest}
+    runs-on: ${{ matrix.runner }}
+    env:
+      FORGE3D_NO_BOOTSTRAP: '1'
+      FORGE3D_TEST_INSTALLED_WHEEL: '1'
+      LITTERA_EXACT_HEAD: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: littera-wheel-${{ matrix.leg }}
+          path: dist/
+      - name: Install the caller's exact-head wheel
+        run: |
+          python -m pip install numpy packaging pytest
+          python scripts/install_compatible_wheel.py dist
+      - name: Check pinned shaping oracles and serialize the corpus twice
+        run: python .github/scripts/littera_shaping_receipt.py collect dist shaping-evidence/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: littera-shaped-${{ matrix.leg }}
+          path: shaping-evidence/
+          if-no-files-found: error
+
+  compare:
+    needs: shaping
+    runs-on: ubuntu-24.04
+    env:
+      LITTERA_EXACT_HEAD: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: littera-shaped-*
+          path: shaping-evidence/
+      - name: Require equal hashes on all three platforms for this exact head and run
+        run: python .github/scripts/littera_shaping_receipt.py compare shaping-evidence/

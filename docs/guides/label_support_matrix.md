@@ -15,8 +15,14 @@
 | Terrain-elevated line labels | `experimental` | Terrain sampling is not owned by feature `002`; requests such as `terrain_mode="sample"` return diagnostics instead of silently flattening. | `experimental_feature`. |
 | Deterministic LabelPlan | `supported` | `LabelPlan.compile(...)` produces deterministic accepted/rejected plan data, point and polygon candidates, terrain-aware point elevations where sampled, keepout and priority rejection details, and render/export payloads. | `missing_glyphs`, `label_rejection_summary`; unsupported backends return `placeholder_fallback`. |
 | Advanced repeated line labels | `underdeveloped` | P2 product planning adds deterministic repeat-distance output where line geometry can be compiled; unavailable render integration remains diagnosed before render. | `experimental_feature` or `label_rejection_summary` where applicable. |
-| Arabic joining | `supported` | `LabelPlan.compile(...)` uses native `rustybuzz` plus `unicode-bidi` when the glyph atlas supplies a font path, records glyph IDs/clusters/advances and RTL metadata, and maps shaped Arabic runs to the current presentation-form atlas keys for MapScene rendering. | `missing_glyphs` if the atlas does not include the shaped render glyphs. |
-| Advanced curved labels and Indic shaping | `experimental` | Curved path text, Indic conjunct shaping, and complex-script shaping beyond the current Arabic joining path remain non-MVP-blocking unless prioritized with end-to-end tests. They must be diagnosed before render rather than treated as silent success. | `experimental_feature`. |
+| Arabic joining | `supported` | `LabelPlan.compile(...)` uses the in-tree OpenType shaper and bidi resolver when the glyph atlas supplies a font chain. It preserves glyph IDs, clusters, advances and native outlines through placement and MapScene rendering. | Structured missing-font, missing-glyph, unsupported-script and unsupported-lookup errors. |
+| Hebrew marks | `supported` | The marked Hebrew subset covers U+05B0, U+05B8, U+05B9, U+05BC and U+05C1 with backward attachment. The shipped conformance corpus pins the supported cases. | `missing_glyph` outside the supplied fonts' repertoire. Arbitrary inherited combining marks in Hebrew runs remain outside the qualified scope. |
+| Devanagari shaping | `supported` | Indic shaping in the in-tree shaper executes reordering, conjunct substitutions and positioning for covered Devanagari glyphs. Atlas lookup uses shaped font/glyph identities. | Structured shaping errors; no character reversal or bitmap fallback. |
+| Curved LabelPlan/MapScene labels | `experimental` | The compiler accepts shaped visual glyph streams, including ligatures and zero-advance marks, and emits centered tangent geometry. MapScene consumes the stored rotations. Full LITTERA surface-fidelity qualification is recorded separately in the scoped review. | Geometry-authority and atlas-coverage diagnostics for unavailable behavior. |
+
+See [shaped outline rendering](littera_outline_rendering.md) for shared CPU/SVG
+outline geometry and the current qualification boundary. The separate
+`ViewerHandle.add_curved_label` entry point retains its experimental diagnostic.
 
 The feature `002` public workflow uses high-level `ViewerHandle` methods and
 does not require raw IPC for basic label creation, configuration, line labels,

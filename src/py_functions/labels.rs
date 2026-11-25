@@ -202,6 +202,7 @@ pub(crate) fn layout_label_candidates_py(
         advance: Option<(f64, f64)>,
         has_outline: Option<bool>,
         unit_advance: f32,
+        origin: (f32, f32),
     }
     let mut glyphs_in = Vec::with_capacity(positioned_glyphs.len());
     for item in &positioned_glyphs {
@@ -264,11 +265,35 @@ pub(crate) fn layout_label_candidates_py(
             Some((ax, _)) => ax as f32,
             None => 0.6,
         };
-        if !unit_advance.is_finite() || unit_advance <= 0.0 {
+        if !unit_advance.is_finite() || unit_advance < 0.0 {
             return Err(PyValueError::new_err(
-                "positioned_glyphs advance must be positive",
+                "positioned_glyphs advance must be non-negative",
             ));
         }
+        let origin = match item.bind(py).get_item("origin")? {
+            Some(value) => {
+                let values = value.extract::<Vec<f32>>()?;
+                if values.len() != 2 {
+                    return Err(PyValueError::new_err(
+                        "positioned_glyphs origin must be a 2-sequence",
+                    ));
+                }
+                let pair = (values[0], values[1]);
+                if !pair.0.is_finite() || !pair.1.is_finite() {
+                    return Err(PyValueError::new_err(
+                        "positioned_glyphs origin must be finite",
+                    ));
+                }
+                pair
+            }
+            None => (
+                glyphs_in
+                    .iter()
+                    .map(|glyph: &GlyphIn| glyph.unit_advance)
+                    .sum(),
+                0.0,
+            ),
+        };
         glyphs_in.push(GlyphIn {
             glyph_id,
             font_index,
@@ -277,6 +302,7 @@ pub(crate) fn layout_label_candidates_py(
             advance,
             has_outline,
             unit_advance,
+            origin,
         });
     }
 
@@ -286,7 +312,12 @@ pub(crate) fn layout_label_candidates_py(
         .iter()
         .map(|glyph| f64::from(glyph.unit_advance * font_size))
         .sum::<f64>()
-        + f64::from(tracking * font_size) * glyph_count.saturating_sub(1) as f64;
+        + f64::from(tracking * font_size)
+            * glyphs_in
+                .iter()
+                .filter(|glyph| glyph.unit_advance > 0.0)
+                .count()
+                .saturating_sub(1) as f64;
     if !text_width.is_finite() || text_width <= 0.0 || path_length < text_width {
         return Ok(None);
     }
@@ -300,17 +331,23 @@ pub(crate) fn layout_label_candidates_py(
         }
     }
 
-    // Curved authority works in the horizontal world plane; the screen
-    // polyline maps x -> x and screen y -> z so the authority's
-    // `atan2(tangent.x, tangent.z)` convention stays inside that authority.
-    let curved_path = if kind == "curved" {
-        let vertices: Vec<glam::Vec3> = screen_path
+    // The visual glyph stream already owns bidi reordering. Canonicalize the
+    // baseline traversal to an upright screen direction; never reverse glyphs.
+    let (curved_path, reversed) = if kind == "curved" {
+        let mut vertices: Vec<glam::Vec3> = screen_path
             .iter()
             .map(|(x, y, _z)| glam::Vec3::new(*x, 0.0, *y))
             .collect();
-        Some(crate::labels::curved::SampledPath::from_polyline(&vertices))
+        let path = crate::labels::curved::SampledPath::from_polyline(&vertices);
+        let reversed = path
+            .sample_at_distance(path.total_length * 0.5)
+            .is_some_and(|point| point.tangent.x < 0.0);
+        if reversed {
+            vertices.reverse();
+        }
+        (Some(crate::labels::curved::SampledPath::from_polyline(&vertices)), reversed)
     } else {
-        None
+        (None, false)
     };
     let points2d: Vec<[f32; 2]> = screen_path.iter().map(|(x, y, _z)| [*x, *y]).collect();
     let pixel_advances: Vec<f32> = glyphs_in
@@ -318,14 +355,14 @@ pub(crate) fn layout_label_candidates_py(
         .map(|glyph| glyph.unit_advance * font_size)
         .collect();
     let tracking_px = tracking * font_size;
-    let chars: Vec<char> = text.chars().collect();
 
     let mut seen_offsets = std::collections::HashSet::new();
     let mut candidates_out: Vec<(f32, Vec<(f32, f32, f32)>)> = Vec::new();
     for fraction in &fractions {
         let max_start = (path_length - text_width).max(0.0) as f32;
-        let start_offset =
-            ((fraction * path_length as f32) - (text_width as f32) * 0.5).clamp(0.0, max_start);
+        let traversal_fraction = if reversed { 1.0 - fraction } else { *fraction };
+        let start_offset = (traversal_fraction * path_length as f32 - text_width as f32 * 0.5)
+            .clamp(0.0, max_start);
         if !seen_offsets.insert(start_offset.to_bits()) {
             continue;
         }
@@ -353,44 +390,19 @@ pub(crate) fn layout_label_candidates_py(
             })
             .collect()
         } else {
-            if chars.len() != glyph_count {
-                // The curved authority indexes advances per char; refuse to
-                // guess a mapping for ligatured/merged glyph streams.
-                return Ok(None);
-            }
             let path = curved_path.as_ref().ok_or_else(|| {
                 PyValueError::new_err("curved label candidate has no geometry path")
             })?;
-            let layout = crate::labels::curved::layout_curved_text_at_offset(
-                &chars,
+            crate::labels::curved::layout_positioned_curved_glyphs(
                 path,
                 &glyphs_in
                     .iter()
-                    .map(|glyph| glyph.unit_advance)
+                    .map(|glyph| (glyph.origin, glyph.unit_advance))
                     .collect::<Vec<_>>(),
                 font_size,
-                [1.0, 1.0, 1.0, 1.0],
                 tracking,
                 start_offset,
-                text_width as f32,
-            );
-            if !layout.success || layout.glyphs.len() != glyph_count {
-                continue;
-            }
-            layout
-                .glyphs
-                .iter()
-                .map(|glyph| {
-                    // Here (world x, z) is screen (x, y down). The authority
-                    // stores r = atan2(tx, tz); the compositor needs
-                    // atan2(tz, tx) = PI/2 - r (modulo a full turn).
-                    (
-                        glyph.world_pos.x,
-                        glyph.world_pos.z,
-                        std::f32::consts::FRAC_PI_2 - glyph.rotation,
-                    )
-                })
-                .collect()
+            )
         };
         if placed.len() != glyph_count {
             continue;
@@ -405,12 +417,13 @@ pub(crate) fn layout_label_candidates_py(
     // authorities: em units relative to the candidate anchor (the compositor
     // draws each glyph at `anchor + origin * font_size`). `placed` holds
     // absolute screen positions, so rebase them on the candidate's anchor.
-    // Both authorities sample each glyph at its advance centre, while the
-    // compositor contract expects the pen origin (it adds the glyph bearing),
-    // so step back half the sampled advance along the glyph's baseline. The
-    // line authority includes tracking in every sampled advance except the last.
+    // Curved placements already carry pen origins and shaping offsets. The
+    // line authority returns advance centres, with tracking folded into spacing.
     let pen_origin = |(x, y, rotation): (f32, f32, f32), advance_px: f32, glyph_index: usize| {
-        let sampled_advance = if kind == "line" && glyph_index < glyph_count.saturating_sub(1) {
+        if kind == "curved" {
+            return (x, y);
+        }
+        let sampled_advance = if glyph_index < glyph_count.saturating_sub(1) {
             advance_px + tracking_px
         } else {
             advance_px
@@ -544,14 +557,15 @@ pub(crate) fn layout_label_candidates_py(
     payload.set_item("projection_authority", "deterministic")?;
     payload.set_item(
         "positioned_glyphs",
-        shared_glyphs.ok_or_else(|| {
-            PyValueError::new_err("label candidates have no positioned glyphs")
-        })?,
+        shared_glyphs
+            .ok_or_else(|| PyValueError::new_err("label candidates have no positioned glyphs"))?,
     )?;
     payload.set_item("candidates", candidates)?;
     Ok(Some(payload.unbind()))
 }
 
 pub(crate) use crate::labels::py_text::{
-    bake_msdf_atlas_py, bake_msdf_atlas_shaped_py, rasterize_shaped_run_py, text_shape_py,
+    bake_msdf_atlas_py, bake_msdf_atlas_shaped_py, compiled_label_svg_path_py,
+    rasterize_shaped_run_py, rasterize_svg_path_py,
+    text_shape_py,
 };

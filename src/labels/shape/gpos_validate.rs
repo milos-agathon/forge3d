@@ -86,8 +86,8 @@ fn validate_pair(reader: Reader<'_>, base: usize) -> Result<(), TextError> {
                 )?;
                 for record in 0..records {
                     let at = set + 2 + record * record_size + 2;
-                    validate_value(reader, base, at, first_format)?;
-                    validate_value(reader, base, at + value_size(first_format), second_format)?;
+                    validate_value(reader, set, at, first_format)?;
+                    validate_value(reader, set, at + value_size(first_format), second_format)?;
                 }
             }
         }
@@ -253,4 +253,36 @@ fn add_offset(reader: Reader<'_>, base: usize, at: usize) -> Result<usize, TextE
 
 fn malformed() -> TextError {
     TextError::MalformedOpenType("GPOS subtable")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pair_set_devices() -> Vec<u8> {
+        // PairSet starts at byte 14. Both ValueRecords contain a device offset;
+        // the VariationIndex tables start at PairSet + 8 and PairSet + 14.
+        [
+            1u16, 0, 0x0010, 0x0010, 1, 14, 0, 1, 2, 8, 14, 0, 0, 0x8000, 0, 0, 0x8000,
+        ]
+        .into_iter()
+        .flat_map(u16::to_be_bytes)
+        .collect()
+    }
+
+    #[test]
+    fn pair_pos_devices_are_relative_to_pair_set() {
+        let data = pair_set_devices();
+        assert!(validate_pair(Reader::new(&data), 0).is_ok());
+    }
+
+    #[test]
+    fn pair_pos_rejects_device_beyond_pair_set_bounds() {
+        let mut data = pair_set_devices();
+        // Isolate the second ValueRecord. Subtable + 22 is a valid table,
+        // while PairSet + 22 lies beyond EOF and must be rejected.
+        data[18..20].copy_from_slice(&0u16.to_be_bytes());
+        data[20..22].copy_from_slice(&22u16.to_be_bytes());
+        assert!(validate_pair(Reader::new(&data), 0).is_err());
+    }
 }
