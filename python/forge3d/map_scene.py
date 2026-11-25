@@ -1779,8 +1779,8 @@ def _build_mapscene_terrain_params(
         except (ValueError, TypeError):
             low = high = 0.0
         z_scale = float(settings.get("exaggeration") or 1.0)
-        # Derive the far plane from the native screen camera's eye and the
-        # deepest exaggerated terrain point, not from a scalar relief sum.
+        # Derive the far plane from the native camera's eye and the deepest
+        # exaggerated terrain point, not from a scalar relief sum.
         polar = math.radians(90.0 - float(recipe.camera.elevation_deg))
         radius = float(recipe.camera.distance)
         target = _mapscene_camera_target(recipe)
@@ -1788,6 +1788,12 @@ def _build_mapscene_terrain_params(
         # planes, or it resets the temporal history of the shared renderer.
         vertical_offset = target[2] + radius * math.sin(polar) - min(low, 0.0) * z_scale
         reach = math.hypot(radius * math.cos(polar), vertical_offset) + 0.5 * terrain_span
+        if _mapscene_effective_camera_mode(recipe) == "screen":
+            # Mirror interactive::camera_matrices: screen mode is orthographic
+            # with its eye at radius + height_range * z_scale. The deepest
+            # terrain sample is another -min(low, 0) * z_scale below that eye.
+            screen_eye_z = radius + abs(high - low) * abs(z_scale)
+            reach = max(reach, screen_eye_z - min(low, 0.0) * abs(z_scale) + 1.0)
         # Keep the previous relief-based floor: the eye-to-deepest distance
         # alone can shrink the far plane for positive-only DEMs and change
         # shadow/lighting behaviour that already passed.
@@ -4102,22 +4108,28 @@ def _terrain_grid_frame(
         span = None
     explicit_span = span is not None
 
-    width = float(metadata.get("width") or metadata.get("cols") or 1.0)
-    height = float(metadata.get("height") or metadata.get("rows") or 1.0)
+    missing_width = not metadata.get("width") and not metadata.get("cols")
+    missing_height = not metadata.get("height") and not metadata.get("rows")
+    width = 1.0 if missing_width else float(metadata.get("width") or metadata.get("cols"))
+    height = 1.0 if missing_height else float(metadata.get("height") or metadata.get("rows"))
     array_shape = getattr(terrain.data, "shape", None)
     if array_shape is not None and len(array_shape) >= 2:
-        if not metadata.get("width") and not metadata.get("cols"):
+        if missing_width:
             width = float(array_shape[1])
-        if not metadata.get("height") and not metadata.get("rows"):
+        if missing_height:
             height = float(array_shape[0])
     transform = None
     shape: tuple[int, int] | None = None
-    # A metadata affine with no dimensions cannot resolve a grid on its own.
-    # Prefer the file's own header, then the inline array shape.
-    if terrain.path and (not metadata.get("width") and not metadata.get("height")):
+    # Resolve each missing dimension independently. A file header supplies the
+    # missing axis; explicit metadata still wins for the axis it names.
+    if terrain.path and (missing_width or missing_height):
         path_grid = _raster_grid_from_path(Path(str(terrain.path)))
         if path_grid is not None:
-            grid = path_grid
+            grid = dict(path_grid)
+            if not missing_width:
+                grid["width"] = int(width)
+            if not missing_height:
+                grid["height"] = int(height)
         else:
             grid = _terrain_alignment_grid(terrain, fallback_shape=(int(height), int(width)))
     else:
@@ -4149,7 +4161,9 @@ def _terrain_grid_frame(
             )
         if span is None:
             span = max(span_x, span_y)
-    elif span is None and (resolution := _metadata_resolution(metadata)) is not None:
+    elif span is None and (resolution := _metadata_resolution(
+        metadata, fallback_shape=(int(height), int(width))
+    )) is not None:
         span = max(width * resolution[0], height * resolution[1])
 
     if span is not None and not explicit_span and crs:
@@ -6392,7 +6406,11 @@ def _alignment_residual_diagnostic(layer_id: str, residual: Mapping[str, Any]) -
     )
 
 
-def _metadata_resolution(metadata: Mapping[str, Any] | None) -> tuple[float, float] | None:
+def _metadata_resolution(
+    metadata: Mapping[str, Any] | None,
+    *,
+    fallback_shape: Sequence[int] | None = None,
+) -> tuple[float, float] | None:
     data = _metadata_dict(metadata)
     value = data.get("resolution", data.get("pixel_size", data.get("spacing")))
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)) and len(value) >= 2:
@@ -6402,11 +6420,18 @@ def _metadata_resolution(metadata: Mapping[str, Any] | None) -> tuple[float, flo
         return scalar, scalar
     if "resolution_x" in data and "resolution_y" in data:
         return abs(float(data["resolution_x"])), abs(float(data["resolution_y"]))
-    if "width" in data and "height" in data and "bounds" in data:
+    width = data.get("width") or data.get("cols")
+    height = data.get("height") or data.get("rows")
+    if fallback_shape is not None and len(fallback_shape) >= 2:
+        if width is None:
+            width = fallback_shape[1]
+        if height is None:
+            height = fallback_shape[0]
+    if width is not None and height is not None and "bounds" in data:
         bounds = data.get("bounds")
         if isinstance(bounds, Sequence) and not isinstance(bounds, (str, bytes)) and len(bounds) == 4:
-            width = max(1.0, float(data["width"]))
-            height = max(1.0, float(data["height"]))
+            width = max(1.0, float(width))
+            height = max(1.0, float(height))
             return abs(float(bounds[2]) - float(bounds[0])) / width, abs(float(bounds[3]) - float(bounds[1])) / height
     return None
 

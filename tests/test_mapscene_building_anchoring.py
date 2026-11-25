@@ -700,15 +700,14 @@ def test_eight_exaggeration_keeps_low_terrain_and_matches_wide_far_control(tmp_p
     from PIL import Image
 
     scene = _mixed_elevation_scene(8.0)
-    # TAA makes frames stochastic; compare the deterministic single-sample path.
-    settings = dict(scene.recipe.lighting.settings or {})
-    settings["screen_space"] = {"enabled": False, "taa_enabled": False}
-    scene.recipe.lighting.settings = settings
+    # Keep the original screen-space effects and TAA enabled: the clipping bug
+    # lived on this path, not only on the deterministic single-sample path.
     params = map_scene._build_mapscene_terrain_params(
         scene.recipe, scene.recipe.terrain.data, (128, 128), projection_only=True
     )
-    # The deepest exaggerated point must be inside the far plane.
-    assert params.clip[1] > float(scene.recipe.camera.distance) + 1800.0 * 8.0
+    # Native screen mode puts the eye at radius + height_range * z_scale.
+    # The low plateau is another 14,400 m below that eye at 8x.
+    assert params.clip[1] > 24000.0 + 3600.0 * 8.0 + 1800.0 * 8.0
 
     out = tmp_path / "eight.png"
     scene.render(str(out))
@@ -726,9 +725,6 @@ def test_eight_exaggeration_keeps_low_terrain_and_matches_wide_far_control(tmp_p
     monkeypatch = __import__("pytest").MonkeyPatch()
     monkeypatch.setattr(module, "_terrain_render_span_and_clip", wide_clip)
     scene = _mixed_elevation_scene(8.0)  # fresh scene for the control
-    settings = dict(scene.recipe.lighting.settings or {})
-    settings["screen_space"] = {"enabled": False, "taa_enabled": False}
-    scene.recipe.lighting.settings = settings
     try:
         control_out = tmp_path / "control.png"
         scene.render(str(control_out))
@@ -745,14 +741,14 @@ def test_eight_exaggeration_keeps_low_terrain_and_matches_wide_far_control(tmp_p
         return int((np.abs(frame - background).sum(axis=2) > 6).sum())
 
     assert terrain_pixels(actual) > 0, "no terrain rendered"
-    assert abs(terrain_pixels(actual) - terrain_pixels(control)) <= 64, (
-        "widening the far plane changed terrain coverage"
-    )
-
-    # Background detection uses the red channel only; differing RGB channels
-    # in a flat background must not count as visible terrain.
-    assert float(actual[:64, ..., 0].astype(np.float64).std()) > 1.0
-    assert float(actual[64:, ..., 0].astype(np.float64).std()) > 1.0
+    for label, actual_half, control_half in (
+        ("high", actual[:64], control[:64]),
+        ("low", actual[64:], control[64:]),
+    ):
+        assert terrain_pixels(actual_half) > 0, f"the {label} half was clipped"
+        assert abs(terrain_pixels(actual_half) - terrain_pixels(control_half)) <= 64, (
+            f"widening the far plane changed the {label} half's terrain coverage"
+        )
 
 
 def test_file_and_array_dimensions_keep_span_and_footprint(tmp_path):
@@ -783,14 +779,25 @@ def test_file_and_array_dimensions_keep_span_and_footprint(tmp_path):
     }), encoding="utf-8")
     layer = f3d.MapSceneBuildingLayer.from_geojson(geojson, metadata={"source_crs": "EPSG:32632"})
 
+    bounds = [500000.0, 5190000.0, 510000.0, 5200000.0]
     cases = {
         "file only": f3d.TerrainSource(path=str(path), crs="EPSG:32632"),
         "file with affine": f3d.TerrainSource(
             path=str(path), crs="EPSG:32632", metadata={"transform": tuple(transform)[:6]}
         ),
+        "file with width only": f3d.TerrainSource(
+            path=str(path), crs="EPSG:32632", metadata={"width": 100}
+        ),
+        "file with height only": f3d.TerrainSource(
+            path=str(path), crs="EPSG:32632", metadata={"height": 100}
+        ),
         "array with affine, no dimensions": f3d.TerrainSource(
             data=np.zeros((100, 100), np.float32), crs="EPSG:32632",
             metadata={"transform": (500000.0, 100.0, 0.0, 5200000.0, 0.0, -100.0)},
+        ),
+        "array with bounds, no dimensions": f3d.TerrainSource(
+            data=np.zeros((100, 100), np.float32), crs="EPSG:32632",
+            metadata={"bounds": bounds},
         ),
     }
     reference = None
@@ -801,11 +808,14 @@ def test_file_and_array_dimensions_keep_span_and_footprint(tmp_path):
             [layer], frame[0], frame[2], frame[1], frame[3], frame[4]
         )
         positions = np.asarray(batches[0]["positions"], dtype=np.float64)
+        footprint = np.ptp(positions[:, [0, 2]], axis=0)
         signature = (
-            round(float(np.ptp(positions[:, [0, 2]], axis=0).max()), 4),
+            round(float(footprint[0]), 4),
+            round(float(footprint[1]), 4),
             round(float(batches[0]["wall_height"]), 4),
         )
         assert signature[0] == pytest.approx(0.017, abs=1e-3), (label, signature)
+        assert signature[1] == pytest.approx(0.017, abs=1e-3), (label, signature)
         if reference is None:
             reference = signature
         assert signature == reference, (label, signature, reference)
