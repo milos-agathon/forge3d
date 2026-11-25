@@ -460,6 +460,7 @@ impl TerrainScene {
                                 time_seconds,
                                 &mut timing,
                                 &mut staged_lod_selection,
+                                None,
                             )?;
                             hzb_frame_staged = params.culling == "hzb_two_phase"
                                 && render_targets.sample_count == 1

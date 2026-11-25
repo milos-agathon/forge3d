@@ -285,6 +285,7 @@ impl TerrainScene {
         time_seconds: f32,
         timing: &mut Option<crate::core::gpu_timing::GpuTimingManager>,
         staged_lod_selection: &mut Option<super::super::geometry::StagedLodSelection>,
+        terrain_visibility: Option<&mut Option<crate::core::resource_tracker::TrackedTexture>>,
     ) -> Result<()> {
         let shadow_bind_group = shadow_setup
             .shadow_bind_group
@@ -458,6 +459,10 @@ impl TerrainScene {
             self.orbis_pending_capture = Some(pending);
         }
 
+        if let Some(terrain_visibility) = terrain_visibility {
+            *terrain_visibility = Some(self.capture_visibility_depth(encoder, render_targets)?);
+        }
+
         #[cfg(feature = "enable-gpu-instancing")]
         {
             let scatter_state = self.build_scatter_render_state(
@@ -488,6 +493,7 @@ impl TerrainScene {
                 &height_inputs.heightmap_view,
                 shadow_setup.shadow_bind_group.as_ref(),
                 &scatter_state,
+                None,
             )?;
         }
         #[cfg(not(feature = "enable-gpu-instancing"))]
@@ -1338,9 +1344,10 @@ impl TerrainScene {
         let sampling = &decoded.sampling;
         let blit_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("terrain.blit.sampler"),
-            address_mode_u: Self::map_address_mode(sampling.address_u),
-            address_mode_v: Self::map_address_mode(sampling.address_v),
-            address_mode_w: Self::map_address_mode(sampling.address_w),
+            // Framebuffer edges cannot wrap like repeating material textures.
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: crate::core::gpu::deterministic_filter_mode(Self::map_filter_mode(
                 sampling.mag_filter,
             )),

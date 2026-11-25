@@ -386,8 +386,9 @@ def _validate_with_projection(
         _is_3d_camera_mode,
         _load_native_heightmap,
         _load_raw_heightmap,
-        _mapscene_effective_camera_mode,
         _mapscene_thematic_surface,
+        _styled_raster_result,
+        _mapscene_effective_camera_mode,
         _metadata_resolution,
         _path_to_str,
         _preset_override_diagnostic,
@@ -491,10 +492,14 @@ def _validate_with_projection(
     }
     if terrain.style is not None:
         try:
+            from .terrain_materials import TerrainMaterialStyle
+            if isinstance(terrain.style, TerrainMaterialStyle):
+                terrain.style.validate_scene(recipe)
             styled = terrain.style.apply(_load_raw_heightmap(terrain))
             terrain_details["style"] = terrain.style.to_dict()
             terrain_details["legend"] = styled.legend
-            supported_features["terrain.population_height_shade"] = "supported"
+            supported_features["terrain.material_recipe" if isinstance(terrain.style, TerrainMaterialStyle)
+                               else "terrain.population_height_shade"] = "supported"
         except (ValueError, TypeError, RuntimeError) as exc:
             diagnostics.append(Diagnostic(code="invalid_raster_style", severity="error", message=str(exc),
                 remediation="Correct the population values, nodata or scale.", layer_id="terrain", support_level="unsupported"))

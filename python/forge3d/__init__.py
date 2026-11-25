@@ -19,6 +19,10 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
+from .terrain_materials import (MaterialGrid, MaterialTexture, MaterialMask, TerrainMaterialLayer,
+                                TerrainMaterialRecipe, PreparedTerrainMaterial, TerrainMaterialStyle)
+from .geospatial_materials import GeospatialMaterialRecipe, MaterialLayer, MaterialEvaluation, MaterialRasterStyle
+
 __version__ = "1.52.0"
 version = __version__
 
@@ -754,6 +758,9 @@ from .precision import dd_harness, dd_jitter_demo, dd_selftest
 # -----------------------------------------------------------------------------
 __all__ = [
     "cinema", "Subject", "FramingSpec", "Shot", "ShotPlan", "CinemaInfeasible", "CinemaNativeUnavailable", "plan_shots",
+    "GeospatialMaterialRecipe", "MaterialLayer", "MaterialEvaluation", "MaterialRasterStyle",
+    "MaterialGrid", "MaterialTexture", "MaterialMask", "TerrainMaterialLayer",
+    "TerrainMaterialRecipe", "PreparedTerrainMaterial", "TerrainMaterialStyle",
     "RasterHeightSurfaceStyle",
     "CategoricalRasterStyle",
     "RasterRecipe",

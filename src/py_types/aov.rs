@@ -16,6 +16,9 @@ pub struct AovFrame {
     /// VERITAS: per-pixel VT source-id map (R32Uint, 0 == SOURCE_ID_NONE).
     /// Registry/ledger accounting is owned by the `TrackedTexture` wrapper.
     source_id_texture: Option<crate::core::resource_tracker::TrackedTexture>,
+    visibility_depth: Option<[crate::core::resource_tracker::TrackedTexture; 2]>,
+    interactive_surface_kind: Option<crate::core::resource_tracker::TrackedTexture>,
+    building_ids: Option<crate::core::resource_tracker::TrackedTexture>,
     width: u32,
     height: u32,
 }
@@ -188,9 +191,36 @@ impl AovFrame {
             optical_depth_texture,
             media_diagnostics_json,
             source_id_texture,
+            visibility_depth: None,
+            interactive_surface_kind: None,
+            building_ids: None,
             width,
             height,
         }
+    }
+
+    pub(crate) fn with_visibility_depth(
+        mut self,
+        depth: Option<[crate::core::resource_tracker::TrackedTexture; 2]>,
+    ) -> Self {
+        self.visibility_depth = depth;
+        self
+    }
+
+    pub(crate) fn with_building_ids(
+        mut self,
+        ids: Option<crate::core::resource_tracker::TrackedTexture>,
+    ) -> Self {
+        self.building_ids = ids;
+        self
+    }
+
+    pub(crate) fn with_interactive_surface_kind(
+        mut self,
+        kind: crate::core::resource_tracker::TrackedTexture,
+    ) -> Self {
+        self.interactive_surface_kind = Some(kind);
+        self
     }
 
     fn read_texture_rgba_f32(&self, texture: &wgpu::Texture) -> anyhow::Result<Vec<f32>> {
@@ -391,6 +421,93 @@ impl AovFrame {
     #[getter]
     fn has_source_id(&self) -> bool {
         self.source_id_texture.is_some()
+    }
+
+    /// Internal same-frame terrain and scene device depths, before/after scatter.
+    fn _visibility_depth<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<(
+        Bound<'py, numpy::PyArray2<f32>>,
+        Bound<'py, numpy::PyArray2<f32>>,
+    )> {
+        let textures = self.visibility_depth.as_ref().ok_or_else(|| {
+            PyRuntimeError::new_err("Visibility requires single-sample, unscaled AOV rendering")
+        })?;
+        let mut arrays = Vec::new();
+        for texture in textures {
+            let bytes = py
+                .allow_threads(|| {
+                    crate::core::texture_readback::read_texture_sync(
+                        &self.device,
+                        &self.queue,
+                        texture,
+                        self.width,
+                        self.height,
+                        wgpu::TextureFormat::Depth32Float,
+                        "terrain.visibility.readback",
+                    )
+                })
+                .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
+            let data = bytes
+                .chunks_exact(4)
+                .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+                .collect();
+            let array =
+                ndarray::Array2::from_shape_vec((self.height as usize, self.width as usize), data)
+                    .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
+            arrays.push(array.into_pyarray_bound(py));
+        }
+        let scene = arrays.pop().unwrap();
+        Ok((arrays.pop().unwrap(), scene))
+    }
+
+    /// Shared G-buffer ownership: 0 background, 1 terrain, 2 scatter.
+    fn _interactive_surface_kind<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<Option<Bound<'py, numpy::PyArray2<u8>>>> {
+        let Some(texture) = self.interactive_surface_kind.as_ref() else {
+            return Ok(None);
+        };
+        let data = py
+            .allow_threads(|| {
+                crate::core::texture_readback::read_texture_sync(
+                    &self.device,
+                    &self.queue,
+                    texture,
+                    self.width,
+                    self.height,
+                    wgpu::TextureFormat::R8Uint,
+                    "concordia.export.surface_kind.readback",
+                )
+            })
+            .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
+        let array = ndarray::Array2::from_shape_vec((self.height as usize, self.width as usize), data)
+            .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
+        Ok(Some(array.into_pyarray_bound(py)))
+    }
+
+    /// C01 internal co-written batch IDs: 0 terrain/sky, batch index + 1 otherwise.
+    fn _building_ids<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, numpy::PyArray2<u32>>> {
+        let texture = self.building_ids.as_ref().ok_or_else(|| {
+            PyRuntimeError::new_err("Building identity was not requested for this frame")
+        })?;
+        let data = py
+            .allow_threads(|| {
+                crate::core::hdr::read_r32uint_texture(
+                    &self.device,
+                    &self.queue,
+                    texture,
+                    self.width,
+                    self.height,
+                )
+            })
+            .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
+        let array =
+            ndarray::Array2::from_shape_vec((self.height as usize, self.width as usize), data)
+                .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
+        Ok(array.into_pyarray_bound(py))
     }
 
     /// VERITAS: per-pixel VT source-id map as a `(H, W)` uint32 array.

@@ -32,6 +32,7 @@ struct ScatterBatchUniforms {
     wind_bend_fade: [f32; 4],
     terrain_blend: [f32; 4],
     terrain_contact: [f32; 4],
+    identity: [u32; 4],
 }
 
 impl Default for ScatterBatchUniforms {
@@ -46,6 +47,7 @@ impl Default for ScatterBatchUniforms {
             wind_bend_fade: [0.0; 4],
             terrain_blend: [0.0, 0.75, 2.5, 0.0],
             terrain_contact: [0.0, 3.0, 0.35, 0.65],
+            identity: [0; 4],
         }
     }
 }
@@ -173,6 +175,7 @@ impl MeshInstancedRenderer {
             depth_write_enabled,
             shadow_bind_group_layout,
             None,
+            false,
         )
     }
 
@@ -191,6 +194,24 @@ impl MeshInstancedRenderer {
             true,
             Some(shadow_layout),
             Some(frame_layout),
+            false,
+        )
+    }
+
+    /// Optional C01 batch identity, co-written with the visible beauty fragment.
+    pub(crate) fn new_with_identity_output(
+        device: &Device,
+        color_format: TextureFormat,
+        depth_format: Option<TextureFormat>,
+        sample_count: u32,
+        depth_compare: wgpu::CompareFunction,
+        depth_write_enabled: bool,
+        shadow_bind_group_layout: Option<&BindGroupLayout>,
+        identity_output: bool,
+    ) -> RenderResult<Self> {
+        Self::new_with_frame_layout(
+            device, color_format, depth_format, sample_count, depth_compare,
+            depth_write_enabled, shadow_bind_group_layout, None, identity_output,
         )
     }
 
@@ -203,6 +224,7 @@ impl MeshInstancedRenderer {
         depth_write_enabled: bool,
         shadow_bind_group_layout: Option<&BindGroupLayout>,
         frame_layout: Option<&BindGroupLayout>,
+        identity_output: bool,
     ) -> RenderResult<Self> {
         #[cfg(feature = "extension-module")]
         let concordia_source;
@@ -294,7 +316,7 @@ impl MeshInstancedRenderer {
         if let Some(frame) = frame_layout {
             layouts.push(frame);
         }
-        let targets = if frame_layout.is_some() {
+        let mut targets = if frame_layout.is_some() {
             crate::core::gbuffer::GBuffer::geometry_targets(color_format).to_vec()
         } else {
             vec![Some(ColorTargetState {
@@ -363,6 +385,13 @@ impl MeshInstancedRenderer {
             ],
         };
 
+        if identity_output {
+            targets.push(Some(ColorTargetState {
+                format: TextureFormat::R32Uint,
+                blend: None,
+                write_mask: ColorWrites::ALL,
+            }));
+        }
         let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
             device,
             &RenderPipelineDescriptor {
@@ -392,6 +421,8 @@ impl MeshInstancedRenderer {
                     module: &shader,
                     entry_point: if frame_layout.is_some() {
                         "fs_concordia"
+                    } else if identity_output {
+                        "fs_main_with_identity"
                     } else {
                         "fs_main"
                     },
@@ -1060,6 +1091,53 @@ impl MeshInstancedRenderer {
         index_count: u32,
         instance_count: u32,
     ) {
+        self.draw_batch_params_with_identity(
+            _device,
+            pass,
+            queue,
+            view,
+            proj,
+            color,
+            light_dir,
+            light_intensity,
+            wind_phase,
+            wind_vec_bounds,
+            wind_bend_fade,
+            terrain_blend,
+            terrain_contact,
+            shadow_bind_group,
+            vbuf,
+            ibuf,
+            instbuf,
+            index_count,
+            instance_count,
+            [0; 4],
+        );
+    }
+
+    pub(crate) fn draw_batch_params_with_identity<'rp>(
+        &'rp self,
+        _device: &Device,
+        pass: &mut RenderPass<'rp>,
+        queue: &Queue,
+        view: Mat4,
+        proj: Mat4,
+        color: [f32; 4],
+        light_dir: [f32; 3],
+        light_intensity: f32,
+        wind_phase: [f32; 4],
+        wind_vec_bounds: [f32; 4],
+        wind_bend_fade: [f32; 4],
+        terrain_blend: [f32; 4],
+        terrain_contact: [f32; 4],
+        shadow_bind_group: Option<&'rp BindGroup>,
+        vbuf: &'rp Buffer,
+        ibuf: &'rp Buffer,
+        instbuf: &'rp Buffer,
+        index_count: u32,
+        instance_count: u32,
+        identity: [u32; 4],
+    ) {
         if index_count == 0 || instance_count == 0 {
             return;
         }
@@ -1090,6 +1168,7 @@ impl MeshInstancedRenderer {
         u.wind_bend_fade = wind_bend_fade;
         u.terrain_blend = terrain_blend;
         u.terrain_contact = terrain_contact;
+        u.identity = identity;
         queue.write_buffer(&self.per_draw_uniforms[slot], 0, bytemuck::bytes_of(&u));
 
         pass.set_pipeline(&self.pipeline);

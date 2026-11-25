@@ -184,6 +184,10 @@ pub(super) fn parse_material_layer_settings(
 
         MaterialLayerSettingsNative {
             normal_path,
+            physical_normals: materials
+                .getattr("physical_normals")
+                .and_then(|v| v.extract())
+                .unwrap_or(false),
             roughness_path,
             mask_path,
             albedo_path,

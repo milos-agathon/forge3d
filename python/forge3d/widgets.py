@@ -93,8 +93,11 @@ def _sample_palette(rgb_lut: np.ndarray, values: np.ndarray) -> np.ndarray:
     return rgb_lut[lo] * (1.0 - frac) + rgb_lut[hi] * frac
 
 
-def _hillshade(heightmap: np.ndarray, azimuth_deg: float, elevation_deg: float) -> np.ndarray:
-    dy, dx = np.gradient(heightmap.astype(np.float32))
+def _hillshade(heightmap: np.ndarray, azimuth_deg: float, elevation_deg: float, *,
+               dx_m: float = 1.0, dy_m: float = 1.0) -> np.ndarray:
+    if not np.isfinite([dx_m, dy_m]).all() or min(dx_m, dy_m) <= 0:
+        raise ValueError("hillshade spacing must be finite and positive")
+    dy, dx = np.gradient(heightmap.astype(np.float32), dy_m, dx_m)
 
     azimuth = np.deg2rad(float(azimuth_deg))
     elevation = np.deg2rad(float(elevation_deg))
@@ -112,6 +115,31 @@ def _hillshade(heightmap: np.ndarray, azimuth_deg: float, elevation_deg: float) 
     normal /= np.linalg.norm(normal, axis=2, keepdims=True) + 1e-8
     shade = normal @ light
     return np.clip(0.18 + 0.82 * shade, 0.0, 1.0)
+
+
+def _multidirectional_hillshade(heightmap: np.ndarray, azimuth_deg: float, elevation_deg: float, *,
+                               dx_m: float = 1.0, dy_m: float = 1.0) -> np.ndarray:
+    """Mark (USGS OFR 92-422) aspect weights over four existing hillshades.
+
+    At the default 315-degree azimuth, lights are 225, 270, 315 and 360
+    degrees. Other azimuths rotate the entire group. We use local measured
+    aspect and the existing central-difference/ambient hillshade convention,
+    rather than claiming GDAL's Horn derivatives or Mark's smoothed aspect.
+    """
+    if not np.isfinite([dx_m, dy_m]).all() or min(dx_m, dy_m) <= 0:
+        raise ValueError("hillshade spacing must be finite and positive")
+    dy, dx = np.gradient(np.asarray(heightmap, dtype=np.float64), dy_m, dx_m)
+    aspect = np.arctan2(-dx, dy)
+    flat = np.hypot(dx, dy) == 0
+    shade = np.zeros_like(aspect)
+    total = np.zeros_like(aspect)
+    for offset in (-90.0, -45.0, 0.0, 45.0):
+        direction = azimuth_deg + offset
+        weight = np.sin(aspect - np.deg2rad(direction)) ** 2
+        weight[flat] = 1.0
+        shade += weight * _hillshade(heightmap, direction, elevation_deg, dx_m=dx_m, dy_m=dy_m)
+        total += weight
+    return shade / total
 
 
 def _rotate_heightmap(heightmap: np.ndarray, phi_deg: float) -> np.ndarray:

@@ -11,6 +11,8 @@ pub struct AovSettingsNative {
     pub optical_depth: bool,
     /// VERITAS: capture the per-pixel VT source-id map (R32Uint attachment).
     pub source_id: bool,
+    /// C01: visible scatter batch ID, co-written with beauty (0 = terrain/sky).
+    pub building_id: bool,
     pub output_dir: Option<String>,
     pub format: String,
 }
@@ -28,6 +30,7 @@ impl Default for AovSettingsNative {
             cloud_shadow: false,
             optical_depth: false,
             source_id: false,
+            building_id: false,
             output_dir: None,
             format: "png".to_string(),
         }
@@ -45,7 +48,8 @@ impl AovSettingsNative {
                 || self.in_scatter
                 || self.cloud_shadow
                 || self.optical_depth
-                || self.source_id)
+                || self.source_id
+                || self.building_id)
     }
 }
 

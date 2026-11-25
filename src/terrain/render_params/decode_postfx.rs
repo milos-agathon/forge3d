@@ -112,6 +112,10 @@ pub(super) fn parse_aov_settings(params: &Bound<'_, PyAny>) -> AovSettingsNative
                 cloud_shadow,
                 optical_depth,
                 source_id,
+                building_id: aov
+                    .getattr("building_id")
+                    .and_then(|v| v.extract())
+                    .unwrap_or(false),
                 output_dir,
                 format,
             }
