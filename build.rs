@@ -91,12 +91,24 @@ fn main() {
         "cargo:rustc-env=FORGE3D_WGSL_TREE_SHA256={}",
         shader_tree_hash(Path::new("src/shaders"))
     );
-    // Re-run when HEAD or its resolved ref moves. `git rev-parse --git-path`
-    // also handles linked worktrees, where the checkout metadata is not stored
-    // in a repository-local `.git` directory.
+    // Checkpoints use identity produced by the final linker, which runs even
+    // when Cargo reuses this build script's output.
+    match (
+        env::var("CARGO_CFG_TARGET_OS").as_deref(),
+        env::var("CARGO_CFG_TARGET_ENV").as_deref(),
+    ) {
+        (Ok("windows"), Ok("msvc")) => {
+            println!("cargo:rustc-link-arg-cdylib=/DEBUG:FULL");
+            println!("cargo:rustc-link-arg-cdylib=/INCREMENTAL:NO");
+        }
+        (Ok("linux"), _) => println!("cargo:rustc-link-arg-cdylib=-Wl,--build-id=sha1"),
+        _ => {}
+    }
+    println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=Cargo.lock");
     println!("cargo:rerun-if-env-changed=GITHUB_SHA");
+    // Resolve Git paths through Git to cover both normal and linked worktrees.
     for git_path in ["HEAD".to_string()].into_iter().chain(
         Command::new("git")
             .args(["symbolic-ref", "-q", "HEAD"])

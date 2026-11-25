@@ -6,12 +6,34 @@
 from __future__ import annotations
 from typing import Tuple, Iterable, Dict, Mapping, Callable, Any, Optional, Sequence
 import numpy as np
+from pathlib import Path
+from dataclasses import dataclass
+from os import PathLike
 from . import AtmosphereLutHandle
 from .atmosphere import AtmosphereSettings
 from .preparation import PreparationGrid
 import numpy as np
 
 class ExperimentalSyntheticOutput(RuntimeError): ...
+
+@dataclass(frozen=True)
+class TerrainRenderProgress:
+    completed_frames: int
+    tile: tuple[int, int] | None
+    variance: float | None
+    variance_at_frame: int | None
+    variance_age_frames: int | None
+    elapsed_seconds: float
+    checkpoint_path: Path | None
+    tile_complete: bool
+
+class TerrainRenderCancelled(RuntimeError):
+    code: str
+    progress: TerrainRenderProgress
+    checkpoint_path: Path | None
+    def __init__(self, progress: TerrainRenderProgress) -> None: ...
+
+ProgressCallback = Callable[[TerrainRenderProgress], bool | None]
 
 class PathTracer:
     def __init__(self, width: int, height: int, *, max_bounces: int = ..., seed: int = ..., tile: int | None = ...) -> None: ...
@@ -110,6 +132,10 @@ def hybrid_render_terrain_reference(
     temperature_c: float | None = ...,
     atmosphere: AtmosphereSettings | Mapping[str, object] | AtmosphereLutHandle | None = ...,
     sdf_scene: object | None = ...,
+    on_progress: ProgressCallback | None = ...,
+    checkpoint_path: str | PathLike[str] | None = ...,
+    checkpoint_every: int | None = ...,
+    resume: bool = ...,
 ) -> Dict[str, object]: ...
 
 def render_registered_terrain(
@@ -155,5 +181,9 @@ def render_terrain_poster(
     seed: int = ...,
     certificate: bool | str | None = ...,
     cache: str | None = ...,
+    on_progress: ProgressCallback | None = ...,
+    checkpoint_path: str | PathLike[str] | None = ...,
+    checkpoint_every: int | None = ...,
+    resume: bool = ...,
     **kwargs: Any,
 ) -> Dict[str, object]: ...

@@ -12,6 +12,7 @@ pub(super) fn register_rendering_py_functions(m: &Bound<'_, PyModule>) -> PyResu
     m.add_function(wrap_pyfunction!(render_compiled_frame, m)?)?;
     m.add_function(wrap_pyfunction!(_pt_render_gpu, m)?)?;
     m.add_function(wrap_pyfunction!(hybrid_render_terrain_reference, m)?)?;
+    m.add_function(wrap_pyfunction!(_terrain_checkpoint_runtime, m)?)?;
     m.add_function(wrap_pyfunction!(
         hybrid_render_aether_spectral_reference,
         m

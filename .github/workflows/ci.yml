@@ -353,6 +353,8 @@ jobs:
               - 'tests/test_chronos_flythrough.py'
               - 'tests/test_adjudication_gate.py'
               - 'tests/test_hybrid_terrain_pt.py'
+              - 'tests/test_continua.py'
+              - 'python/forge3d/_terrain_checkpoint.py'
               - 'tests/test_prometheus_dem_reference.py'
               - 'tests/test_inverse_pt.py'
               - 'tests/test_splat_fusion_occlusion.py'
@@ -1559,7 +1561,7 @@ jobs:
           FORGE3D_NO_BOOTSTRAP: '1'
         run: |
           New-Item -ItemType Directory -Force -Path tests/artifacts/prometheus | Out-Null
-          python -m pytest tests/test_hybrid_terrain_pt.py tests/test_prometheus_dem_reference.py -v --tb=short --junitxml="tests/artifacts/prometheus/junit.xml"
+          python -m pytest tests/test_hybrid_terrain_pt.py tests/test_prometheus_dem_reference.py tests/test_continua.py -v --tb=short --junitxml="tests/artifacts/prometheus/junit.xml"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/assert_junit_zero_skips.py "tests/artifacts/prometheus/junit.xml"
           exit $LASTEXITCODE
