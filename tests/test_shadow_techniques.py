@@ -27,6 +27,43 @@ def test_shadow_depth_height_curve_uses_receiver_primitives():
     assert "return det_mix(t, curved, strength);" in source
 
 
+def test_shadow_slab_matches_between_depth_caster_and_fragment_lookup():
+    """Both shadow sides must describe the same vertical slab.
+
+    The bug this locks: the depth caster compressed elevation into a
+    one-metre ``z_scale`` slab, so a sun ray exited it after a few metres of
+    horizontal travel and nothing could occlude anything. Metre relief is
+    centred on zero on both sides now, and the y-up branch keeps absolute
+    elevation on both sides.
+    """
+    root = Path(__file__).parent.parent
+    depth = (root / "src" / "shaders" / "terrain_shadow_depth.wgsl").read_text(
+        encoding="utf-8"
+    )
+    pbr = (root / "src" / "shaders" / "terrain_pbr_pom.wgsl").read_text(
+        encoding="utf-8"
+    )
+
+    assert "let world_z = det_barrier((height_curved - 0.5) * height_range) * z_scale;" in depth
+    assert "let shadow_z = det_barrier((h_curved - 0.5) * h_range) * h_exag;" in pbr
+    assert "let world_z = height_curved * z_scale;" not in depth
+    assert "let shadow_z = h_curved * h_exag;" not in pbr
+
+    assert "det_mix(height_min, height_max, height_curved) * z_scale" in depth
+    assert "det_fma(h_curved, h_max - h_min, h_min) * h_exag" in pbr
+
+
+def test_stylized_direct_diffuse_reads_raw_csm_visibility():
+    """The [0.30, 1.0] direct clamp must consume CSM visibility, not the
+    IBL-softened factor (which is capped at 0.8-1 and hid cast shadows)."""
+    pbr = (
+        Path(__file__).parent.parent / "src" / "shaders" / "terrain_pbr_pom.wgsl"
+    ).read_text(encoding="utf-8")
+
+    assert "let shadow_clamped = max(det_mix(SHADOW_MIN, 1.0, shadow_visibility), 0.30);" in pbr
+    assert "let shadow_clamped = max(shadow_factor, 0.30);" not in pbr
+
+
 def test_viewer_csm_allocation_and_rebuild_are_technique_aware():
     root = Path(__file__).parent.parent
     init = (root / "src" / "viewer" / "terrain" / "scene" / "pipeline_init.rs").read_text(

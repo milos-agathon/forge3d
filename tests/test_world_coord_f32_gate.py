@@ -659,12 +659,12 @@ def _undo_splat_env_map_transition(sites):
 def _undo_studio_branch_transition(sites):
     """Restore the two shadow files to their main-side inventory.
 
-    This branch rewrote the viewer relief LUT and the shadow-setup cascade
-    loop. Every added site narrows a bounded screen-space operand — the u8
-    colour interpolation and its [0, 1] domain ratio, the cascade-index ratio,
-    the u32 grid constant, and the render-frame dimensions — none narrows an
-    absolute world coordinate. Reviewed and recorded 2026-11-13 (see the
-    ``terrain_shadow_relief_lut`` ledger record).
+    This branch rewrote the shadow-setup cascade loop and the per-cascade
+    terrain parameters. Every added site narrows a bounded operand — the
+    cascade-index ratio and the ``SHADOW_GRID_RES`` u32 constant — none
+    narrows an absolute world coordinate, and Anchor stays the sole
+    production world-position narrowing owner. Reviewed and recorded
+    2026-11-13 (see the ``terrain_shadow_relief_lut`` ledger record).
     """
     files = _ledger_data()["terrain_shadow_relief_lut"]["files"]
     by_file = {}
@@ -2117,7 +2117,7 @@ def test_registratio_inventory_transition_is_exact():
     assert (transition["base_count"], transition["base_digest"]) == (
         previous["result_count"], previous["result_digest"],
     )
-    sites = _current_production_inventory()
+    sites = _undo_studio_branch_transition(_current_production_inventory())
     assert (len(sites), _inventory_digest(sites)) == (
         transition["result_count"], transition["result_digest"],
     )

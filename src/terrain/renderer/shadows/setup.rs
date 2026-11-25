@@ -239,11 +239,12 @@ impl TerrainScene {
             .max(params.clip.0);
 
         // Cascades follow a λ=0.75 log/linear blend over [clip.0, shadow_far].
-        // The old absolute table ([50, 200, 800, 3000] m) put any kilometre-
-        // scale terrain entirely beyond the last cascade, so whole scenes
-        // rendered without a single shadow. The blend is the standard practical
-        // scheme and behaves at every scale; near/far come from the frustum,
-        // not the scene extent, keeping tiny scenes sane too.
+        // The old absolute table ([50, 200, 800, 3000] m) is tied to one scene
+        // scale: below ~50 m of far distance every cascade collapses onto the
+        // far plane, and at kilometre scale cascade 0 spends its whole budget
+        // in the first 50 m. The blend is scale-relative, stays strictly
+        // increasing, and always ends at shadow_far so the depth pass can use
+        // it verbatim.
         const LAMBDA: f32 = 0.75;
         let near = params.clip.0;
         let mut cascade_splits: Vec<f32> = Vec::with_capacity(cascade_count as usize + 1);
