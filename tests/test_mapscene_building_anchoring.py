@@ -408,6 +408,18 @@ def test_spacing_metadata_and_projected_feet_are_metres_for_both_consumers(tmp_p
     assert feet[2] == pytest.approx(10000.0 * 1200 / 3937, rel=0.01)
 
 
+def test_projected_span_uses_native_crs_metadata_without_rasterio_crs(monkeypatch):
+    import rasterio
+
+    monkeypatch.delattr(rasterio, "crs", raising=False)
+    terrain = f3d.TerrainSource(
+        data=np.zeros((100, 100), np.float32), crs="EPSG:32632",
+        metadata={"bounds": (500000, 5200000, 510000, 5200000),
+                  "resolution": (100.0, 100.0)},
+    )
+    assert map_scene._terrain_frame(terrain)[2] == pytest.approx(10000.0)
+
+
 def test_preset_camera_uses_metric_span_and_far_clip_includes_relief(tmp_path):
     scene = _country_scene([])
     terrain = f3d.TerrainSource(

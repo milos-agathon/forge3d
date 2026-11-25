@@ -4177,12 +4177,23 @@ def _terrain_grid_frame(
 
     if span is not None and not explicit_span and crs:
         try:
-            import rasterio
+            try:
+                from .gis import _crs_metadata
 
-            raster_crs = rasterio.crs.CRS.from_user_input(crs)
-            if raster_crs.is_projected:
-                span *= float(raster_crs.linear_units_factor[1])
-            elif raster_crs.is_geographic:
+                crs_info = _crs_metadata(crs)
+                kind = str(crs_info.get("kind") or "")
+                factor = float(crs_info.get("linear_unit_to_meters") or 1.0)
+            except Exception:
+                # Native CRS metadata covers the engine's own projection set;
+                # a full Rasterio install covers the remaining PROJ database.
+                import rasterio
+
+                raster_crs = rasterio.crs.CRS.from_user_input(crs)
+                kind = "projected" if raster_crs.is_projected else "geographic" if raster_crs.is_geographic else ""
+                factor = float(raster_crs.linear_units_factor[1]) if kind == "projected" else 1.0
+            if kind == "projected":
+                span *= factor
+            elif kind == "geographic":
                 from pyproj import Geod
 
                 geod = Geod(ellps="WGS84")
