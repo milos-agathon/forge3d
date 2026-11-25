@@ -7041,5 +7041,160 @@
    }
   },
   "review": "APPROVED by Milos for #84. The exact changes cover the viewer GeoTIFF snapshot camera, shadow grid, terrain sample lattice, vector height sampling, and camera projection. Reversing the recorded changes restores the approved AUTOCHIRON main inventory."
- }
+ },
+  "terrain_shadow_relief_lut": {
+    "branch_commit": "98040910",
+    "review": "2026-11-20: shadow-only split of studio_branch_relief_lut for PR 4. The viewer.rs LUT and render-frame cast sites belong to the viewer PR and are intentionally omitted here. The two remaining files narrow bounded cascade-index ratios and the SHADOW_GRID_RES u32 constant; no absolute world coordinate is narrowed, and Anchor remains the sole production world-position narrowing owner.",
+    "base_count": 1940,
+    "base_digest": "bbc0fe72aadecc3d746f1c4daee24629ea23943e217bd849696b67b7fb8656b0",
+    "result_count": 1941,
+    "result_digest": "b4cc2648cb47e3c1f7a540913c3b50dc24f544ccd29de1a8b1ff37d6d5f7bd7c",
+    "files": {
+      "src/terrain/renderer/shadows/render.rs": {
+        "base": [
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            1,
+            "let step = (far_plane - near_plane) / cascade_count as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            2,
+            "fallback.push((near_plane + step * i as f32).min(far_plane))"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            3,
+            "let texel_size = (light_max.x - light_min.x) / self.csm_renderer.config.shadow_map_size as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            4,
+            "self.csm_renderer.uniforms.shadow_map_size = self.csm_renderer.config.shadow_map_size as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            5,
+            "let terrain_width = heightmap_width.max(heightmap_height).max(1) as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            6,
+            "height_exag }, height_min, height_max, ], grid_params: [ SHADOW_GRID_RES as f32, if y_up { 1.0"
+          ]
+        ],
+        "result": [
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            1,
+            "let step = (far_plane - near_plane) / cascade_count as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            2,
+            "fallback.push((near_plane + step * i as f32).min(far_plane))"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            3,
+            "let texel_size = (light_max.x - light_min.x) / self.csm_renderer.config.shadow_map_size as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            4,
+            "self.csm_renderer.uniforms.shadow_map_size = self.csm_renderer.config.shadow_map_size as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            5,
+            "let terrain_width = heightmap_width.max(heightmap_height).max(1) as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/render.rs",
+            "<module>",
+            "as_f32",
+            6,
+            "light_view_proj: stored_light_view_proj, terrain_params: [terrain_spacing, height_exag, height_min, height_max], grid_params: [ SHADOW_GRID_RES as f32, if y_up { 1.0"
+          ]
+        ]
+      },
+      "src/terrain/renderer/shadows/setup.rs": {
+        "base": [
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup_with_mode",
+            "as_f32",
+            1,
+            "let aspect = params.size_px.0 as f32 / params.size_px.1 as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup_with_mode",
+            "as_f32",
+            2,
+            "let aspect = params.size_px.0 as f32 / params.size_px.1 as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup_with_mode",
+            "as_f32",
+            3,
+            "let step = (shadow_far - last) / remaining.max(1) as f32"
+          ]
+        ],
+        "result": [
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup_with_mode",
+            "as_f32",
+            1,
+            "let aspect = params.size_px.0 as f32 / params.size_px.1 as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup_with_mode",
+            "as_f32",
+            2,
+            "let aspect = params.size_px.0 as f32 / params.size_px.1 as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup_with_mode",
+            "as_f32",
+            3,
+            "let t = i as f32 / cascade_count as f32"
+          ],
+          [
+            "src/terrain/renderer/shadows/setup.rs",
+            "prepare_shadow_setup_with_mode",
+            "as_f32",
+            4,
+            "let t = i as f32 / cascade_count as f32"
+          ]
+        ]
+      }
+    }
+  }
 }

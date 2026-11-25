@@ -322,7 +322,6 @@ pub(super) struct PipelineCache {
     pub(super) visibility_resolve_pipeline: Option<wgpu::RenderPipeline>,
 }
 
-pub(super) const TERRAIN_DEFAULT_CASCADE_SPLITS: [f32; 4] = [50.0, 200.0, 800.0, 3000.0];
 pub(super) const MATERIAL_LAYER_CAPACITY: usize = 4;
 pub(super) const TERRAIN_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
