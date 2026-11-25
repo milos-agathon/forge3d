@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import Tuple, Optional, Sequence, Any, Dict, List, Literal, Mapping, Callable, NoReturn
 import os
 import numpy as np
+from os import PathLike
 from . import gis
 from . import cinema as cinema
 from .cinema import Subject as Subject, FramingSpec as FramingSpec, Shot as Shot, ShotPlan as ShotPlan, CinemaInfeasible as CinemaInfeasible, CinemaNativeUnavailable as CinemaNativeUnavailable, plan as plan_shots
@@ -196,7 +197,13 @@ from .style import (
 from .vector_line import VectorLineLayer as VectorLineLayer, VectorLineStyleError as VectorLineStyleError
 from . import smoke
 from . import verify
-from .path_tracing import ExperimentalSyntheticOutput, render_terrain_poster
+from .path_tracing import (
+    ExperimentalSyntheticOutput,
+    ProgressCallback,
+    TerrainRenderCancelled as TerrainRenderCancelled,
+    TerrainRenderProgress as TerrainRenderProgress,
+    render_terrain_poster,
+)
 
 PathLikeStr = os.PathLike[str] | str
 
@@ -1930,6 +1937,10 @@ def hybrid_render_terrain_reference(
     temperature_c: float | None = ...,
     atmosphere: AtmosphereSettings | Mapping[str, Any] | AtmosphereLutHandle | None = ...,
     sdf_scene: object | None = ...,
+    on_progress: ProgressCallback | None = ...,
+    checkpoint_path: str | PathLike[str] | None = ...,
+    checkpoint_every: int | None = ...,
+    resume: bool = ...,
 ) -> Dict[str, Any]: ...
 
 # AETHER: independent stochastic spectral atmosphere acceptance reference.

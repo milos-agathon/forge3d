@@ -190,6 +190,13 @@ pub(crate) fn finish_runtime_contract_capture() {
     *LAST.lock().unwrap_or_else(|p| p.into_inner()) = observations;
 }
 
+#[cfg(feature = "extension-module")]
+pub(crate) fn swap_runtime_contract_capture(
+    value: Option<Vec<RuntimeContractObservation>>,
+) -> Option<Vec<RuntimeContractObservation>> {
+    CURRENT.with(|slot| slot.replace(value))
+}
+
 pub(crate) fn abort_runtime_contract_capture() {
     CURRENT.with(|slot| {
         slot.borrow_mut().take();

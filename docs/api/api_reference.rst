@@ -267,6 +267,8 @@ Native Rendering And Quality
    :members:
    :no-index:
 
+See :doc:`../guides/recoverable_terrain_renders` for terrain and poster recovery.
+
 .. automodule:: forge3d.path_tracing
    :members:
    :no-index:

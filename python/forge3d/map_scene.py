@@ -6472,7 +6472,7 @@ class MapScene:
                 **({"raster_recipe": raster_recipe} if raster_recipe is not None else {}),
             )
         if certificate:
-            sha = _certificate.emit_render_certificate(certificate)
+            sha = _certificate._emit_current_render_certificate(certificate)
             if sha is not None:
                 self.last_render_metadata["certificate_payload_sha256"] = sha
         if cache is not None:

@@ -13,6 +13,7 @@
 // RELEVANT FILES: src/shaders/hybrid_terrain_traversal.wgsl,
 //                 src/path_tracing/hybrid_compute/terrain_heightfield.rs
 
+use super::terrain_checkpoint::{StateResource, TerrainCheckpoint};
 use super::terrain_heightfield::{AlbedoSampling, TerrainPtScene};
 use super::*;
 use crate::core::atmosphere::AETHER_RADIOMETRIC_SCALE_MAX;
@@ -1202,6 +1203,8 @@ fn validate_desc(desc: &TerrainReferenceDesc) -> Result<(), RenderError> {
     Ok(())
 }
 
+type OnFrame<'a> = dyn FnMut(FrameProgress, bool) -> Result<(), RenderError> + 'a;
+
 impl HybridPathTracer {
     /// Render the converged terrain reference. Errors (rather than returning
     /// a fake image) when inputs are degenerate, the frame cap is hit
@@ -1219,21 +1222,61 @@ impl HybridPathTracer {
         validate_desc(desc)?;
         if let Some(scene) = &desc.sdf_scene {
             let source = super::sdf_scene::specialize(scene)?;
-            return Self::new_with_source(source)?.render_terrain_reference_inner(desc);
+            return Self::new_with_source(source)?
+                .render_terrain_reference_inner(desc, None, None)
+                .map(|(out, _)| out);
         }
-        self.render_terrain_reference_inner(desc)
+        self.render_terrain_reference_inner(desc, None, None)
+            .map(|(out, _)| out)
+    }
+
+    pub(crate) fn render_terrain_reference_recoverable(
+        desc: &TerrainReferenceDesc,
+        options: Option<TerrainCheckpointOptions>,
+        on_frame: &mut OnFrame,
+    ) -> Result<(TerrainReferenceOutput, (u32, u32)), RenderError> {
+        validate_desc(desc)?;
+        let source = match &desc.sdf_scene {
+            Some(scene) => super::sdf_scene::specialize(scene)?,
+            None => crate::shader_sources::hybrid_kernel(),
+        };
+        // Validate exact identity, dimensions and the entire checksum before
+        // creating the tracer, DEM pyramid or image-sized GPU allocations.
+        let checkpoint = options
+            .map(|options| TerrainCheckpoint::open(options, desc, &source))
+            .transpose()?;
+        Self::new_with_source(source)?.render_terrain_reference_inner(
+            desc,
+            checkpoint,
+            Some(on_frame),
+        )
     }
 
     fn render_terrain_reference_inner(
         &self,
         desc: &TerrainReferenceDesc,
-    ) -> Result<TerrainReferenceOutput, RenderError> {
+        mut checkpoint: Option<TerrainCheckpoint>,
+        mut on_frame: Option<&mut OnFrame>,
+    ) -> Result<(TerrainReferenceOutput, (u32, u32)), RenderError> {
         let device = &try_ctx()?.device;
         let queue = &try_ctx()?.queue;
         let (width, height) = (desc.width, desc.height);
         validate_desc(desc)?;
         let (exposure, sun_intensity, sun_color, env_intensity) = uploaded_radiometry(desc);
         let mut tracked = TrackedGpu::new();
+        let start = checkpoint
+            .as_ref()
+            .map_or_else(FrameProgress::default, |state| state.progress);
+        let checkpoint_buffer_usage = if start.frames > 0 {
+            wgpu::BufferUsages::COPY_DST
+        } else {
+            wgpu::BufferUsages::empty()
+        };
+        let checkpoint_texture_usage = if start.frames > 0 {
+            wgpu::TextureUsages::COPY_DST
+        } else {
+            wgpu::TextureUsages::empty()
+        };
 
         // --- Terrain scene: min-max pyramid + env map (validates the DEM,
         // registers itself with the memory tracker, frees on drop) ---
@@ -1481,7 +1524,9 @@ impl HybridPathTracer {
             &wgpu::BufferDescriptor {
                 label: Some("hybrid-pt-terrain-welford"),
                 size: px_count * stats_size,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | checkpoint_buffer_usage,
                 mapped_at_creation: false,
             },
         )?;
@@ -1525,7 +1570,9 @@ impl HybridPathTracer {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba16Float,
-                usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+                usage: wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC
+                    | checkpoint_texture_usage,
                 view_formats: &[],
             },
         )?;
@@ -1540,7 +1587,33 @@ impl HybridPathTracer {
             AovKind::Emission,
             AovKind::Visibility,
         ];
-        let aov_frames = AovFrames::new(device, width, height, &aovs_all)?;
+        let persistent_aovs = [
+            AovKind::Albedo,
+            AovKind::Normal,
+            AovKind::Depth,
+            AovKind::Visibility,
+        ];
+        let aov_frames = AovFrames::new_with_copy_dst(
+            device,
+            width,
+            height,
+            &aovs_all,
+            if start.frames > 0 {
+                &persistent_aovs
+            } else {
+                &[]
+            },
+        )?;
+        let state_resources = [
+            StateResource::Buffer(&accum_buf),
+            StateResource::Buffer(&welford_buf),
+            StateResource::Buffer(&reservoir_prev),
+            StateResource::Texture(&out_tex, 8),
+            StateResource::Texture(aov_frames.get_texture(AovKind::Albedo).unwrap(), 8),
+            StateResource::Texture(aov_frames.get_texture(AovKind::Normal).unwrap(), 8),
+            StateResource::Texture(aov_frames.get_texture(AovKind::Depth).unwrap(), 4),
+            StateResource::Texture(aov_frames.get_texture(AovKind::Visibility).unwrap(), 4),
+        ];
         for kind in aovs_all {
             tracked.texture(width, height, kind.texture_format());
         }
@@ -1567,6 +1640,10 @@ impl HybridPathTracer {
                  (host-visible {}) > limit {}",
                 metrics.total_bytes, metrics.host_visible_bytes, metrics.limit_bytes
             )));
+        }
+
+        if let Some(checkpoint) = checkpoint.as_mut() {
+            checkpoint.restore(device, queue, &state_resources)?;
         }
 
         // --- Bind groups ---
@@ -1792,7 +1869,9 @@ impl HybridPathTracer {
         // when timestamp queries are unavailable the fallback below records
         // the same labels in the same order with 0.0.
         let mut timing = crate::core::gpu_timing::OneShotTiming::for_current_device();
-        {
+        // The checkpoint already passed the original geometry prepass. Its
+        // scratch output is consumed only by new accumulation frames.
+        if !start.converged {
             let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("hybrid-pt-terrain-gbuffer-enc"),
             });
@@ -1812,7 +1891,7 @@ impl HybridPathTracer {
             timing.end(&mut enc, gbuffer_scope, 1);
             queue.submit([enc.finish()]);
         }
-        if desc.sdf_scene.is_some() {
+        if !start.converged && desc.sdf_scene.is_some() {
             // The gbuffer pipeline's layout cannot reach terrain_welford, so
             // the kernel signals a compiled-SDF march failure on the center
             // ray through terrain_gbuffer_pos[pix].w = -1. Reject it here
@@ -1831,20 +1910,32 @@ impl HybridPathTracer {
         // --- Accumulate until converged (estimated variance of the mean
         // frame luminance over all frames, polled every WELFORD_WINDOW
         // frames and at the cap) or capped ---
-        let mut frames = 0u32;
-        let mut variance = f32::INFINITY;
-        let mut converged = false;
-        while frames < desc.max_frames {
+        let mut frames = start.frames;
+        let mut variance_at = start.variance_at;
+        let mut variance = if variance_at == 0 {
+            f32::INFINITY
+        } else {
+            start.variance
+        };
+        let mut converged = start.converged;
+        let mut frames_dispatched = 0;
+        if start.frames > 0 {
+            // The last uniform is also observed by the certificate when the
+            // saved boundary was already converged and no frame executes.
+            base.frame_index = start.frames - 1;
+            base.aov_flags = if base.frame_index == 0 { 0xFF } else { 0 };
+        }
+        while !converged && frames < desc.max_frames {
             base.frame_index = frames;
             base.aov_flags = if frames == 0 { 0xFF } else { 0 };
             queue.write_buffer(&base_ubo, 0, bytemuck::bytes_of(&base));
             let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("hybrid-pt-terrain-frame"),
             });
-            // Only frame 0 carries timing scopes (one certificate pass per
+            // Only the first dispatched frame carries timing scopes (one certificate pass per
             // label); each scope brackets exactly one dispatch of its
             // pipeline on the encoder that executes it.
-            let time_this_frame = frames == 0;
+            let time_this_frame = frames == start.frames;
             let terrain_scope = if time_this_frame {
                 timing.begin(&mut enc, "hybrid_pt.terrain")
             } else {
@@ -1935,6 +2026,7 @@ impl HybridPathTracer {
             // dispatches. The window still controls statistics readback below.
             device.poll(wgpu::Maintain::WaitForSubmissionIndex(submission));
             frames += 1;
+            frames_dispatched += 1;
 
             let window_full = frames.is_multiple_of(WELFORD_WINDOW);
             if (window_full || frames == desc.max_frames) && frames >= 2 {
@@ -1948,11 +2040,37 @@ impl HybridPathTracer {
                     vmax = vmax.max(estimator_variance(s.y, frames)?);
                 }
                 variance = vmax;
-                if frames >= desc.min_frames && variance < desc.variance_threshold {
-                    converged = true;
-                    break;
-                }
+                variance_at = frames;
+                converged = frames >= desc.min_frames && variance < desc.variance_threshold;
             }
+            if let Some(on_frame) = on_frame.as_mut() {
+                try_ctx()?;
+                let progress = FrameProgress {
+                    frames,
+                    variance_at,
+                    variance: if variance_at == 0 { 0.0 } else { variance },
+                    converged,
+                };
+                let mut published = false;
+                if let Some(checkpoint) = checkpoint.as_mut() {
+                    if checkpoint.is_due(frames) {
+                        checkpoint.save(device, queue, progress, &state_resources)?;
+                        published = true;
+                    }
+                }
+                on_frame(progress, published)?;
+            }
+        }
+        if start.frames > 0 {
+            crate::core::certificate::record_input("continua_resumed", "true");
+            crate::core::certificate::record_input(
+                "continua_resume_frame",
+                start.frames.to_string(),
+            );
+            crate::core::certificate::record_input(
+                "continua_frames_dispatched",
+                frames_dispatched.to_string(),
+            );
         }
         device.poll(wgpu::Maintain::Wait);
         if !converged {
@@ -2160,12 +2278,24 @@ impl HybridPathTracer {
         // temporal/spatial dispatches, draw_calls = 1 dispatch each); when
         // timestamps were unavailable, record the same labels in the same
         // order with 0.0 (draw_calls = accumulated frames, as before).
-        if !timing.record_into_certificate() {
+        if frames_dispatched > 0 && !timing.record_into_certificate() {
             crate::core::certificate::record_pass("hybrid_pt.terrain_gbuffer", 0.0, 1);
-            crate::core::certificate::record_pass("hybrid_pt.terrain", 0.0, frames);
-            crate::core::certificate::record_pass("hybrid_pt.restir_temporal", 0.0, frames);
-            crate::core::certificate::record_pass("hybrid_pt.restir_spatial", 0.0, frames);
-            crate::core::certificate::record_pass("hybrid_pt.terrain_publish", 0.0, frames);
+            crate::core::certificate::record_pass("hybrid_pt.terrain", 0.0, frames_dispatched);
+            crate::core::certificate::record_pass(
+                "hybrid_pt.restir_temporal",
+                0.0,
+                frames_dispatched,
+            );
+            crate::core::certificate::record_pass(
+                "hybrid_pt.restir_spatial",
+                0.0,
+                frames_dispatched,
+            );
+            crate::core::certificate::record_pass(
+                "hybrid_pt.terrain_publish",
+                0.0,
+                frames_dispatched,
+            );
         }
         if let Some(post_timing) = aether_post_timing {
             if !post_timing.record_into_certificate() {
@@ -2175,30 +2305,33 @@ impl HybridPathTracer {
 
         let variance = luminance_variance.iter().copied().fold(0.0f32, f32::max);
 
-        Ok(TerrainReferenceOutput {
-            rgba,
-            albedo,
-            normal,
-            depth,
-            radiance,
-            luminance_variance,
-            frames,
-            variance,
-            traversal_primary,
-            traversal_shadow,
-            traversal_mip_count: terrain_scene.pyramid.mip_count,
-            converged,
-            peak_host_visible_bytes: peak,
-            reservoir_valid_count,
-            reservoir_m_min: if reservoir_valid_count == 0 {
-                0
-            } else {
-                reservoir_m_min
+        Ok((
+            TerrainReferenceOutput {
+                rgba,
+                albedo,
+                normal,
+                depth,
+                radiance,
+                luminance_variance,
+                frames,
+                variance,
+                traversal_primary,
+                traversal_shadow,
+                traversal_mip_count: terrain_scene.pyramid.mip_count,
+                converged,
+                peak_host_visible_bytes: peak,
+                reservoir_valid_count,
+                reservoir_m_min: if reservoir_valid_count == 0 {
+                    0
+                } else {
+                    reservoir_m_min
+                },
+                reservoir_m_max,
+                minmax_pyramid_bytes: terrain_scene.pyramid.byte_size,
+                gpu_resource_bytes,
             },
-            reservoir_m_max,
-            minmax_pyramid_bytes: terrain_scene.pyramid.byte_size,
-            gpu_resource_bytes,
-        })
+            (start.frames, frames_dispatched),
+        ))
     }
 }
 
