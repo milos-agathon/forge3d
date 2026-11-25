@@ -181,6 +181,25 @@ def test_renderer_and_buildings_share_the_measured_span(tmp_path):
     assert far > float(scene.recipe.camera.distance), "the camera must be inside the far clip"
 
 
+def test_sub_metre_span_is_clamped_once_for_renderer_buildings_and_presets(tmp_path):
+    terrain = f3d.TerrainSource(
+        data=np.zeros((2, 2), np.float32), crs="EPSG:32632",
+        metadata={"terrain_span": 0.5},
+    )
+    assert map_scene._terrain_frame(terrain)[2] == 1.0
+    scene = _country_scene([])
+    scene.recipe.terrain = terrain
+    render_span, _clip = map_scene._terrain_render_span_and_clip(scene.recipe)
+    assert render_span == 1.0
+    preset = map_scene._camera_from_preset(scene.recipe.camera, terrain, {"radius_scale": 2.4})
+    assert preset.distance == pytest.approx(2.4)
+    layer = _building_layer(tmp_path, height=1.0)
+    batches = map_scene._native_building_mesh_batches_for_layers(
+        [layer], None, map_scene._terrain_frame(terrain)[2], "EPSG:32632"
+    )
+    assert batches[0]["wall_height"] == pytest.approx(1.7)
+
+
 def test_file_backed_projected_dem_supplies_bounds_and_span(tmp_path):
     import rasterio
     from rasterio.transform import from_origin
@@ -198,6 +217,26 @@ def test_file_backed_projected_dem_supplies_bounds_and_span(tmp_path):
     assert crs == "EPSG:32632"
     assert bounds == pytest.approx((500000.0, 5190000.0, 510000.0, 5200000.0))
     assert span == pytest.approx(10000.0)
+
+
+def test_file_header_without_crs_uses_the_terrain_source_crs(tmp_path):
+    import rasterio
+    from rasterio.transform import from_origin
+
+    path = tmp_path / "no_crs.tif"
+    with rasterio.open(
+        path, "w", driver="GTiff", width=10, height=10, count=1,
+        dtype="float32", transform=from_origin(0.0, 0.0, 100.0, 100.0),
+    ) as dataset:
+        dataset.write(np.zeros((10, 10), np.float32), 1)
+    bounds, crs, span, transform, shape = map_scene._terrain_grid_frame(
+        f3d.TerrainSource(path=str(path), crs="EPSG:32632")
+    )
+    assert crs == "EPSG:32632"
+    assert bounds == pytest.approx((0.0, -1000.0, 1000.0, 0.0))
+    assert span == pytest.approx(1000.0)
+    assert transform is not None
+    assert shape == (10, 10)
 
 
 def test_file_backed_dem_places_a_small_footprint_at_its_grid_corner(tmp_path):
@@ -434,6 +473,15 @@ def test_nonfinite_crs_transform_returns_a_layer_diagnostic():
     assert "nonfinite" in str(exc.value)
 
 
+@pytest.mark.parametrize("terrain_crs", ["EPSG:32632", None])
+def test_nonfinite_same_or_unknown_crs_footprint_returns_a_layer_diagnostic(terrain_crs):
+    with pytest.raises(f3d.MapSceneNativeUnavailable) as exc:
+        map_scene._building_points_in_terrain_crs(
+            [(float("nan"), 0.0)], "EPSG:32632", terrain_crs, "campus"
+        )
+    assert "nonfinite" in str(exc.value)
+
+
 def test_rotated_affine_uses_both_axes_and_inverse_placement(tmp_path):
     import rasterio
     from affine import Affine
@@ -591,6 +639,43 @@ def test_geodesic_span_uses_distance_not_azimuth(monkeypatch):
     assert map_scene._terrain_frame(terrain)[2] == pytest.approx(22189.44)
 
 
+def test_geodesic_conversion_failure_is_not_silently_used_as_metres(monkeypatch):
+    import pyproj
+
+    class BrokenGeod:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("geodesic conversion unavailable")
+
+    monkeypatch.setattr(pyproj, "Geod", BrokenGeod)
+    terrain = f3d.TerrainSource(
+        data=np.zeros((100, 100), np.float32), crs="EPSG:4326",
+        metadata={"bounds": BOUNDS, "resolution": (0.0009, 0.0008)},
+    )
+    with pytest.raises(f3d.MapSceneNativeUnavailable) as exc:
+        map_scene._terrain_frame(terrain)
+    assert "geodesic" in str(exc.value)
+
+
+def test_geodesic_nonfinite_span_returns_a_diagnostic(monkeypatch):
+    import pyproj
+
+    class NonfiniteGeod:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def inv(self, *args):
+            return (float("nan"), float("nan"), float("nan"))
+
+    monkeypatch.setattr(pyproj, "Geod", NonfiniteGeod)
+    terrain = f3d.TerrainSource(
+        data=np.zeros((100, 100), np.float32), crs="EPSG:4326",
+        metadata={"bounds": BOUNDS, "resolution": (0.0009, 0.0008)},
+    )
+    with pytest.raises(f3d.MapSceneNativeUnavailable) as exc:
+        map_scene._terrain_frame(terrain)
+    assert "nonfinite" in str(exc.value)
+
+
 # --- Milos's fourth review ---------------------------------------------------
 
 def test_inline_dem_shape_matches_explicit_dimensions(tmp_path):
@@ -660,26 +745,48 @@ def test_rotated_geographic_grid_measures_raster_edges(tmp_path):
 
 @engine_required
 def test_mixed_elevation_stays_inside_the_far_plane(tmp_path):
-    scene = _country_scene([])
-    dem = np.full((128, 128), -1800.0, dtype=np.float32)
-    dem[:64, :] = 1800.0
-    scene.recipe.terrain.data = dem
-    settings = dict(scene.recipe.lighting.settings or {})
-    settings["exaggeration"] = 4.0
-    scene.recipe.lighting.settings = settings
+    from PIL import Image
 
+    scene = _mixed_elevation_scene(4.0)
     params = map_scene._build_mapscene_terrain_params(
-        scene.recipe, dem, (128, 128), projection_only=True
+        scene.recipe, scene.recipe.terrain.data, (128, 128), projection_only=True
     )
     assert params.clip[1] > float(scene.recipe.camera.distance)
 
     out = tmp_path / "mixed.png"
     scene.render(str(out))
-    from PIL import Image
+    actual = np.asarray(Image.open(out).convert("RGB"), dtype=np.int32)
 
-    frame = np.asarray(Image.open(out).convert("RGB"), dtype=np.float32)
-    assert float(frame[:64].std()) > 1.0, "the high half did not render"
-    assert float(frame[64:].std()) > 1.0, "the low half was clipped to background"
+    import forge3d.map_scene as module
+
+    original = module._terrain_render_span_and_clip
+
+    def wide_clip(recipe):
+        span, (near, far) = original(recipe)
+        return span, (near, far * 4.0)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(module, "_terrain_render_span_and_clip", wide_clip)
+    try:
+        control_scene = _mixed_elevation_scene(4.0)
+        control_out = tmp_path / "mixed-control.png"
+        control_scene.render(str(control_out))
+    finally:
+        monkeypatch.undo()
+    control = np.asarray(Image.open(control_out).convert("RGB"), dtype=np.int32)
+    background = np.array([64, 64, 81], dtype=np.int32)
+
+    def terrain_pixels(frame):
+        return int((np.abs(frame - background).sum(axis=2) > 6).sum())
+
+    for label, actual_half, control_half in (
+        ("high", actual[:64], control[:64]),
+        ("low", actual[64:], control[64:]),
+    ):
+        assert terrain_pixels(actual_half) > 0, f"the {label} half was clipped"
+        assert abs(terrain_pixels(actual_half) - terrain_pixels(control_half)) <= 64, (
+            f"widening the far plane changed the {label} half's terrain coverage"
+        )
 
 
 # --- Milos's fifth review ----------------------------------------------------
@@ -722,10 +829,10 @@ def test_eight_exaggeration_keeps_low_terrain_and_matches_wide_far_control(tmp_p
         span, (near, far) = original(recipe)
         return span, (near, far * 4.0)
 
-    monkeypatch = __import__("pytest").MonkeyPatch()
+    monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(module, "_terrain_render_span_and_clip", wide_clip)
-    scene = _mixed_elevation_scene(8.0)  # fresh scene for the control
     try:
+        scene = _mixed_elevation_scene(8.0)  # fresh scene for the control
         control_out = tmp_path / "control.png"
         scene.render(str(control_out))
     finally:
@@ -783,7 +890,7 @@ def test_file_and_array_dimensions_keep_span_and_footprint(tmp_path):
     cases = {
         "file only": f3d.TerrainSource(path=str(path), crs="EPSG:32632"),
         "file with affine": f3d.TerrainSource(
-            path=str(path), crs="EPSG:32632", metadata={"transform": tuple(transform)[:6]}
+            path=str(path), crs="EPSG:32632", metadata={"transform": transform.to_gdal()}
         ),
         "file with width only": f3d.TerrainSource(
             path=str(path), crs="EPSG:32632", metadata={"width": 100}
@@ -819,3 +926,68 @@ def test_file_and_array_dimensions_keep_span_and_footprint(tmp_path):
         if reference is None:
             reference = signature
         assert signature == reference, (label, signature, reference)
+
+
+@pytest.mark.parametrize("dimension", ["width", "height"])
+def test_file_header_fills_missing_dimension_without_replacing_metadata_affine(tmp_path, dimension):
+    import rasterio
+    from affine import Affine
+    from rasterio.transform import from_origin
+
+    path = tmp_path / "cells.tif"
+    header = from_origin(500000.0, 5200000.0, 100.0, 100.0)
+    with rasterio.open(
+        path, "w", driver="GTiff", width=100, height=100, count=1,
+        dtype="float32", crs="EPSG:32632", transform=header,
+    ) as dataset:
+        dataset.write(np.zeros((100, 100), np.float32), 1)
+    supplied = Affine.translation(500000.0, 5200000.0) * Affine.scale(200.0, -200.0)
+    terrain = f3d.TerrainSource(
+        path=str(path), crs="EPSG:32632",
+        metadata={dimension: 100, "transform": supplied.to_gdal()},
+    )
+    bounds, crs, span, transform, shape = map_scene._terrain_grid_frame(terrain)
+    assert transform == supplied
+    assert shape == (100, 100)
+    assert span == pytest.approx(20000.0)
+    assert bounds == pytest.approx((500000.0, 5180000.0, 520000.0, 5200000.0))
+
+
+def test_file_header_keeps_an_explicit_dimension_without_affine(tmp_path):
+    import rasterio
+    from rasterio.transform import from_origin
+
+    path = tmp_path / "wide.tif"
+    with rasterio.open(
+        path, "w", driver="GTiff", width=100, height=10, count=1,
+        dtype="float32", crs="EPSG:32632",
+        transform=from_origin(500000.0, 5200000.0, 100.0, 100.0),
+    ) as dataset:
+        dataset.write(np.zeros((10, 100), np.float32), 1)
+    frame = map_scene._terrain_grid_frame(
+        f3d.TerrainSource(path=str(path), crs="EPSG:32632", metadata={"width": 50})
+    )
+    assert frame[4] == (50, 10)
+    assert frame[2] == pytest.approx(5000.0)
+
+
+def test_invalid_metadata_affine_falls_back_to_the_file_header(tmp_path):
+    import rasterio
+    from rasterio.transform import from_origin
+
+    path = tmp_path / "valid.tif"
+    with rasterio.open(
+        path, "w", driver="GTiff", width=100, height=100, count=1,
+        dtype="float32", crs="EPSG:32632",
+        transform=from_origin(500000.0, 5200000.0, 100.0, 100.0),
+    ) as dataset:
+        dataset.write(np.zeros((100, 100), np.float32), 1)
+    frame = map_scene._terrain_grid_frame(
+        f3d.TerrainSource(
+            path=str(path), crs="EPSG:32632",
+            metadata={"transform": "not-an-affine"},
+        )
+    )
+    assert frame[3] is not None
+    assert frame[4] == (100, 100)
+    assert frame[2] == pytest.approx(10000.0)

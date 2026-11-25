@@ -278,12 +278,15 @@ def _raster_grid_from_path(path: Path, *, target_crs: str | None = None) -> dict
 
     try:
         with rasterio.open(path) as src:
-            if src.crs is None or src.transform is None:
+            if src.transform is None:
                 return None
-            if target_crs and not _same_crs(str(src.crs), str(target_crs)):
+            source_crs = str(src.crs) if src.crs is not None else None
+            if source_crs is None and target_crs is None:
+                return None
+            if source_crs and target_crs and not _same_crs(source_crs, str(target_crs)):
                 return None
             return {
-                "crs": str(src.crs),
+                "crs": source_crs or str(target_crs),
                 "transform": src.transform,
                 "width": int(src.width),
                 "height": int(src.height),
@@ -4120,20 +4123,21 @@ def _terrain_grid_frame(
             height = float(array_shape[0])
     transform = None
     shape: tuple[int, int] | None = None
-    # Resolve each missing dimension independently. A file header supplies the
-    # missing axis; explicit metadata still wins for the axis it names.
+    # Resolve each missing dimension independently. Explicit metadata,
+    # including its affine, wins; the file header only fills absent axes.
+    grid = _terrain_alignment_grid(
+        terrain, target_crs=crs, fallback_shape=(int(height), int(width))
+    )
+    path_grid = None
     if terrain.path and (missing_width or missing_height):
-        path_grid = _raster_grid_from_path(Path(str(terrain.path)))
+        path_grid = _raster_grid_from_path(Path(str(terrain.path)), target_crs=crs)
         if path_grid is not None:
-            grid = dict(path_grid)
-            if not missing_width:
-                grid["width"] = int(width)
-            if not missing_height:
-                grid["height"] = int(height)
-        else:
-            grid = _terrain_alignment_grid(terrain, fallback_shape=(int(height), int(width)))
-    else:
-        grid = _terrain_alignment_grid(terrain, fallback_shape=(int(height), int(width)))
+            if grid is None:
+                grid = dict(path_grid)
+            else:
+                grid = dict(grid)
+            grid["width"] = int(path_grid["width"] if missing_width else width)
+            grid["height"] = int(path_grid["height"] if missing_height else height)
     if grid is not None:
         if crs is None:
             crs = str(grid.get("crs") or "") or None
@@ -4145,6 +4149,11 @@ def _terrain_grid_frame(
             transform = _affine_from_metadata(grid["transform"])
         except Exception:
             transform = None
+            if path_grid is not None:
+                try:
+                    transform = _affine_from_metadata(path_grid["transform"])
+                except Exception:
+                    pass
 
     if transform is not None:
         # Affine columns are (a, d) and rows are (b, e).
@@ -4192,10 +4201,22 @@ def _terrain_grid_frame(
                 else:
                     span_x = span_y = 0.0
                 span = max(span_x, span_y)
-        except Exception:
-            pass
-    if span is not None and (not math.isfinite(span) or span <= 0.0):
-        span = None
+            if not math.isfinite(span) or span <= 0.0:
+                raise ValueError("terrain span conversion produced a nonfinite or nonpositive value")
+        except Exception as error:
+            raise MapSceneNativeUnavailable(
+                diagnostic_block(
+                    layer="terrain",
+                    reason=f"could not convert terrain span to metres: {error}",
+                    required_native="rasterio/pyproj CRS transform",
+                )
+            ) from error
+    if span is not None:
+        if not math.isfinite(span) or span <= 0.0:
+            span = None
+        else:
+            # Renderer, buildings and preset cameras must share one scale.
+            span = max(1.0, span)
     return bounds, crs, span, transform, shape
 
 
@@ -4244,6 +4265,14 @@ def _building_points_in_terrain_crs(
     layer_id: str,
 ) -> list[tuple[float, float]]:
     out = [(float(point[0]), float(point[1])) for point in points]
+    if not all(math.isfinite(value) for point in out for value in point):
+        raise MapSceneNativeUnavailable(
+            diagnostic_block(
+                layer=layer_id,
+                reason="building footprint contains nonfinite coordinates",
+                required_native="finite footprint coordinates",
+            )
+        )
     if source_crs is None or terrain_crs is None or source_crs == terrain_crs:
         return out
     try:
