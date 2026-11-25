@@ -1,4 +1,6 @@
 use super::OverlayStack;
+use crate::gis::raster_write::{CrsSpec, RasterData};
+use crate::gis::types::{PixelRegistration, RasterInfo};
 use crate::viewer::terrain::overlay::{BlendMode, OverlayData, OverlayLayer, OverlayLayerGpu};
 
 impl OverlayStack {
@@ -20,6 +22,7 @@ impl OverlayStack {
             device,
             queue,
             layers: Vec::new(),
+            registered_grids: Default::default(),
             next_id: 0,
             composite_texture: None,
             composite_view: None,
@@ -51,14 +54,19 @@ impl OverlayStack {
         blend_mode: BlendMode,
         z_order: i32,
     ) -> Result<OverlayLayer, String> {
-        let img = image::open(path)
-            .map_err(|e| format!("Failed to load overlay image '{}': {e}", path.display()))?;
-        let rgba_img = img.to_rgba8();
-        let (width, height) = rgba_img.dimensions();
+        let (rgba, width, height) = if is_tiff(path) {
+            read_tiff_rgba(path).map_err(|err| err.to_string())?
+        } else {
+            let img = image::open(path)
+                .map_err(|e| format!("Failed to load overlay image '{}': {e}", path.display()))?;
+            let rgba_img = img.to_rgba8();
+            let (width, height) = rgba_img.dimensions();
+            (rgba_img.into_raw(), width, height)
+        };
         Ok(OverlayLayer {
             name: name.to_string(),
             data: OverlayData::Raster {
-                rgba: rgba_img.into_raw(),
+                rgba,
                 width,
                 height,
             },
@@ -107,6 +115,12 @@ impl OverlayStack {
                 config: layer.config.clone(),
             })
             .collect();
+        candidate.registered_grids = self
+            .registered_grids
+            .iter()
+            .filter(|(id, _)| !removed_ids.contains(id))
+            .map(|(&id, info)| (id, info.clone()))
+            .collect();
         let ids = additions
             .into_iter()
             .map(|config| candidate.add_layer_config(config))
@@ -118,6 +132,7 @@ impl OverlayStack {
     pub fn remove(&mut self, id: u32) -> bool {
         if let Some(pos) = self.layers.iter().position(|l| l.id == id) {
             let removed = self.layers.remove(pos);
+            self.registered_grids.remove(&id);
             println!(
                 "[overlay] Removed layer '{}' (id={})",
                 removed.config.name, id
@@ -127,6 +142,41 @@ impl OverlayStack {
         } else {
             false
         }
+    }
+
+    pub(crate) fn set_registered_grid(&mut self, id: u32, grid: Option<RasterInfo>) {
+        if let Some(grid) = grid {
+            self.registered_grids.insert(id, grid);
+        }
+    }
+
+    pub(crate) fn validate_registered_grids(&self, terrain: &RasterInfo) -> anyhow::Result<()> {
+        for grid in self.registered_grids.values() {
+            check_terrain_grid(grid, terrain)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn geotiff_grid(
+        path: &std::path::Path,
+        terrain: Option<&RasterInfo>,
+        extent: Option<[f32; 4]>,
+    ) -> anyhow::Result<Option<RasterInfo>> {
+        use anyhow::{ensure, Context};
+        if !is_tiff(path) {
+            return Ok(None);
+        }
+        let grid = crate::gis::raster_info::read_raster_info(path)?;
+        if !grid.is_georeferenced && grid.registration == PixelRegistration::Area {
+            return Ok(None);
+        }
+        let terrain = terrain.context("GeoTIFF draping requires loaded terrain")?;
+        check_terrain_grid(&grid, terrain)?;
+        ensure!(
+            extent.is_none() || extent == Some([0.0, 0.0, 1.0, 1.0]),
+            "GeoTIFF draping uses its grid extent"
+        );
+        Ok(Some(grid))
     }
 
     /// Set overlay visibility
@@ -179,4 +229,63 @@ impl OverlayStack {
     pub fn sampler(&self) -> &wgpu::Sampler {
         &self.sampler
     }
+}
+
+fn is_tiff(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("tif") || extension.eq_ignore_ascii_case("tiff")
+        })
+}
+
+fn read_tiff_rgba(path: &std::path::Path) -> anyhow::Result<(Vec<u8>, u32, u32)> {
+    use anyhow::{bail, ensure};
+    let loaded = crate::gis::raster_info::read_raster_data(path)?;
+    let RasterData::U8(samples) = loaded.array.data else {
+        bail!("GeoTIFF draping requires 8-bit image bands");
+    };
+    let bands = loaded.array.bands;
+    ensure!(
+        matches!(bands, 1 | 3 | 4),
+        "GeoTIFF draping requires grayscale, RGB or RGBA"
+    );
+    let pixels = samples.len() / bands;
+    let rgba = (0..pixels)
+        .flat_map(|i| match bands {
+            1 => [samples[i], samples[i], samples[i], 255],
+            3 => [
+                samples[i],
+                samples[pixels + i],
+                samples[2 * pixels + i],
+                255,
+            ],
+            _ => [
+                samples[i],
+                samples[pixels + i],
+                samples[2 * pixels + i],
+                samples[3 * pixels + i],
+            ],
+        })
+        .collect();
+    Ok((rgba, loaded.info.width, loaded.info.height))
+}
+
+fn check_terrain_grid(grid: &RasterInfo, terrain: &RasterInfo) -> anyhow::Result<()> {
+    use anyhow::ensure;
+    ensure!(
+        grid.registration == terrain.registration,
+        "raster registration mismatch ({} to {}); prepare with registration_conversion='preserve_sample_locations'",
+        grid.registration.name(), terrain.registration.name()
+    );
+    let same_crs = CrsSpec::from_raster_info(grid)
+        .zip(CrsSpec::from_raster_info(terrain))
+        .is_some_and(|(left, right)| left.equivalent_to(&right));
+    ensure!(
+        same_crs
+            && grid.transform == terrain.transform
+            && (grid.width, grid.height) == (terrain.width, terrain.height),
+        "GeoTIFF drape must be prepared on the terrain grid"
+    );
+    Ok(())
 }

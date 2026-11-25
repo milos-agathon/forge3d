@@ -7,7 +7,13 @@ from __future__ import annotations
 from typing import Tuple, Optional, Sequence, Any, Dict, List, Literal, Mapping, Callable, NoReturn
 import os
 import numpy as np
+from os import PathLike
 from . import gis
+from . import cinema as cinema
+from .cinema import Subject as Subject, FramingSpec as FramingSpec, Shot as Shot, ShotPlan as ShotPlan, CinemaInfeasible as CinemaInfeasible, CinemaNativeUnavailable as CinemaNativeUnavailable, plan as plan_shots
+
+def cinema_solve(spec_json: str, heights: list[float], width: int, height: int, terrain_width: float) -> str: ...
+def cinema_validate(spec_json: str, solution_json: str, keyframes_json: str, heights: list[float], width: int, height: int, terrain_width: float, time_offset: float) -> str: ...
 from . import geo as geo
 from . import terrain as terrain
 from . import codec as codec
@@ -21,6 +27,7 @@ from .atmosphere import AtmosphereSettings, SUN_ELEVATION_SWEEP_DEG
 from .precision import dd_harness, dd_jitter_demo, dd_selftest
 from .graticule import GraticuleSpec, generate_graticule
 from .legend import Legend, LegendConfig
+from .raster_recipe import RasterRecipe as RasterRecipe, RasterRecipeSource as RasterRecipeSource
 from .raster_style import RasterHeightSurfaceStyle as RasterHeightSurfaceStyle, CategoricalRasterStyle as CategoricalRasterStyle, BivariateRasterStyle as BivariateRasterStyle, RasterStyleResult as RasterStyleResult
 from .map_plate import BBox, MapPlate, MapPlateConfig, PlateRegion
 from .publication import PublicationSource as PublicationSource, PublicationExtent as PublicationExtent, PublicationRecipe as PublicationRecipe
@@ -114,6 +121,7 @@ from .label_plan import (
     RejectedLabel,
 )
 from . import semantic_scale as semantic_scale
+from . import measured_sections as measured_sections
 from .map_scene import (
     RenderPassInput as RenderPassInput,
     RenderPassSpec as RenderPassSpec,
@@ -189,7 +197,13 @@ from .style import (
 from .vector_line import VectorLineLayer as VectorLineLayer, VectorLineStyleError as VectorLineStyleError
 from . import smoke
 from . import verify
-from .path_tracing import ExperimentalSyntheticOutput, render_terrain_poster
+from .path_tracing import (
+    ExperimentalSyntheticOutput,
+    ProgressCallback,
+    TerrainRenderCancelled as TerrainRenderCancelled,
+    TerrainRenderProgress as TerrainRenderProgress,
+    render_terrain_poster,
+)
 
 PathLikeStr = os.PathLike[str] | str
 
@@ -632,6 +646,7 @@ class TerrainRenderParams:
 
     DEM detail normals require enabled=True, detail_normal_path and positive
     detail_strength. detail_sigma_px is metadata for the precomputed map.
+    camera_mode="mesh:zup:dem" opts into DEM-driven mesh density.
     """
     size_px: Tuple[int, int]
     render_scale: float
@@ -643,6 +658,7 @@ class TerrainRenderParams:
     cam_theta_deg: float
     cam_gamma_deg: float
     fov_y_deg: float
+    camera_mode: str
     clip: Tuple[float, float]
     exposure: float
     gamma: float
@@ -1922,6 +1938,10 @@ def hybrid_render_terrain_reference(
     temperature_c: float | None = ...,
     atmosphere: AtmosphereSettings | Mapping[str, Any] | AtmosphereLutHandle | None = ...,
     sdf_scene: object | None = ...,
+    on_progress: ProgressCallback | None = ...,
+    checkpoint_path: str | PathLike[str] | None = ...,
+    checkpoint_every: int | None = ...,
+    resume: bool = ...,
 ) -> Dict[str, Any]: ...
 
 # AETHER: independent stochastic spectral atmosphere acceptance reference.

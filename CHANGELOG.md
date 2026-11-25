@@ -6,6 +6,35 @@ This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [1.52.0]
+
+### Added
+
+- Set `camera_mode="mesh:zup:dem"` (or `"mesh:dem"` for the legacy orbit) to render a [terrain mesh at DEM resolution](docs/terrain/dem-mesh.md). Each axis follows its own source samples, and a singleton axis repeats its sample. Beauty, AOV, offline accumulation, planar reflections, shadows, and physical water traversal use the selected grid.
+- The default camera stays `screen`, and existing mesh modes retain their fixed grids. Large DEMs increase GPU geometry work. A 3000 × 3000 DEM uses about 18 million triangles in this mode, compared with about 522,000 in the default mesh. Local rendering and default-output comparisons ran on Windows Vulkan with a physical NVIDIA GeForce RTX 3070.
+- [Raster registration](docs/guides/raster_registration.md) carries pixel-is-area and pixel-is-point through reading, preparation, and export. The viewer, MapScene, and traced terrain place drapes and vectors on the terrain's sample grid. Combining different registrations requires an explicit conversion. GeoTIFF output records the registration of the exported pixels.
+
+## [1.51.1]
+
+### Fixed
+
+- CI and release wheel builds use the reviewed Rust 1.97.1 toolchain, avoiding the macOS `objc2` compilation failure under newer runner defaults. The 1.51.0 tag remains available; its package publication did not complete.
+- Cached scene sequences check frozen label acceptance without copying complete label plans. Public plan reads still return detached values, and cache keys and rendered pixels retain the same inputs.
+
+## [1.51.0]
+
+### Added
+
+- [AUTOCHIRON terrain shot planning](docs/api/cinema.md) plans reveal, orbit, flyover, and straight dolly shots around static subjects on a declared heightfield. Bake the plan into a native camera animation for the interactive viewer, or save canonical JSON and revalidate a replay against the same terrain.
+- Planning checks terrain clearance, visibility, framing, speed, and jerk, including physical GPU terrain traces of the baked camera. Infeasible shots report the binding constraint. The viewer reference targets physical NVIDIA Vulkan. The solved spline has C2 joins, while playback uses the existing cubic with possible acceleration jumps. Saved reports require revalidation when used as evidence.
+
+## [1.50.0]
+
+### Added
+- Measured terrain transects sample a declared WGS 84 geodesic across a DEM and produce a linked map/profile PNG and CSV/JSON. Samples retain signed source heights and declared vertical reference, with missing values shown as gaps. This delivery covers stills (#306).
+- Fixed-camera observation maps compile prepared GeoTIFFs and timestamped vector events into CHRONOS frames with QA masks, source and age captions, indexed rendering, and replay. Observation frames use the MapScene furniture cache bypass (#304).
+- GPU-resident normalized-difference recipes classify two registered binary32 rasters with a validity mask and fixed thresholds. Threshold edits reuse GPU inputs and normalized values. The native terrain PNG route provides matching legends, samples, counts, and explicit raster export. It requires a physical GPU and a matching terrain grid. Local render evidence covers NVIDIA Vulkan. Scene caching, provenance, and signed certificates are outside this route (#307).
+
 ## [1.49.0]
 
 ### Added

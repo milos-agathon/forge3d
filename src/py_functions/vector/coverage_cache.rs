@@ -54,6 +54,11 @@ pub(super) fn compiled_coverage_scene(
     }
 
     let compiled = Arc::new(compile_coverage(ingest_coverage_scene(input)?)?);
+    // Release the preceding scene's GPU workspace before allocating the new
+    // one. Keep its CPU plan until the new scene renders successfully.
+    if let Some(previous) = cache().lock().map_err(|_| cache_poisoned())?.as_ref() {
+        previous.compiled.release_device_resources();
+    }
     Ok(CompiledCoverageSceneLookup {
         compiled: compiled.clone(),
         pending: Some(CachedCoverageScene {

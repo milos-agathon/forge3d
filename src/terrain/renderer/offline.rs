@@ -764,10 +764,10 @@ impl TerrainScene {
                 &mut encoder, &state.params, &state.decoded, eye, view, jittered_proj,
             )?;
 
-            let main_height_view = self.main_pass_height_view(&state.height_inputs.heightmap_view);
             let pass_bind_groups = self.create_terrain_pass_bind_groups(
                 &uniform_buffer,
-                main_height_view,
+                &state.height_inputs.heightmap_view,
+                &state.params.camera_mode,
                 state.materials.material_view(),
                 state.materials.material_sampler(),
                 state.materials.material_normal_view(),
@@ -806,7 +806,8 @@ impl TerrainScene {
                 eye,
                 view,
                 jittered_proj,
-                main_height_view,
+                &state.height_inputs.heightmap_view,
+                (state.height_inputs.width, state.height_inputs.height),
                 state.materials.material_view(),
                 state.materials.material_sampler(),
                 &state.materials.shading_buffer,

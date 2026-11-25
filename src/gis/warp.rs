@@ -103,6 +103,7 @@ pub fn assign_crs(path: impl AsRef<Path>, crs: CrsSpec, overwrite: bool) -> GisR
         creation_options_explicit: false,
         like_info: None,
         height_system: loaded.info.height_system.clone(),
+        registration: loaded.info.registration,
     };
     let mut info = write_raster(path, loaded.array, options)?;
     info.warnings.push(RasterWarning::new(
@@ -208,31 +209,55 @@ pub fn align_raster_to(
     method: ResamplingMethod,
 ) -> GisResult<RasterOperationResult> {
     let loaded = read_raster(path)?;
-    let source_crs = require_crs(&loaded.info)?;
+    align_raster_data(&loaded.array, &loaded.info, target, method)
+}
+
+pub(crate) fn require_matching_registration(
+    source: crate::gis::types::PixelRegistration,
+    target: crate::gis::types::PixelRegistration,
+) -> GisResult<()> {
+    if source != target {
+        return Err(GisError::InvalidRaster(
+            "raster registration mismatch; convert registration before aligning".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn align_raster_data(
+    source_array: &RasterArray,
+    source: &RasterInfo,
+    target: &RasterInfo,
+    method: ResamplingMethod,
+) -> GisResult<RasterOperationResult> {
+    require_matching_registration(source.registration, target.registration)?;
+    validate_shape(target.height, target.width)?;
+    let source_crs = require_crs(source)?;
     let target_crs = require_crs(target)?;
     if !crs_equal(&source_crs, &target_crs) {
         return Err(GisError::CrsMismatch(
             "crs_mismatch: align_raster_to does not reproject rasters".to_string(),
         ));
     }
-    let source_transform = require_transform(&loaded.info)?;
+    let source_transform = require_transform(source)?;
     // A singular source transform cannot be inverted, so sample_to_grid would
     // silently fill every pixel with nodata and report success. Reject it here
     // (M-05 no-silent-suppression, resample/align path).
     crate::gis::affine::require_invertible(source_transform)?;
     let target_transform = require_transform(target)?;
-    let diagnostics = alignment_diagnostics(&loaded.info, target);
+    crate::gis::affine::require_invertible(target_transform)?;
+    let diagnostics = alignment_diagnostics(source, target);
     let array = sample_to_grid(
-        &loaded.array,
+        source_array,
         source_transform,
         target_transform,
         target.width,
         target.height,
         method,
-        &loaded.info.nodata_per_band,
+        &source.nodata_per_band,
     );
     let info = operation_info(
-        &loaded.info,
+        source,
         target.width,
         target.height,
         Some(target_transform),
@@ -253,6 +278,13 @@ pub fn assert_grid_compatible(
     compare_nodata: bool,
 ) -> Vec<RasterWarning> {
     let mut diagnostics = Vec::new();
+    if source.registration != target.registration {
+        diagnostics.push(RasterWarning::new(
+            "registration_mismatch",
+            "source and target raster registration differ",
+            Some("registration"),
+        ));
+    }
     match (
         CrsSpec::from_raster_info(source),
         CrsSpec::from_raster_info(target),
@@ -661,6 +693,7 @@ pub(crate) fn operation_info(
     info.dtype_per_band = vec![array.dtype().name().to_string(); source.band_count as usize];
     // Resampling and horizontal reprojection do not change the vertical datum.
     info.height_system = source.height_system.clone();
+    info.registration = source.registration;
     if let Some(crs) = crs {
         info.crs_wkt = crs.wkt.clone();
         info.crs_authority = authority_map(&crs);

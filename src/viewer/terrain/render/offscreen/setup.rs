@@ -132,7 +132,7 @@ impl ViewerTerrainScene {
         let render_origin_span = [origin.x, origin.z, span.x, span.z];
         let terrain_width = span.x;
         let proj_base = frame.projection(width, height);
-        let proj = if self.taa_jitter.enabled {
+        let proj = if frame.orthographic_half_extents.is_none() && self.taa_jitter.enabled {
             crate::core::jitter::apply_jitter(
                 proj_base,
                 self.taa_jitter.offset.0,

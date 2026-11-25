@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections import Counter
 from dataclasses import replace
@@ -63,15 +64,15 @@ def _build_sparse_store(tmp_path: Path) -> tuple[f3d.VTStore, dict]:
     store_path = tmp_path / "switzerland-procedural.f3dvt"
     manifest_path = tmp_path / "switzerland-procedural.manifest.json"
     root = Path(__file__).resolve().parents[1]
-    subprocess.run(
+    prebuilt = os.environ.get("FORGE3D_TEST_VTPACK")
+    packer = (
+        [prebuilt]
+        if prebuilt is not None
+        else ["cargo", "run", "--quiet", "--release", "--bin", "forge3d-vtpack", "--"]
+    )
+    result = subprocess.run(
         [
-            "cargo",
-            "run",
-            "--quiet",
-            "--release",
-            "--bin",
-            "forge3d-vtpack",
-            "--",
+            *packer,
             "--procedural",
             "--output",
             str(store_path),
@@ -95,10 +96,11 @@ def _build_sparse_store(tmp_path: Path) -> tuple[f3d.VTStore, dict]:
             str(DETAIL_WINDOW_PAGES),
         ],
         cwd=root,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
+    assert result.returncode == 0, result.stdout + result.stderr
     # The manifest carries one digest per page (hundreds of KiB), so it is read
     # from disk rather than from the packer's stdout summary.
     manifest = json.loads(manifest_path.read_text())

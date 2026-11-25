@@ -1118,10 +1118,10 @@ impl TerrainScene {
             .as_ref()
             .and_then(|sky| sky.scattering_view.as_ref())
             .unwrap_or(&self.atmosphere_scattering_fallback_view);
-        let main_height_view = self.main_pass_height_view(&height_inputs.heightmap_view);
         let pass_bind_groups = self.create_terrain_pass_bind_groups(
             &uniform_buffer,
-            main_height_view,
+            &height_inputs.heightmap_view,
+            &params.camera_mode,
             materials.material_view(),
             materials.material_sampler(),
             materials.material_normal_view(),
@@ -1155,7 +1155,8 @@ impl TerrainScene {
             camera_eye,
             camera_view,
             camera_proj,
-            main_height_view,
+            &height_inputs.heightmap_view,
+            (height_inputs.width, height_inputs.height),
             materials.material_view(),
             materials.material_sampler(),
             &materials.shading_buffer,

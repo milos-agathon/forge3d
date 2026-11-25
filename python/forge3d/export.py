@@ -738,7 +738,28 @@ def validate_svg(svg_content: str) -> bool:
 
 
 # Convenience re-exports
+def render_to_geotiff(result, path, *, layer: str = "rgba", overwrite: bool = False):
+    """Write one registered render layer as a GeoTIFF on its actual output grid."""
+    import numpy as np
+
+    from .gis import write_raster
+    from .preparation import PreparationGrid
+
+    grid = result.get("grid")
+    if not isinstance(grid, PreparationGrid):
+        raise ValueError("render has no verified output grid")
+    values = np.asarray(result[layer])
+    if values.shape[:2] != (grid.height, grid.width) or values.ndim not in (2, 3):
+        raise ValueError("render layer dimensions differ from the output grid")
+    if values.ndim == 3:
+        values = np.moveaxis(values, -1, 0)
+    a, b, c, d, e, f = tuple(grid.transform)[:6]
+    return write_raster(path, values, crs=grid.crs, transform=(a, b, c, d, e, f),
+                        registration=grid.registration, overwrite=overwrite)
+
+
 __all__ = [
+    "render_to_geotiff",
     'VectorScene',
     'VectorStyle',
     'LabelStyle',

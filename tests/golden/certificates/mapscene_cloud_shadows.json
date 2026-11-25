@@ -147,16 +147,16 @@
   },
   "degradations": [],
   "engine": {
-    "git_sha": "4c64e0f50779",
-    "version": "1.47.1",
+    "git_sha": "569c5a85d9cd",
+    "version": "1.52.0",
     "wgsl_module_hashes": {
-      "concordia.atmosphere.shader": "35eff75b79b15dd5f700bf442fda80873b1d3f33f1f3f027119c550f35663a3e",
-      "concordia.geometry.shader": "5c81a83571c63a39c123ccb55f33da093ed4ef3e5faa0b8b2021ea1081fffb45",
+      "concordia.atmosphere.shader": "18bca3bc87f5245c292922c191081bf4205aabafa52b35e31f964b0cb29f67f5",
+      "concordia.geometry.shader": "50eaecb2e594e1df4e928d88796fe45e0d8bf08dfad979510a31b53e7945920e",
       "ibl.precompute.shader.brdf": "1ae542caaac04a941c211ec924c0072a3110cbff03aff23e140ea9305ba8dc75",
       "ibl.precompute.shader.equirect": "c77440fdaca6bb421e6775d86cb0be2f7cb3638e103de07121027e338c2a9772",
       "ibl.precompute.shader.prefilter": "7e705dff6742aa1a9ad760a42561d01d66899e27408043c0e62f8c907f9d1694",
       "terrain.offline.tonemap.pipeline": "621a5f156ac352a671a78e65d7599e5ef974efdc8426829f8975d16af668fe7a",
-      "terrain.shadow_depth.shader": "228860457ad33e87fa6b6523a947453b1bdd65f09e6795746556b2cae94fc5b3"
+      "terrain.shadow_depth.shader": "a64a0899cf40592f95068b62ffbd40212d8f8440d11ef6a3aa1c8682ea943eed"
     }
   },
   "inputs": {
@@ -169,42 +169,42 @@
   "passes": [
     {
       "draw_calls": 0,
-      "gpu_ms": 0.11264000087976456,
+      "gpu_ms": 0.3041279911994934,
       "label": "concordia.resources"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.10956799983978271,
+      "gpu_ms": 0.2979840040206909,
       "label": "concordia.cloud_shadows"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 4.098048210144043,
+      "gpu_ms": 4.354047775268555,
       "label": "concordia.shadows"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 1.4602240324020386,
+      "gpu_ms": 1.423359990119934,
       "label": "concordia.geometry"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.0010239999974146485,
+      "gpu_ms": 0.002047999994829297,
       "label": "terrain.sky"
     },
     {
       "draw_calls": 1,
-      "gpu_ms": 1.4489599466323853,
+      "gpu_ms": 1.3905919790267944,
       "label": "terrain.main"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.011264000087976456,
+      "gpu_ms": 0.03379200026392937,
       "label": "concordia.atmosphere"
     },
     {
       "draw_calls": 0,
-      "gpu_ms": 0.008191999979317188,
+      "gpu_ms": 0.02252800017595291,
       "label": "concordia.output_transform"
     }
   ],
@@ -212,7 +212,7 @@
   "signature": {
     "alg": "ed25519",
     "pubkey": "293714d07f70116c88cea0db72023726047d3de56cb4f3f6964305937952f46e",
-    "sig": "a4b4a946ef1f54847d1e63616c5f41e516b7b9573cb8a21ca8fa948cec93ce628b42260cdbf3b9f96180e7d83f33a94e39aaea169ae04ff881d47ecaf6d9a600",
+    "sig": "a1b52b8cc2ba2a3f06edc76e0d3f00df2cd7244ea030c3316c14678b6d4f8c556ef1837b2a4d64740e33759a9a1683f6eb34e186a553cec60ece477ceff63e05",
     "signed_fields": [
       "adapter",
       "allocations",

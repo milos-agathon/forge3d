@@ -118,6 +118,13 @@ class _FrozenLabelPlans(Mapping[str, Any]):
     def __len__(self) -> int:
         return len(self._snapshots)
 
+    def _has_accepted(self, layer_id: str | None = None) -> bool:
+        """Inspect owned decisions without copying or exposing mutable plans."""
+        if layer_id is None:
+            return any(plan.accepted for plan in self._snapshots.values())
+        plan = self._snapshots.get(layer_id)
+        return plan is not None and bool(plan.accepted)
+
 
 class _SceneCompiler:
     """Publish a complete result only after validation/compilation succeeds.
@@ -385,7 +392,7 @@ def _validate_with_projection(
         _path_to_str,
         _preset_override_diagnostic,
         _resolution_mismatch_diagnostic,
-        _styled_raster_result,
+        _require_mapscene_geotiff_grid,
         _tiles3d_layer_has_native_geometry,
     )
 
@@ -412,9 +419,22 @@ def _validate_with_projection(
         supported_features["mapscene.lighting_preset"] = "supported"
 
     output = recipe.output
-    if output is not None and str(output.format).lower() not in {"png", "exr"}:
+    geotiff_error = None
+    if output is not None and str(output.format).lower() == "geotiff":
+        try:
+            _require_mapscene_geotiff_grid(recipe)
+        except (ValueError, TypeError) as error:
+            geotiff_error = Diagnostic(
+                code="geotiff_output_unavailable", severity="fatal",
+                message=str(error), support_level="unsupported",
+                remediation="Use registered orthographic terrain in the requested CRS and 8-bit RGBA output.",
+            )
+    if output is not None and str(output.format).lower() not in {"png", "exr", "geotiff"}:
         diagnostics.append(_unsupported_output_format_diagnostic(str(output.format).lower()))
         unsupported_features["output.format"] = "unsupported"
+    elif geotiff_error is not None:
+        diagnostics.append(geotiff_error)
+        unsupported_features["output.format.geotiff"] = "unsupported"
     elif output is not None:
         supported_features[f"output.format.{str(output.format).lower()}"] = "supported"
         supported_features[f"output.bit_depth.{int(output.bit_depth)}"] = "supported"
@@ -603,9 +623,8 @@ def _validate_with_projection(
             layer_memory = _dimension_memory_bytes(layer.metadata)
             details = {"style": layer.style.to_dict(), "opacity": layer.opacity}
             try:
-                styled = _styled_raster_result(layer)
                 terrain_shape = _load_native_heightmap(terrain).shape
-                _mapscene_thematic_surface(recipe, terrain_shape)
+                styled = _mapscene_thematic_surface(recipe, terrain_shape)
                 details["legend"] = styled.legend
                 supported_features["raster.thematic_style"] = "supported"
             except (ValueError, TypeError, RuntimeError, AttributeError) as exc:

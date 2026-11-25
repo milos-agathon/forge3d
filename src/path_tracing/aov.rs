@@ -194,6 +194,16 @@ pub struct AovFrames {
 impl AovFrames {
     /// Create AOV textures for the specified AOVs
     pub fn new(device: &Device, width: u32, height: u32, aovs: &[AovKind]) -> RenderResult<Self> {
+        Self::new_with_copy_dst(device, width, height, aovs, &[])
+    }
+
+    pub(crate) fn new_with_copy_dst(
+        device: &Device,
+        width: u32,
+        height: u32,
+        aovs: &[AovKind],
+        copy_dst: &[AovKind],
+    ) -> RenderResult<Self> {
         let mut textures = HashMap::new();
         let mut enabled_mask = 0u32;
 
@@ -213,7 +223,13 @@ impl AovFrames {
                     sample_count: 1,
                     dimension: TextureDimension::D2,
                     format: aov_kind.texture_format(),
-                    usage: TextureUsages::STORAGE_BINDING | TextureUsages::COPY_SRC,
+                    usage: TextureUsages::STORAGE_BINDING
+                        | TextureUsages::COPY_SRC
+                        | if copy_dst.contains(&aov_kind) {
+                            TextureUsages::COPY_DST
+                        } else {
+                            TextureUsages::empty()
+                        },
                     view_formats: &[],
                 },
             )?;

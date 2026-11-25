@@ -847,12 +847,18 @@ impl ConcordiaFrame {
 /// Private geometry selector; public recipe camera keys are unchanged.
 pub(crate) const SCREEN_GEOMETRY_MODE: &str = "mesh:zup:concordia-screen";
 
+pub(super) const REGISTERED_RASTER: &str = ":registered-raster";
+
+pub(super) fn without_registration(mode: &str) -> &str {
+    mode.strip_suffix(REGISTERED_RASTER).unwrap_or(mode)
+}
+
 /// Screen mode uses full-tile orthographic XY framing and real shared depth.
 /// The legacy fullscreen UV clamp is deliberately not reproduced here.
 pub(crate) fn camera_matrices(
     params: &crate::terrain::render_params::TerrainRenderParams,
 ) -> (glam::Vec3, glam::Mat4, glam::Mat4) {
-    if params.camera_mode != "screen" && params.camera_mode != SCREEN_GEOMETRY_MODE {
+    if !matches!(without_registration(&params.camera_mode), "screen" | SCREEN_GEOMETRY_MODE) {
         return TerrainScene::build_camera_matrices(params);
     }
     let half = params.terrain_span * 0.5;
@@ -862,9 +868,14 @@ pub(crate) fn camera_matrices(
         0.0,
         params.cam_radius + (range.1 - range.0).abs() * params.z_scale.abs(),
     );
+    let view = if params.camera_mode.ends_with(REGISTERED_RASTER) {
+        super::core::north_up_view(eye, glam::Vec3::ZERO, glam::Vec3::Y)
+    } else {
+        glam::Mat4::look_at_rh(eye, glam::Vec3::ZERO, glam::Vec3::Y)
+    };
     (
         eye,
-        glam::Mat4::look_at_rh(eye, glam::Vec3::ZERO, glam::Vec3::Y),
+        view,
         glam::Mat4::orthographic_rh(-half, half, -half, half, params.clip.0, params.clip.1),
     )
 }

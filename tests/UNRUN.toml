@@ -21,36 +21,10 @@
 #      (has_gpu()/hosted-CI probe) and are NOT listed.
 #   5. test_dask_stub self-skips on CI (real runners have no xarray) and is NOT listed.
 #   6. Stale pure-CPU P1/P2 expectations were repaired against the current
-#      supported feature surface; only hardware-bound files remain below.
+#      supported feature surface.
 #
 # NOTE: the `[[entries]]` array-of-tables below IS the entries list; do not add a
 # separate `entries = []` line (TOML forbids redefining an array-of-tables).
 
-# --- requires a hardware GPU adapter with no graceful CPU skip -----------------
-# SUTURA zero-placeholder MapScene render paths: MapScene.render raises
-# MapSceneNativeUnavailable (not skip) when no terrain-safe adapter exists, so
-# these fail on GPU-less runners. They are not in the GPU golden lane either.
-[[entries]]
-file = "tests/test_mapscene_buildings.py"
-reason = "requires_hardware_adapter: MapScene native terrain/building render raises MapSceneNativeUnavailable with no CPU skip on GPU-less runners"
-owner = "milos"
-expires = "2026-12-10"
-
-[[entries]]
-file = "tests/test_mapscene_furniture.py"
-reason = "requires_hardware_adapter: MapScene native terrain render raises MapSceneNativeUnavailable with no CPU skip on GPU-less runners"
-owner = "milos"
-expires = "2026-12-10"
-
-[[entries]]
-file = "tests/test_mapscene_render_png.py"
-reason = "requires_hardware_adapter: MapScene native offscreen terrain render raises MapSceneNativeUnavailable with no CPU skip on GPU-less runners"
-owner = "milos"
-expires = "2026-12-10"
-
-[[entries]]
-file = "tests/test_mapscene_screen_space_settings.py"
-reason = "requires_hardware_adapter: MapScene native terrain/screen-space render raises MapSceneNativeUnavailable with no CPU skip on GPU-less runners"
-owner = "milos"
-expires = "2026-12-10"
-
+# No files remain quarantined. The four former MapScene entries run in the
+# required physical NVIDIA/Vulkan lane; hosted selection records this routing.

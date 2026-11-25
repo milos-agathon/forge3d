@@ -187,6 +187,9 @@ impl ViewerTerrainScene {
         let preflight = Self::preflight_terrain_path(path)?;
         let raster_info = preflight.raster_info;
         let footprint = preflight.footprint;
+        if let Some(overlays) = self.overlay_stack.as_ref() {
+            overlays.validate_registered_grids(&raster_info)?;
+        }
 
         let file = File::open(path)?;
         let mut decoder = tiff::decoder::Decoder::new(file)?;
@@ -269,7 +272,14 @@ impl ViewerTerrainScene {
 
         let heightmap_view = heightmap_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let (grid_cols, grid_rows) = terrain_grid_dims(width, height);
-        let (vertices, indices) = create_grid_mesh(grid_cols, grid_rows);
+        let (mut vertices, indices) = create_grid_mesh(grid_cols, grid_rows);
+        if uses_registered_grid(&raster_info) {
+            for vertex in vertices.chunks_exact_mut(4) {
+                let u = sample_lattice_uv(vertex[0], width);
+                let v = sample_lattice_uv(vertex[1], height);
+                vertex.copy_from_slice(&[u, v, u, v]);
+            }
+        }
 
         let vertex_buffer = tracked_create_buffer_init(
             &self.device,
@@ -567,6 +577,15 @@ fn parse_terrain_grid_cap(raw: &str) -> Option<u32> {
         .parse::<u32>()
         .ok()
         .filter(|cap| (2..=max_u32_index_grid()).contains(cap))
+}
+
+// A north-up georeferenced terrain spans its outer sample positions in the
+// mesh, while overlays span the corner-normalized footprint in texture UV.
+fn sample_lattice_uv(node_uv: f32, samples: u32) -> f32 {
+    if samples == 1 {
+        return node_uv;
+    }
+    ((node_uv * (samples - 1) as f32).round() + 0.5) / samples as f32
 }
 
 fn create_grid_mesh(cols: u32, rows: u32) -> (Vec<f32>, Vec<u32>) {

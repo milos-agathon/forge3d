@@ -710,6 +710,55 @@ def test_m06_geographic_dem_matches_metric_twin_and_keeps_relief(tmp_path: Path)
         viewer.close("geographic-viewer.log")
 
 
+@pytest.mark.parametrize("registration", ["area", "point"])
+def test_registered_snapshot_maps_labels_to_its_geotiff_viewport(tmp_path, registration):
+    import rasterio
+    from forge3d.viewer import open_viewer_async
+
+    dem = tmp_path / "terrain.tif"
+    west, north, pitch = 500000, 5200000, 8
+    gis.write_raster(
+        dem, np.zeros((9, 9), dtype=np.float32), crs="EPSG:32631",
+        transform=(pitch, 0, west, 0, -pitch, north), registration=registration,
+    )
+    drape = tmp_path / "drape.png"
+    Image.new("RGBA", (9, 9), (0, 0, 0, 255)).save(drape)
+    atlas = tmp_path / "glyph.png"
+    Image.new("RGBA", (10, 10), (255, 255, 255, 255)).save(atlas)
+    metrics = tmp_path / "metrics.json"
+    metrics.write_text(json.dumps({
+        "font_size": 10, "line_height": 10, "baseline": 5,
+        "glyphs": {"80": {"x": 0, "y": 0, "w": 10, "h": 10, "ox": 0, "oy": -5, "adv": 10}},
+    }), encoding="utf-8")
+    width, height = 97, 65
+    centres = []
+    with open_viewer_async(width=128, height=96, terrain_path=dem) as viewer:
+        viewer.send_ipc({"cmd": "set_terrain_pbr", "enabled": True})
+        viewer.load_overlay("Drape", drape, preserve_colors=True)
+        assert viewer.load_label_atlas(atlas, metrics).ok
+        for sample in (3, 4):
+            offset = (sample + 0.5) * pitch
+            label = viewer.add_label(
+                "P", (west + offset, 0.5, -north + offset),
+                size=8, color=(0, 1, 0, 1), halo_width=0,
+            )
+            assert isinstance(label, int)
+            output = tmp_path / f"label-{sample}.tif"
+            info = viewer.snapshot_geotiff(output, width, height)
+            assert info.registration == "area"
+            with rasterio.open(output) as frame:
+                assert frame.transform * (0, 0) == (west + pitch / 2, north - pitch / 2)
+                assert frame.transform * (width, height) == (west + 8.5 * pitch, north - 8.5 * pitch)
+                red, green, blue, _ = frame.read()
+                rows, columns = np.nonzero((green > red) & (green > blue))
+                assert len(columns) > 0
+                centres.append(np.array([columns.mean(), rows.mean()]))
+            viewer.remove_label(label)
+    residual = centres[1] - centres[0] - np.array([width / 8, height / 8])
+    print(f"Viewer GeoTIFF {registration} world-label motion residual in pixels {residual}")
+    assert np.max(np.abs(residual)) <= 1.0
+
+
 def test_m06_nonzero_origin_effects_orbit_no_flash_and_scatter(tmp_path: Path) -> None:
     viewer = ViewerProcess(effects=True)
     try:

@@ -3,9 +3,18 @@ use crate::core::memory_tracker::{calculate_texture_size, global_tracker, is_hos
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::thread::{self, ThreadId};
 use wgpu::util::DeviceExt;
 use wgpu::{BufferDescriptor, BufferUsages, TextureDescriptor, TextureFormat};
+
+// Pair each ledger entry change with the matching registry counter update.
+// The debug cross-check must observe both sides of the same allocation state.
+static LEDGER_REGISTRY: Mutex<()> = Mutex::new(());
+
+fn lock_ledger_registry() -> MutexGuard<'static, ()> {
+    LEDGER_REGISTRY.lock().unwrap_or_else(|p| p.into_inner())
+}
 
 /// Resource handle that automatically unregisters on drop
 #[derive(Debug)]
@@ -31,6 +40,7 @@ impl ResourceHandle {
 
 impl Drop for ResourceHandle {
     fn drop(&mut self) {
+        let _accounting = lock_ledger_registry();
         let tracker = global_tracker();
         match self {
             ResourceHandle::Buffer {
@@ -65,6 +75,7 @@ fn register_buffer_with_ledger(
 ) -> Result<ResourceHandle, RenderError> {
     let tracker = global_tracker();
     tracker.track_buffer_allocation_labeled(size, is_host_visible, &label)?;
+    let _accounting = lock_ledger_registry();
     tracker.track_ledger_allocation(size, is_host_visible);
     let ledger_id = ledger().insert(
         label,
@@ -83,6 +94,7 @@ fn register_buffer_with_ledger(
 fn register_texture_with_ledger(size: u64, label: String, call_site: String) -> ResourceHandle {
     let tracker = global_tracker();
     tracker.track_texture_allocation_bytes(size);
+    let _accounting = lock_ledger_registry();
     tracker.track_ledger_allocation(size, false);
     let ledger_id = ledger().insert(label, size, false, LedgerCategory::Texture, call_site);
     ResourceHandle::Texture { size, ledger_id }
@@ -373,7 +385,7 @@ pub struct AllocationLedger {
     peak_host_visible: AtomicU64,
     peak_device_local: AtomicU64,
     peak_total: AtomicU64,
-    capture: Mutex<Option<LedgerCapture>>,
+    captures: Mutex<HashMap<ThreadId, LedgerCapture>>,
     owner_captures: Mutex<BTreeMap<u64, OwnerCapture>>,
     owner_groups: Mutex<HashMap<(u64, String), OwnerGroupState>>,
 }
@@ -388,7 +400,7 @@ impl AllocationLedger {
             peak_host_visible: AtomicU64::new(0),
             peak_device_local: AtomicU64::new(0),
             peak_total: AtomicU64::new(0),
-            capture: Mutex::new(None),
+            captures: Mutex::new(HashMap::new()),
             owner_captures: Mutex::new(BTreeMap::new()),
             owner_groups: Mutex::new(HashMap::new()),
         }
@@ -449,10 +461,10 @@ impl AllocationLedger {
             Ordering::Relaxed,
         );
         if let Some(capture) = self
-            .capture
+            .captures
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .as_mut()
+            .get_mut(&thread::current().id())
         {
             capture.add(id, &entry);
         }
@@ -499,11 +511,14 @@ impl AllocationLedger {
     }
 
     fn begin_capture(&self, owner_ids: &[u64]) {
-        // ponytail: render capture is process-global and serialized; use capture
-        // IDs only if concurrent renders become a supported public contract.
         let entries = self.entries.lock().unwrap_or_else(|p| p.into_inner());
-        *self.capture.lock().unwrap_or_else(|p| p.into_inner()) =
-            Some(LedgerCapture::new(&entries, owner_ids));
+        self.captures
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(
+                thread::current().id(),
+                LedgerCapture::new(&entries, owner_ids),
+            );
     }
 
     fn extend_capture(&self, owner_ids: &[u64]) {
@@ -512,8 +527,8 @@ impl AllocationLedger {
         }
         let owners: HashSet<u64> = owner_ids.iter().copied().collect();
         let entries = self.entries.lock().unwrap_or_else(|p| p.into_inner());
-        let mut capture = self.capture.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(capture) = capture.as_mut() else {
+        let mut captures = self.captures.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(capture) = captures.get_mut(&thread::current().id()) else {
             return;
         };
         for (&id, entry) in entries.iter() {
@@ -524,19 +539,19 @@ impl AllocationLedger {
     }
 
     fn finish_capture(&self) -> LedgerReport {
-        self.capture
+        self.captures
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .take()
+            .remove(&thread::current().id())
             .map(LedgerCapture::report)
             .unwrap_or_default()
     }
 
     fn abort_capture(&self) {
-        self.capture
+        self.captures
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .take();
+            .remove(&thread::current().id());
     }
 
     fn remove(&self, id: u64) {
@@ -573,11 +588,11 @@ impl AllocationLedger {
                     |current| Some(current.saturating_sub(entry.bytes)),
                 );
             }
-            if let Some(capture) = self
-                .capture
+            for capture in self
+                .captures
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
-                .as_mut()
+                .values_mut()
             {
                 capture.remove(id, &entry);
             }
@@ -771,6 +786,7 @@ pub fn extend_ledger_capture(owner_ids: &[u64]) {
 /// Every `ResourceHandle` updates both the ledger and the registry's exact
 /// wrapper subset as one lifetime-owned allocation, so both axes must match.
 pub fn ledger_registry_cross_check() -> Result<(), String> {
+    let _accounting = lock_ledger_registry();
     let snap = ledger().snapshot();
     let (registry_host_visible, registry_device_local) = global_tracker().ledger_totals();
     if snap.current_host_visible_bytes != registry_host_visible {
@@ -786,6 +802,57 @@ pub fn ledger_registry_cross_check() -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// Temporarily detach the render ledger and allocation owner around a caller's
+/// callback. No ledger lock is held while the callback runs.
+#[cfg(feature = "extension-module")]
+pub(crate) fn suspend_ledger_capture() -> impl Drop {
+    struct SuspendedLedger {
+        capture: Option<LedgerCapture>,
+        entries: Vec<(u64, LedgerEntry)>,
+        _owner: AllocationOwnerGuard,
+    }
+
+    impl Drop for SuspendedLedger {
+        fn drop(&mut self) {
+            let ledger = ledger();
+            let live = ledger.entries.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some(mut capture) = self.capture.take() {
+                for (id, entry) in &self.entries {
+                    if !live.contains_key(id) {
+                        capture.remove(*id, entry);
+                    }
+                }
+                ledger
+                    .captures
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .insert(thread::current().id(), capture);
+            }
+        }
+    }
+
+    let ledger = ledger();
+    let live = ledger.entries.lock().unwrap_or_else(|p| p.into_inner());
+    let capture = ledger
+        .captures
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(&thread::current().id());
+    let entries = capture
+        .iter()
+        .flat_map(|capture| &capture.ids)
+        .filter_map(|id| live.get(id).map(|entry| (*id, entry.clone())))
+        .collect();
+    SuspendedLedger {
+        capture,
+        entries,
+        _owner: AllocationOwnerGuard {
+            previous: ACTIVE_ALLOCATION_OWNER.with(|owner| owner.replace(None)),
+            previous_group: ACTIVE_ALLOCATION_GROUP.with(|group| group.replace(None)),
+        },
+    }
 }
 
 /// Finish render-local peak accounting and return the captured ledger report.

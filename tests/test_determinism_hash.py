@@ -30,6 +30,76 @@ if not terrain_rendering_available():
 GOLDEN_PATH = Path(__file__).parent / "goldens" / "determinism" / f"{CANONICAL_SCENE}.sha256"
 
 
+def test_autochiron_golden_png_is_in_the_determinism_inventory():
+    sidecar = GOLDEN_PATH.parent / "autochiron_viewer_v1.sha256"
+    png = sidecar.with_suffix(".png")
+    assert hashlib.sha256(png.read_bytes()).hexdigest() == sidecar.read_text().split()[0]
+
+
+def _autochiron_reference_environment():
+    """Qualify the NVIDIA/Vulkan viewer reference; required lanes fail closed."""
+    required = os.environ.get("FORGE3D_REQUIRE_AUTOCHIRON_GOLDEN") == "1"
+
+    def unavailable(reason):
+        if required:
+            pytest.fail(f"required AUTOCHIRON golden unavailable: {reason}")
+        pytest.skip(reason)
+
+    if _local_backend().strip().lower() != "vulkan":
+        unavailable("the AUTOCHIRON reference was generated on physical NVIDIA/Vulkan")
+    from forge3d.viewer import _find_viewer_binary
+    try:
+        viewer = _find_viewer_binary()
+    except (FileNotFoundError, ValueError) as error:
+        unavailable(f"AUTOCHIRON golden requires a built interactive_viewer: {error}")
+    env = dict(os.environ)
+    env.update(FORGE3D_DETERMINISTIC="1", WGPU_BACKENDS="vulkan", WGPU_BACKEND="vulkan",
+               FORGE3D_NO_BOOTSTRAP="1", FORGE3D_VIEWER_BINARY=viewer)
+    # The viewer and probe run in fresh processes; an existing DX12 context in
+    # this pytest process does not attest their Vulkan adapter.
+    probe = subprocess.run(
+        [sys.executable, "-c", "import json, forge3d; print(json.dumps(forge3d.device_probe('vulkan')))"],
+        env=env, capture_output=True, text=True,
+    )
+    if probe.returncode:
+        unavailable(f"AUTOCHIRON Vulkan adapter probe failed: {probe.stderr}")
+    adapter = json.loads(probe.stdout.strip().splitlines()[-1])
+    if (adapter.get("vendor") != 0x10DE or adapter.get("backend", "").lower() != "vulkan"
+            or adapter.get("device_type") not in ("DiscreteGpu", "IntegratedGpu")
+            or adapter.get("software_fallback") is not False):
+        unavailable(f"AUTOCHIRON reference requires physical NVIDIA/Vulkan: {adapter}")
+    return env
+
+
+def test_autochiron_physical_baked_shot_golden(tmp_path):
+    """An actual baked camera drives a repeatable physical viewer frame."""
+    from forge3d.cinema import ShotPlan
+    root = Path(__file__).parents[1]
+    env = _autochiron_reference_environment()
+    # Load real rasterio before the example inserts the source-tree test stub.
+    env.pop("PYTHONPATH", None)
+    subprocess.run([sys.executable, str(root / "examples/autochiron_render_golden.py"),
+                    "--output", str(tmp_path)], env=env, check=True, capture_output=True, text=True)
+    report = json.loads((tmp_path / "metadata.json").read_text())
+    expected = (GOLDEN_PATH.parent / "autochiron_viewer_v1.sha256").read_text().split()[0]
+    hashes = [hashlib.sha256((tmp_path / name).read_bytes()).hexdigest()
+              for name in ("frame_a.png", "frame_b.png")]
+    assert hashes == [expected, expected]
+    assert report["png_sha256"] == expected
+    for stats in (report["first_stats"], report["second_stats"]):
+        assert stats["adapter_device_type"] in ("DiscreteGpu", "IntegratedGpu")
+        assert stats["adapter_vendor"] == 0x10DE
+        assert stats["adapter_backend"].lower() == "vulkan"
+        assert stats["rendered_frame_revision"] >= report["camera_command_revision"]
+    saved = ShotPlan.from_json((tmp_path / "shotplan.json").read_text())
+    assert hashlib.sha256(saved.keyframes_json.encode()).hexdigest() == report["keyframes_sha256"]
+    actual = saved.bake().evaluate(report["frame_time"])
+    assert report["consumer_pose"] == {"phi": actual.phi_deg, "theta": actual.theta_deg,
+                                       "radius": actual.radius, "fov": actual.fov_deg,
+                                       "target": list(actual.target)}
+    assert not json.loads(saved.to_json())["certificate_links"]
+
+
 def _local_backend() -> str:
     """Single backend to pin for the local leg of the determinism proof."""
     explicit = os.environ.get("FORGE3D_DETERMINISM_TEST_BACKEND")

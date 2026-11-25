@@ -252,6 +252,7 @@ mod py {
             .transpose()?
             .flatten();
         info.transform = optional_tuple6(dict.get_item("transform")?)?;
+        info.registration = crate::gis::types::PixelRegistration::from_py_dict(dict)?;
         info.bounds = optional_tuple4(dict.get_item("bounds")?)?;
         info.resolution = optional_tuple2(dict.get_item("resolution")?)?;
         info.warnings = warnings_from_py(dict.get_item("warnings")?)?;

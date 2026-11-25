@@ -559,12 +559,15 @@ impl CogHeightReader {
 
         let scale_x = f64::from(ifd.width) / f64::from(full.width);
         let scale_y = f64::from(ifd.height) / f64::from(full.height);
-        let x0 = (full_x0 * scale_x).floor() as u32;
-        let y0 = (full_y0 * scale_y).floor() as u32;
-        let x1 = ((full_x1 * scale_x).ceil() as u32)
-            .clamp(x0 + 1, ifd.width);
-        let y1 = ((full_y1 * scale_y).ceil() as u32)
-            .clamp(y0 + 1, ifd.height);
+        // Scale the corner coordinates before moving to the selected level's
+        // sample lattice. Include the neighbours required at the window edges.
+        let sample_index = |corner: f64, scale: f64, size: u32| {
+            (corner * scale - 0.5).clamp(0.0, f64::from(size - 1))
+        };
+        let x0 = sample_index(full_x0, scale_x, ifd.width).floor() as u32;
+        let y0 = sample_index(full_y0, scale_y, ifd.height).floor() as u32;
+        let x1 = sample_index(full_x1, scale_x, ifd.width).ceil() as u32 + 1;
+        let y1 = sample_index(full_y1, scale_y, ifd.height).ceil() as u32 + 1;
         let window_width = x1 - x0;
         let window_height = y1 - y0;
         let mut window = vec![0.0f32; (window_width * window_height) as usize];
@@ -640,10 +643,8 @@ impl CogHeightReader {
                 {
                     continue;
                 }
-                let image_x = (full_pixel_x * scale_x)
-                    .clamp(0.0, f64::from(ifd.width.saturating_sub(1)));
-                let image_y = (full_pixel_y * scale_y)
-                    .clamp(0.0, f64::from(ifd.height.saturating_sub(1)));
+                let image_x = sample_index(full_pixel_x, scale_x, ifd.width);
+                let image_y = sample_index(full_pixel_y, scale_y, ifd.height);
                 let local_x = (image_x - f64::from(x0))
                     .clamp(0.0, f64::from(window_width.saturating_sub(1)));
                 let local_y = (image_y - f64::from(y0))

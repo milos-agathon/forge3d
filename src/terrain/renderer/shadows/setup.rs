@@ -335,6 +335,9 @@ impl TerrainScene {
                 height_curve_view,
                 heightmap_width,
                 heightmap_height,
+                is_dem_mesh_camera_mode(&params.camera_mode).then(|| {
+                    terrain_grid_size(&params.camera_mode, (heightmap_width, heightmap_height))
+                }),
                 terrain_spacing,
                 height_exag,
                 height_min,

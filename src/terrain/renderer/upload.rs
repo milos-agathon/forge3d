@@ -144,7 +144,7 @@ impl TerrainScene {
                     } else {
                         0.0
                     },
-                    0.0,
+                    if params.camera_mode.ends_with(super::interactive::REGISTERED_RASTER) { 1.0 } else { 0.0 },
                     0.0,
                 ],
             },
@@ -390,6 +390,11 @@ impl TerrainScene {
         let grid_size = clipmap_camera_config(&params.camera_mode)
             .map(|config| config.ring_resolution as f32)
             .unwrap_or(512.0);
+        let grid_size = if is_dem_mesh_camera_mode(&params.camera_mode) {
+            0.0 // The program reads both grid dimensions from the height texture.
+        } else {
+            grid_size
+        };
         uniforms.extend_from_slice(&[camera_mode, grid_size, params.clip.0, params.clip.1]);
 
         uniforms
@@ -398,7 +403,7 @@ impl TerrainScene {
     pub(crate) fn build_camera_matrices(
         params: &render_params::TerrainRenderParams,
     ) -> (glam::Vec3, glam::Mat4, glam::Mat4) {
-        if params.camera_mode == super::interactive::SCREEN_GEOMETRY_MODE {
+        if super::interactive::without_registration(&params.camera_mode) == super::interactive::SCREEN_GEOMETRY_MODE {
             return super::interactive::camera_matrices(params);
         }
         let phi_rad = params.cam_phi_deg.to_radians();

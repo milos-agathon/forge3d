@@ -143,6 +143,39 @@ pub(crate) fn compression_name<R: std::io::Read + std::io::Seek>(
         }))
 }
 
+pub(crate) fn read_registration<R: std::io::Read + std::io::Seek>(
+    decoder: &mut Decoder<R>,
+) -> GisResult<crate::gis::types::PixelRegistration> {
+    use crate::gis::types::PixelRegistration;
+    let Some(value) = decoder.find_tag(Tag::GeoKeyDirectoryTag)? else {
+        return Ok(PixelRegistration::Area);
+    };
+    let directory = value.into_u16_vec()
+        .map_err(|err| GisError::InvalidCrs(err.to_string()))?;
+    registration_from_geokeys(&directory)
+}
+
+pub(crate) fn registration_from_geokeys(
+    directory: &[u16],
+) -> GisResult<crate::gis::types::PixelRegistration> {
+    use crate::gis::types::PixelRegistration;
+    let invalid = || GisError::InvalidCrs("invalid GeoKeyDirectoryTag".to_string());
+    let count = usize::from(*directory.get(3).ok_or_else(invalid)?);
+    let entries = directory.get(4..4 + 4 * count).ok_or_else(invalid)?;
+    let mut registration = None;
+    for entry in entries.chunks_exact(4).filter(|entry| entry[0] == 1025) {
+        let value = match entry {
+            [1025, 0, 1, 1] => PixelRegistration::Area,
+            [1025, 0, 1, 2] => PixelRegistration::Point,
+            _ => return Err(GisError::InvalidRaster(format!("invalid GTRasterTypeGeoKey: {entry:?}"))),
+        };
+        if registration.replace(value).is_some() {
+            return Err(GisError::InvalidRaster("duplicate GTRasterTypeGeoKey".to_string()));
+        }
+    }
+    Ok(registration.unwrap_or_default())
+}
+
 pub(crate) fn read_transform<R: std::io::Read + std::io::Seek>(
     decoder: &mut Decoder<R>,
 ) -> GisResult<Option<AffineTransform>> {

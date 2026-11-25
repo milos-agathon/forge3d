@@ -98,7 +98,20 @@ pub struct ViewerTerrainData {
     pub water_color: [f32; 3],
 }
 
+fn uses_registered_grid(info: &crate::gis::types::RasterInfo) -> bool {
+    // A transform-less DEM uses the same sample lattice as its georeferenced
+    // twin on a local unit grid. Affine-only Cartesian Area scenes were
+    // authored with the legacy mesh footprint.
+    info.transform.is_none()
+        || info.is_georeferenced
+        || info.registration == crate::gis::types::PixelRegistration::Point
+}
+
 impl ViewerTerrainData {
+    pub(super) fn uses_registered_grid(&self) -> bool {
+        uses_registered_grid(&self.raster_info)
+    }
+
     pub fn terrain_width(&self) -> f32 {
         self.dimensions.0 as f32
     }

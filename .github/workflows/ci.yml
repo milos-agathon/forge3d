@@ -353,6 +353,8 @@ jobs:
               - 'tests/test_chronos_flythrough.py'
               - 'tests/test_adjudication_gate.py'
               - 'tests/test_hybrid_terrain_pt.py'
+              - 'tests/test_continua.py'
+              - 'python/forge3d/_terrain_checkpoint.py'
               - 'tests/test_prometheus_dem_reference.py'
               - 'tests/test_inverse_pt.py'
               - 'tests/test_splat_fusion_occlusion.py'
@@ -715,7 +717,7 @@ jobs:
         # These direct-GPU checks are run on the physical NVIDIA Vulkan lane
         # below.  The generic matrix must not silently substitute WARP, Mesa,
         # or Metal for their hardware assertions.
-        run: cargo test --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe,splat-fusion -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile --skip gpu_timing_double_buffered_measures_copy --skip raster_capture_executes_production_shader --skip adjudication_shadow_map_dump --skip pt_reference_renders_multibounce_frames --skip curvature_descent_production_gpu_is_conservative --skip production_shadow_ray_uses_later_bilinear_root_after_tmin --skip inverse_checkpointed_replay_matches_untiled --skip inverse_edge_term_exercises_boundary_classes_on_gpu --skip inverse_edge_term_replays_nonuniform_environment_map_on_gpu --skip inverse_gaussian_smooth_and_crease_gpu_probe --skip inverse_gradient_matches_fd_nonflat_all_terms --skip inverse_gradient_matches_finite_difference --skip inverse_reservoir_boundary_selection_probe --skip inverse_score_correction_is_exercised --skip pbr_pipeline_initializes_real_ibl_and_shader --skip draw_batch_params_renders_pixels --skip live_shared_msm_sampler_treats_front_of_mean_as_lit --skip live_shared_msm_sampler_consumes_third_and_fourth_moments --skip generation_and_blur_cover_a_1024_moment_atlas --skip execute_rejects_unbound_and_mismatched_allocations --skip legacy_view_prepare_and_execute_sequence_remains_compatible --skip separable_blur_filters_both_axes --skip execute_rejects_invalid_or_mismatched_atlas_dimensions --skip execute_rejects_invalid_texture_contracts_before_view_creation --skip execute_rejects_invalid_evsm_exponents --skip bind_groups_follow_atlas_resource_identity --skip shared_evsm_visibility_helpers_execute_lit_front_of_mean --skip shared_evsm_minimum_variance_scales_each_warp_derivative --skip shared_evsm_moment_leak_control_preserves_a_soft_penumbra --skip shared_evsm_uniform_distribution_does_not_widen --skip shared_evsm_uniform_rgba16float_moments_remain_lit_at_the_receiver --skip shared_evsm_chebyshev_is_conservative_for_uniform_half_moments --skip shared_evsm_uniform_half_uncertainty_has_a_bounded_transition --skip shared_evsm_uniform_rgba16float_dense_sweep_has_no_false_shadows --skip shared_evsm_helpers_fail_open_for_non_finite_inputs --skip shared_pcss_penumbra_grows_with_light_size_and_receiver_separation --skip shared_msm_visibility_is_bounded_for_degenerate_and_non_finite_inputs
+        run: cargo test --workspace --features default,async_readback,copc_laz,cog_streaming,gis-remote,geos-topology,weighted-oit,wsI_bigbuf,wsI_double_buf,enable-pbr,enable-tbn,enable-normal-mapping,enable-hdr-offscreen,enable-renderer-config,enable-staging-rings,enable-inverse-pt,shader-contract-asserts,enable-globe,splat-fusion -- --test-threads=1 --skip gpu_extrusion --skip brdf_tile --skip gpu_timing_double_buffered_measures_copy --skip raster_capture_executes_production_shader --skip adjudication_shadow_map_dump --skip pt_reference_renders_multibounce_frames --skip curvature_descent_production_gpu_is_conservative --skip production_shadow_ray_uses_later_bilinear_root_after_tmin --skip inverse_checkpointed_replay_matches_untiled --skip inverse_edge_term_exercises_boundary_classes_on_gpu --skip inverse_edge_term_replays_nonuniform_environment_map_on_gpu --skip inverse_gaussian_smooth_and_crease_gpu_probe --skip inverse_gradient_matches_fd_nonflat_all_terms --skip inverse_gradient_matches_finite_difference --skip inverse_reservoir_boundary_selection_probe --skip inverse_score_correction_is_exercised --skip pbr_pipeline_initializes_real_ibl_and_shader --skip draw_batch_params_renders_pixels --skip live_shared_msm_sampler_treats_front_of_mean_as_lit --skip live_shared_msm_sampler_consumes_third_and_fourth_moments --skip generation_and_blur_cover_a_1024_moment_atlas --skip execute_rejects_unbound_and_mismatched_allocations --skip legacy_view_prepare_and_execute_sequence_remains_compatible --skip separable_blur_filters_both_axes --skip execute_rejects_invalid_or_mismatched_atlas_dimensions --skip execute_rejects_invalid_texture_contracts_before_view_creation --skip execute_rejects_invalid_evsm_exponents --skip bind_groups_follow_atlas_resource_identity --skip shared_evsm_visibility_helpers_execute_lit_front_of_mean --skip shared_evsm_minimum_variance_scales_each_warp_derivative --skip shared_evsm_moment_leak_control_preserves_a_soft_penumbra --skip shared_evsm_uniform_distribution_does_not_widen --skip shared_evsm_uniform_rgba16float_moments_remain_lit_at_the_receiver --skip shared_evsm_chebyshev_is_conservative_for_uniform_half_moments --skip shared_evsm_uniform_half_uncertainty_has_a_bounded_transition --skip shared_evsm_uniform_rgba16float_dense_sweep_has_no_false_shadows --skip shared_evsm_helpers_fail_open_for_non_finite_inputs --skip shared_pcss_penumbra_grows_with_light_size_and_receiver_separation --skip shared_msm_visibility_is_bounded_for_degenerate_and_non_finite_inputs --skip viewer::terrain::render::offscreen::registration_tests::viewer_registered_checkerboard_coincidence
         env:
           RUST_TEST_THREADS: 1
 
@@ -900,9 +902,36 @@ jobs:
       wheel_artifact: wheels-macos
       test_mode: compatibility
 
+  build-vtpack-fixture:
+    name: Build VT-store fixture tool (${{ matrix.runner }})
+    needs: preflight
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.scope == 'full')
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: dtolnay/rust-toolchain@1.97.1
+      - name: Build the VT-store fixture tool from the exact checkout
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          cargo build --locked --release --bin forge3d-vtpack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vtpack-fixture-${{ runner.os }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: target/release/forge3d-vtpack${{ runner.os == 'Windows' && '.exe' || '' }}
+          if-no-files-found: error
+
   test-python-full-linux:
     name: Python Full Matrix (Linux)
-    needs: [build-wheel-linux, prepare-lfs-fixtures]
+    needs: [build-wheel-linux, prepare-lfs-fixtures, build-vtpack-fixture]
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.scope == 'full')
     uses: ./.github/workflows/test-python-wheel.yml
     with:
@@ -912,10 +941,11 @@ jobs:
       wheel_artifact: wheels-linux
       test_mode: full
       restore_lfs: true
+      prebuilt_vtpack: true
 
   test-python-full-windows:
     name: Python Full Matrix (Windows)
-    needs: [build-wheel-windows, prepare-lfs-fixtures]
+    needs: [build-wheel-windows, prepare-lfs-fixtures, build-vtpack-fixture]
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.scope == 'full')
     uses: ./.github/workflows/test-python-wheel.yml
     with:
@@ -926,10 +956,11 @@ jobs:
       wheel_artifact: wheels-windows
       test_mode: full
       restore_lfs: true
+      prebuilt_vtpack: true
 
   test-python-full-macos:
     name: Python Full Matrix (macOS)
-    needs: [build-wheel-macos, prepare-lfs-fixtures]
+    needs: [build-wheel-macos, prepare-lfs-fixtures, build-vtpack-fixture]
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.scope == 'full')
     uses: ./.github/workflows/test-python-wheel.yml
     with:
@@ -939,6 +970,7 @@ jobs:
       wheel_artifact: wheels-macos
       test_mode: full
       restore_lfs: true
+      prebuilt_vtpack: true
 
   # ============================================================================
   # Accounted slow Python tests (one hosted representative)
@@ -1529,9 +1561,41 @@ jobs:
           FORGE3D_NO_BOOTSTRAP: '1'
         run: |
           New-Item -ItemType Directory -Force -Path tests/artifacts/prometheus | Out-Null
-          python -m pytest tests/test_hybrid_terrain_pt.py tests/test_prometheus_dem_reference.py -v --tb=short --junitxml="tests/artifacts/prometheus/junit.xml"
+          python -m pytest tests/test_hybrid_terrain_pt.py tests/test_prometheus_dem_reference.py tests/test_continua.py -v --tb=short --junitxml="tests/artifacts/prometheus/junit.xml"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/assert_junit_zero_skips.py "tests/artifacts/prometheus/junit.xml"
+          exit $LASTEXITCODE
+
+      - name: Run MapScene former-quarantine physical gate
+        shell: pwsh
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+          WGPU_BACKEND: vulkan
+          WGPU_BACKENDS: vulkan
+        run: |
+          $dir = Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR "mapscene-former-quarantine"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $junit = Join-Path $dir "junit.xml"
+          $pytestTemp = Join-Path $dir "pytest"
+          python -m pytest tests/test_mapscene_buildings.py tests/test_mapscene_furniture.py tests/test_mapscene_render_png.py tests/test_mapscene_screen_space_settings.py -v -s --tb=short --basetemp="$pytestTemp" --junitxml="$junit" *>&1 | Tee-Object (Join-Path $dir "pytest.log")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$junit"
+          exit $LASTEXITCODE
+
+      - name: Run AUTOCHIRON physical terrain cinematography gate
+        shell: pwsh
+        env:
+          FORGE3D_NO_BOOTSTRAP: '1'
+          WGPU_BACKEND: vulkan
+          WGPU_BACKENDS: vulkan
+        run: |
+          $dir = Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR "autochiron"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $junit = Join-Path $dir "junit.xml"
+          $pytestTemp = Join-Path $dir "pytest"
+          python -m pytest tests/test_cinema_solver.py -v -s --tb=short --basetemp="$pytestTemp" --junitxml="$junit" *>&1 | Tee-Object (Join-Path $dir "pytest.log")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/assert_junit_zero_skips.py "$junit"
           exit $LASTEXITCODE
 
       - name: Run physical NVIDIA Vulkan Python GPU checks
@@ -1626,7 +1690,8 @@ jobs:
             'shadows::tests::shared_evsm_uniform_rgba16float_dense_sweep_has_no_false_shadows',
             'shadows::tests::shared_evsm_helpers_fail_open_for_non_finite_inputs',
             'shadows::tests::shared_pcss_penumbra_grows_with_light_size_and_receiver_separation',
-            'shadows::tests::shared_msm_visibility_is_bounded_for_degenerate_and_non_finite_inputs'
+            'shadows::tests::shared_msm_visibility_is_bounded_for_degenerate_and_non_finite_inputs',
+            'viewer::terrain::render::offscreen::registration_tests::viewer_registered_checkerboard_coincidence'
           )
           $log = Join-Path $env:FORGE3D_VISUAL_ARTIFACT_DIR 'physical-rust-gpu-checks.log'
           foreach ($check in $checks) {
@@ -3235,7 +3300,7 @@ jobs:
   # selected high-cost hosted and physical claims without delaying every merge.
   full-acceptance-summary:
     name: Full Acceptance Summary
-    needs: [pr-core-success, test-orbis-wasm, terrain-golden-paths, test-rust, test-python-full-linux, test-python-full-windows, test-python-full-macos, test-python-slow, test-terminus-fuzz, test-python-linux-arm, test-golden-images-nvidia, test-substratia-gpu-nvidia, build-docs, determinism-render, determinism-f3dz, determinism-anamnesis, test-m06-full-geospatial-viewer, test-f3dz-gpu, test-anamnesis-portability-seed, test-anamnesis-portability, test-anamnesis-production, test-anamnesis-hermeticity, test-tessella-gpu, test-helios-rust-conservative, test-helios-gpu, test-nephele-gpu]
+    needs: [pr-core-success, test-orbis-wasm, terrain-golden-paths, test-rust, build-vtpack-fixture, test-python-full-linux, test-python-full-windows, test-python-full-macos, test-python-slow, test-terminus-fuzz, test-python-linux-arm, test-golden-images-nvidia, test-substratia-gpu-nvidia, build-docs, determinism-render, determinism-f3dz, determinism-anamnesis, test-m06-full-geospatial-viewer, test-f3dz-gpu, test-anamnesis-portability-seed, test-anamnesis-portability, test-anamnesis-production, test-anamnesis-hermeticity, test-tessella-gpu, test-helios-rust-conservative, test-helios-gpu, test-nephele-gpu]
     runs-on: ubuntu-latest
     if: >-
       always() &&
@@ -3285,6 +3350,7 @@ jobs:
 
           check_selected "$full_selected" '${{ needs.test-rust.result }}' rust-full
           check_selected "$full_selected" '${{ needs.test-orbis-wasm.result }}' orbis-wasm
+          check_selected "$full_selected" '${{ needs.build-vtpack-fixture.result }}' vtpack-fixture
           check_selected "$full_selected" '${{ needs.test-python-full-linux.result }}' python-full-linux
           check_selected "$full_selected" '${{ needs.test-python-full-windows.result }}' python-full-windows
           check_selected "$full_selected" '${{ needs.test-python-full-macos.result }}' python-full-macos

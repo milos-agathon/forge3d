@@ -1,11 +1,12 @@
 use super::*;
+use std::sync::Arc;
 
 use crate::core::resource_tracker::{tracked_create_texture, TrackedTexture};
 
 // ---------- Colormaps ----------
 
 pub struct ColormapLUT {
-    pub texture: TrackedTexture,
+    pub texture: Arc<TrackedTexture>,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
     pub format: wgpu::TextureFormat,
@@ -66,20 +67,36 @@ impl ColormapLUT {
             },
             size,
         );
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        Ok(Self::from_raster_texture(
+            device,
+            Arc::new(texture),
+            <sha2::Sha256 as sha2::Digest>::digest(data).into(),
+        ))
+    }
+
+    pub(crate) fn from_raster_texture(
+        device: &wgpu::Device,
+        texture: Arc<TrackedTexture>,
+        content_hash: [u8; 32],
+    ) -> Self {
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(format),
+            ..Default::default()
+        });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("terrain.thematic_nearest"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             ..Default::default()
         });
-        Ok(Self {
+        Self {
             texture,
             view,
             sampler,
             format,
-            content_hash: <sha2::Sha256 as sha2::Digest>::digest(data).into(),
-        })
+            content_hash,
+        }
     }
 
     pub fn new_single_palette(
@@ -170,7 +187,7 @@ impl ColormapLUT {
         });
 
         Ok(Self {
-            texture,
+            texture: Arc::new(texture),
             view,
             sampler,
             format,
@@ -265,7 +282,7 @@ impl ColormapLUT {
         });
         Ok((
             Self {
-                texture: tex,
+                texture: Arc::new(tex),
                 view,
                 sampler,
                 format,
@@ -392,7 +409,7 @@ impl ColormapLUT {
 
         Ok((
             Self {
-                texture: tex,
+                texture: Arc::new(tex),
                 view,
                 sampler,
                 format,

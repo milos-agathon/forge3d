@@ -131,7 +131,8 @@ pub fn read_raster_py(
         creation_options = None,
         like_path = None,
         like_info = None,
-        height_system = None
+        height_system = None,
+        registration = None
     )
 )]
 #[allow(clippy::too_many_arguments)]
@@ -147,6 +148,7 @@ pub fn write_raster_py(
     like_path: Option<String>,
     like_info: Option<&Bound<'_, PyAny>>,
     height_system: Option<String>,
+    registration: Option<&str>,
 ) -> PyResult<RasterInfo> {
     if like_path.is_some() && like_info.is_some() {
         return Err(GisError::InvalidArgument(
@@ -191,6 +193,10 @@ pub fn write_raster_py(
             .unwrap_or_else(|| crate::gis::types::HEIGHT_SYSTEM_UNSPECIFIED.to_string()),
     };
 
+    let registration = match registration {
+        Some(value) => crate::gis::types::PixelRegistration::parse(value)?,
+        None => like_info.as_ref().map(|info| info.registration).unwrap_or_default(),
+    };
     let options = WriteRasterOptions {
         crs,
         transform,
@@ -201,6 +207,7 @@ pub fn write_raster_py(
         creation_options_explicit,
         like_info,
         height_system,
+        registration,
     };
     write_raster(path, raster_array, options).map_err(Into::into)
 }
@@ -766,6 +773,7 @@ pub fn warped_vrt_info_py(
     info.resolution = Some(transform.resolution());
     info.nodata_per_band = source_info.nodata_per_band.clone();
     info.height_system = source_info.height_system.clone();
+    info.registration = source_info.registration;
     info.is_georeferenced = true;
 
     let dict = PyDict::new_bound(py);
@@ -1666,6 +1674,7 @@ fn raster_info_to_py_dict(py: Python<'_>, info: &RasterInfo) -> PyResult<PyObjec
     dict.set_item("tiling", info.tiling.clone())?;
     dict.set_item("compression", info.compression.clone())?;
     dict.set_item("is_georeferenced", info.is_georeferenced)?;
+    dict.set_item("registration", info.registration.name())?;
     dict.set_item("height_system", info.height_system.clone())?;
     dict.set_item("warnings", warnings_to_py(py, &info.warnings)?)?;
     Ok(dict.into_py(py))

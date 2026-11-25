@@ -4,6 +4,7 @@ from typing import Any, Callable, Optional, Sequence, TypeAlias
 
 from .bundle import LoadedBundle
 from .diagnostics import Diagnostic
+from .gis import RasterInfo
 from .geo import SolarTime
 from .media import Medium
 from .vector_line import VectorLineLayer
@@ -226,6 +227,9 @@ class ViewerHandle:
         width: Optional[int] = ...,
         height: Optional[int] = ...,
     ) -> None: ...
+    def snapshot_geotiff(
+        self, path: str | Path, width: int, height: int, *, overwrite: bool = ...
+    ) -> RasterInfo: ...
     def render_animation(
         self,
         animation: Any,

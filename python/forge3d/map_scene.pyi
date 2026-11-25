@@ -6,6 +6,7 @@ from typing import Any, Mapping, Sequence
 
 from .diagnostics import Diagnostic, ValidationReport
 from .graticule import GraticuleSpec
+from .raster_recipe import RasterRecipe
 from .raster_style import RasterHeightSurfaceStyle, CategoricalRasterStyle, BivariateRasterStyle
 from .render_pass import RenderPassInput as RenderPassInput, RenderPassSpec as RenderPassSpec
 
@@ -163,6 +164,7 @@ class MapScene:
         certificate: bool | str | Path | None = ...,
         # ANAMNESIS uses path-free keys in per-scene subfolders of this cache.
         cache: str | Path | None = ...,
+        raster_recipe: RasterRecipe | None = ...,
     ) -> ValidationReport: ...
     def save_bundle(self, path: str | Path) -> ValidationReport: ...
 

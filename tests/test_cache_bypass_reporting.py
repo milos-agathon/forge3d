@@ -4,7 +4,9 @@ from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+import warnings
 
+import numpy as np
 import pytest
 import forge3d as f3d
 
@@ -26,7 +28,7 @@ def test_mapscene_fresh_paths_report_reason(tmp_path, monkeypatch, options, outp
     marker = object()
     monkeypatch.setattr(scene, "_render_impl", lambda *a, **kw: marker)
     monkeypatch.setattr(certificate, "_render_capture", lambda *a, **kw: nullcontext())
-    monkeypatch.setattr(certificate, "emit_render_certificate", lambda *a, **kw: None)
+    monkeypatch.setattr(certificate, "_emit_current_render_certificate", lambda *a, **kw: None)
     assert scene.render(cache=tmp_path / "cache", **options) is marker
     assert scene.last_render_metadata["bypass_reason"] == reason
     assert scene.last_render_metadata["cache_hit"] is False
@@ -67,9 +69,12 @@ _CACHE_OWNERS = {
 }
 _CACHE_DELEGATES = {
     ("__init__.py", "render_triangle_png", "self.render_triangle_rgba"),
+    ("_measured_section_plate.py", "render_section_plate", "scene.render"),
     ("chronos.py", "render_flythrough", "_render_frames"),
     ("map_scene.py", "render", "render_sequence"),
     ("map_scene.py", "render_passes", "self.render"),
+    ("measured_sections.py", "render_section", "render_section_plate"),
+    ("observation_map.py", "render", "render_flythrough"),
     ("path_tracing.py", "render_terrain_poster", "hybrid_render_terrain_reference"),
     ("publication.py", "render_series", "self._render_layout_series"),
     ("publication.py", "render_flyover", "_render_publication_flyover"),
@@ -116,6 +121,35 @@ def test_every_python_render_cache_request_has_an_owner_or_bypass():
 def test_bare_native_forward_is_not_cache_handling():
     node = ast.parse("def render(cache=None): return native(cache=cache)").body[0]
     assert not _handles_cache("new_module.py", node)
+
+
+@pytest.mark.parametrize("cache", [None, "cache"])
+def test_registered_terrain_reports_cache_bypass_once(monkeypatch, cache):
+    from forge3d import path_tracing
+    from forge3d.preparation import PreparationGrid
+
+    grid = PreparationGrid(
+        "EPSG:32631", 3, 3, (500000, 8, 0, 5200000, 0, -8), registration="point",
+    )
+
+    def trace(*args, **options):
+        assert options.get("cache") is None
+        warnings.warn("unrelated trace diagnostic", DeprecationWarning, stacklevel=2)
+        return {}
+
+    monkeypatch.setattr(path_tracing, "hybrid_render_terrain_reference", trace)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        path_tracing.render_registered_terrain(
+            np.zeros((3, 3)), grid, 3, 3, pixel_size=8, cache=cache,
+        )
+    bypasses = [warning for warning in caught if "cache bypassed" in str(warning.message)]
+    assert len(bypasses) == (0 if cache is None else 1), [str(item.message) for item in caught]
+    if bypasses:
+        assert bypasses[0].category is RuntimeWarning
+        assert str(bypasses[0].message) == (
+            "path_tracing.render_registered_terrain: cache bypassed (render_cache_unsupported); rendering fresh"
+        )
 
 
 @pytest.mark.parametrize("entrypoint", ["render_oit", "render_snapshot", "render_pick_map", "render_oit_and_pick"])

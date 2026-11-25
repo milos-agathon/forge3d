@@ -27,6 +27,7 @@ pub(crate) struct FrameCamera {
     pub fov_deg: f32,
     pub near: f32,
     pub far: f32,
+    pub orthographic_half_extents: Option<[f32; 2]>,
 }
 
 impl FrameCamera {
@@ -39,9 +40,15 @@ impl FrameCamera {
     }
 
     pub fn projection(self, width: u32, height: u32) -> Mat4 {
+        let aspect = width as f32 / height.max(1) as f32;
+        if let Some([half_width, half_height]) = self.orthographic_half_extents {
+            return Mat4::orthographic_rh(
+                -half_width, half_width, -half_height, half_height, self.near, self.far,
+            );
+        }
         Mat4::perspective_rh(
             self.fov_deg.to_radians(),
-            width as f32 / height.max(1) as f32,
+            aspect,
             self.near,
             self.far,
         )

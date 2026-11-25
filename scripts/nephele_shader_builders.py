@@ -80,6 +80,23 @@ mod point {
   use crate::core::error::RenderError;
   pub struct PointRenderer; impl PointRenderer { POINT_FUNCTION }
 }
+mod viewer_pbr {
+  const TERRAIN_PBR_SHADER: &str = VIEWER_PBR;
+  const SMOOTH_NORMALS_LINE: &str = VIEWER_SMOOTH_LINE;
+  const RIDGE_GAIN_LINE: &str = VIEWER_RIDGE_LINE;
+  VIEWER_FUNCTIONS
+  pub fn sources() -> Vec<(String, String)> {
+    let mut sources = vec![("viewer-pbr-live".to_owned(), terrain_pbr_shader_source().into_owned())];
+    // Ridge gain changes a numeric literal, not the shader call graph. Cover
+    // the default and documented disabled paths for both normal switches.
+    for smooth in [false, true] {
+      for (label, ridge) in [("default", None), ("disabled", Some(0.0))] {
+        sources.push((format!("viewer-pbr-{smooth}-{label}"), apply_switches(smooth, ridge).into_owned()));
+      }
+    }
+    sources
+  }
+}
 fn main() {
   let out = std::path::PathBuf::from(std::env::args().nth(1).unwrap());
   let records = [
@@ -101,6 +118,7 @@ fn main() {
     ("overlays-legacy", OVERLAY.to_owned()),
   ];
   for (name, source) in records { std::fs::write(out.join(format!("{name}.wgsl")), source).unwrap(); }
+  for (name, source) in viewer_pbr::sources() { std::fs::write(out.join(format!("{name}.wgsl")), source).unwrap(); }
 }
 '''
     substitutions = dict(SHADER_SOURCES=json.dumps((root/'src/shader_sources.rs').as_posix()),
@@ -110,7 +128,12 @@ fn main() {
                          GTAO=constant('src/core/screen_space_effects.rs','GTAO_SHADER_SRC'),
                          HZB=constant('src/core/screen_space_effects/hzb.rs','HZB_BUILD_SOURCE'),
                          TAA=constant('src/core/taa.rs','TAA_SHADER_SRC'), FOG=included('src/shaders/volumetric.wgsl'),
-                         OVERLAY=included('src/shaders/overlays.wgsl'))
+                         OVERLAY=included('src/shaders/overlays.wgsl'),
+                         VIEWER_PBR=constant('src/viewer/terrain/shader_pbr.rs','TERRAIN_PBR_SHADER'),
+                         VIEWER_SMOOTH_LINE=constant('src/viewer/terrain/shader_pbr.rs','SMOOTH_NORMALS_LINE'),
+                         VIEWER_RIDGE_LINE=constant('src/viewer/terrain/shader_pbr.rs','RIDGE_GAIN_LINE'),
+                         VIEWER_FUNCTIONS='\n'.join(function('src/viewer/terrain/shader_pbr.rs', name)
+                                                   for name in ('env_flag', 'env_ridge_gain', 'terrain_pbr_shader_source', 'apply_switches')))
     harness = re.sub(r'\b('+'|'.join(substitutions)+r')\b', lambda m: substitutions[m[0]], harness)
     # Match the repository's already selected anyhow dependency exactly.
     lock = read('Cargo.lock')
@@ -133,16 +156,19 @@ fn main() {
         'hzb_sources':['hzb-linear','hzb-legacy'], 'filter_source':['ao-filter'],
         'fog_sources':['froxels','fog-legacy'],
         'overlay_sources':['overlays','overlays-legacy'],
+        'terrain_pbr_shader_source': ['viewer-pbr-live', 'viewer-pbr-false-default',
+                                      'viewer-pbr-true-default', 'viewer-pbr-false-disabled',
+                                      'viewer-pbr-true-disabled'],
     }.items()}
 
 
 def builder_variants(expr, path, text, before, assignment, sources):
-    """Resolve pure factory calls and their complete finite runtime variants."""
+    """Resolve pure factories and their executed structural source variants."""
     bare=expr.strip().lstrip('&').strip()
     if re.fullmatch(r'[A-Za-z_]\w*',bare):
         value=assignment(text,bare,before)
         if value is not None: bare=value.strip()
-    factory=re.fullmatch(r'(?:[A-Za-z_]\w*::)*(terrain_source|scatter_source|atmosphere_source|height_ao_source|shared_contacts_source|concordia_gtao_source|shared_geometry_source|shared_depth_source)\s*\((.*)\)\s*\??',bare,re.S)
+    factory=re.fullmatch(r'(?:[A-Za-z_]\w*::)*(terrain_source|scatter_source|atmosphere_source|height_ao_source|shared_contacts_source|concordia_gtao_source|shared_geometry_source|shared_depth_source|terrain_pbr_shader_source)\s*\((.*)\)\s*\??',bare,re.S)
     if factory:
         owners = {
             'terrain_source':'src/terrain/renderer/pipeline_cache.rs',
@@ -153,6 +179,7 @@ def builder_variants(expr, path, text, before, assignment, sources):
             'concordia_gtao_source':'src/core/screen_space_effects/ssao/constructor.rs',
             'shared_geometry_source':'src/core/taa.rs',
             'shared_depth_source':'src/vector/point/renderer/shared.rs',
+            'terrain_pbr_shader_source':'src/viewer/terrain/scene/pbr_compute.rs',
         }
         if not path.as_posix().endswith('/'+owners[factory[1]]): return []
         # Only terrain_source accepts an input, and both boolean values run.

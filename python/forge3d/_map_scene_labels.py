@@ -503,7 +503,8 @@ def _label_plan_from_layer(
         raise ValueError("LabelLayer.metadata.coordinate_space must be 'screen' or 'world'")
     world_projection = coordinate_space == "world" and (
         ms._is_3d_camera_mode(ms._mapscene_effective_camera_mode(recipe))
-        or bool(ms._mapscene_native_effects(recipe)))
+        or bool(ms._mapscene_native_effects(recipe))
+        or ms._registered_screen_grid(recipe) is not None)
     needs_projection = world_projection and any(
         record.get("projected_anchor") is None and record.get("geometry_authority") is None
         for record in layer.labels or ())

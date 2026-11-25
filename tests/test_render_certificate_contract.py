@@ -14,6 +14,7 @@ from forge3d.legend import Legend
 from forge3d.lighting import RestirDI
 from forge3d.map_scene import MapScene
 from forge3d.map_plate import MapPlate
+from forge3d.measured_sections import render_section
 from forge3d.north_arrow import NorthArrow
 from forge3d.offline import render_offline
 from forge3d.scale_bar import ScaleBar
@@ -47,6 +48,7 @@ DOCUMENTED_EXCLUSIONS = {
     "MapPlate.export_jpeg": "writes a composed image, no render",
     # Interactive viewer subprocess: CENSOR certifies offscreen renders.
     "ViewerHandle.snapshot": "interactive viewer subprocess, outside offscreen scope",
+    "ViewerHandle.snapshot_geotiff": "interactive viewer subprocess, outside offscreen scope",
     "ViewerHandle.render_animation": "interactive viewer subprocess, outside offscreen scope",
     "ViewerWidget.snapshot": "interactive viewer/widget snapshot, outside offscreen scope",
     # Vector (non-pixel) exports.
@@ -82,6 +84,7 @@ RENDER_ENTRYPOINTS = {
     "Renderer.render_triangle_rgba": f3d.Renderer.render_triangle_rgba,
     "Renderer.render_triangle_png": f3d.Renderer.render_triangle_png,
     "MapScene.render": MapScene.render,
+    "measured_sections.render_section": render_section,
     "CompiledSubjectShot.render": f3d.CompiledSubjectShot.render,
     "render_offline": render_offline,
     "render_flythrough": f3d.render_flythrough,
@@ -91,6 +94,7 @@ RENDER_ENTRYPOINTS = {
     "path_tracing.render_aovs": path_tracing.render_aovs,
     "path_tracing.render_rgba": path_tracing.render_rgba,
     "path_tracing.hybrid_render_terrain_reference": path_tracing.hybrid_render_terrain_reference,
+    "path_tracing.render_registered_terrain": path_tracing.render_registered_terrain,
     "media.render_volumetric_reference": media.render_volumetric_reference,
     "path_tracing.render_terrain_poster": path_tracing.render_terrain_poster,
     "HybridRenderer.render_sdf_scene": HybridRenderer.render_sdf_scene,
@@ -286,6 +290,7 @@ def test_documented_exclusions_explain_their_certificate_scope() -> None:
         "numpy_to_png": f3d.numpy_to_png,
         "png_to_numpy": f3d.png_to_numpy,
         "ViewerHandle.snapshot": ViewerHandle.snapshot,
+        "ViewerHandle.snapshot_geotiff": ViewerHandle.snapshot_geotiff,
         "ViewerWidget.snapshot": ViewerWidget.snapshot,
         "export_svg": export_svg,
         "export_pdf": export_pdf,

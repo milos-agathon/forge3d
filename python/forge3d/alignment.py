@@ -9,6 +9,10 @@ import numpy as np
 
 from ._map_scene_common import _layer_id, _metadata, _same_crs, _stable_hash
 from .crs import transform_coords
+from .raster_registration import (
+    PixelRegistration, RegistrationConversion, geotiff_registration,
+    pixel_registration, require_compatible_registration,
+)
 
 
 def _is_point(value: Any) -> bool:
@@ -128,7 +132,8 @@ def _grid_shape(grid: Mapping[str, Any]) -> tuple[int, int]:
     raise ValueError("target grid requires height/width or shape")
 
 
-def _grid_metadata(crs: Any, transform: Any, width: int, height: int, nodata: Any = None) -> dict[str, Any]:
+def _grid_metadata(crs: Any, transform: Any, width: int, height: int, nodata: Any = None,
+                   *, registration: PixelRegistration = "area") -> dict[str, Any]:
     return {
         "crs": str(crs) if crs is not None else None,
         "width": int(width),
@@ -136,6 +141,7 @@ def _grid_metadata(crs: Any, transform: Any, width: int, height: int, nodata: An
         "geotransform": _affine_to_metadata(transform),
         "resolution": [abs(float(transform.a)), abs(float(transform.e))],
         "nodata": nodata,
+        "registration": registration,
     }
 
 
@@ -160,6 +166,7 @@ def reproject_dem_to_target(
     with rasterio.open(src_path) as src:
         if src.crs is None:
             raise ValueError("source DEM is missing CRS metadata")
+        registration = geotiff_registration(src)
         transform, width, height = calculate_default_transform(
             src.crs,
             target_crs,
@@ -200,10 +207,11 @@ def reproject_dem_to_target(
             out_path.parent.mkdir(parents=True, exist_ok=True)
             with rasterio.open(out_path, "w", **profile) as dst:
                 dst.write(destination, 1)
+                dst.update_tags(AREA_OR_POINT=registration.title())
                 dst.scales = src.scales[:1]
                 dst.offsets = src.offsets[:1]
             written_path = str(out_path)
-        metadata = _grid_metadata(target_crs, transform, width, height, nodata)
+        metadata = _grid_metadata(target_crs, transform, width, height, nodata, registration=registration)
         metadata["scales"] = list(src.scales[:1])
         metadata["offsets"] = list(src.offsets[:1])
         metadata.update(
@@ -224,6 +232,7 @@ def resample_raster_to_grid(
     output_path: str | Path | None = None,
     resampling: str = "nearest",
     dst_nodata: float | int | None = None,
+    registration_conversion: RegistrationConversion | None = None,
 ) -> dict[str, Any]:
     """Resample a raster onto an explicit target grid."""
 
@@ -239,6 +248,11 @@ def resample_raster_to_grid(
     with rasterio.open(src_path) as src:
         if src.crs is None:
             raise ValueError("source raster is missing CRS metadata")
+        source_registration = geotiff_registration(src)
+        registration = pixel_registration(target_grid.get("registration", "area"))
+        native_origin_shift = require_compatible_registration(
+            source_registration, registration, registration_conversion,
+        )
         nodata = dst_nodata if dst_nodata is not None else target_grid.get("nodata", src.nodata)
         fill = 0 if nodata is None else nodata
         destination = np.full((src.count, height, width), fill, dtype=src.dtypes[0])
@@ -276,10 +290,16 @@ def resample_raster_to_grid(
             out_path.parent.mkdir(parents=True, exist_ok=True)
             with rasterio.open(out_path, "w", **profile) as dst:
                 dst.write(destination)
+                dst.update_tags(AREA_OR_POINT=registration.title())
                 dst.scales = src.scales
                 dst.offsets = src.offsets
             written_path = str(out_path)
-        metadata = _grid_metadata(target_crs, transform, width, height, nodata)
+        metadata = _grid_metadata(target_crs, transform, width, height, nodata, registration=registration)
+        if native_origin_shift:
+            metadata["registration_conversion"] = {
+                "method": registration_conversion, "from": source_registration, "to": registration,
+                "native_origin_shift_pixels": [native_origin_shift, native_origin_shift],
+            }
         metadata["scales"] = list(src.scales)
         metadata["offsets"] = list(src.offsets)
         metadata.update(

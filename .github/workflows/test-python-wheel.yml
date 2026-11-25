@@ -28,6 +28,11 @@ on:
         required: false
         default: false
         type: boolean
+      prebuilt_vtpack:
+        description: Use the VT-store fixture tool built for this platform and commit.
+        required: false
+        default: false
+        type: boolean
       physical_windows_gpu:
         description: Run the full Windows matrix on the required NVIDIA Vulkan runner.
         required: false
@@ -60,6 +65,26 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # The full Python suite also invokes Cargo for its Unicode and VT-store
+      # contracts. Use the same reviewed compiler as the Rust acceptance lane.
+      - name: Install reviewed Rust toolchain for full-suite subprocesses
+        if: inputs.test_mode == 'full' && runner.os != 'Windows'
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: rustfmt
+
+      # The physical runner's bash resolves to WSL, which cannot open the
+      # Windows script path passed by composite actions. Use native PowerShell.
+      - name: Install reviewed Rust toolchain for Windows full-suite subprocesses
+        if: inputs.test_mode == 'full' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal --component rustfmt --no-self-update
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          'RUSTUP_TOOLCHAIN=1.97.1' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          rustup run 1.97.1 rustfmt --version
+          exit $LASTEXITCODE
+
       - name: Prove exact-head checkout
         shell: python
         env:
@@ -71,6 +96,30 @@ jobs:
           expected = os.environ["EXPECTED_HEAD"]
           if actual != expected:
               raise SystemExit(f"Checkout mismatch: expected {expected}, got {actual}")
+
+      - name: Download exact VT-store fixture tool
+        if: inputs.prebuilt_vtpack
+        uses: actions/download-artifact@v4
+        with:
+          name: vtpack-fixture-${{ runner.os }}-${{ inputs.ref }}
+          path: ci-fixture-tools/
+
+      - name: Set the prebuilt VT-store fixture tool path
+        if: inputs.prebuilt_vtpack
+        shell: python
+        run: |
+          import os
+          import stat
+          from pathlib import Path
+
+          name = "forge3d-vtpack.exe" if os.name == "nt" else "forge3d-vtpack"
+          tool = (Path("ci-fixture-tools") / name).resolve(strict=True)
+          if not tool.is_file():
+              raise SystemExit(f"Expected a fixture executable at {tool}")
+          if os.name != "nt":
+              tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+          with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as env:
+              env.write(f"FORGE3D_TEST_VTPACK={tool}\n")
 
       - name: Configure physical Windows acceptance
         if: inputs.physical_windows_gpu
@@ -174,12 +223,40 @@ jobs:
         run: >-
           python -c "import os; from pathlib import Path; reason = 'D02: Linux/Windows Python matrices deselect tests/test_raster_styles_gpu.py (three physical cases); required NVIDIA Vulkan acceptance runs all three with zero skips and unchanged physical/pixel assertions.'; print('::notice::' + reason); Path(os.environ['GITHUB_STEP_SUMMARY']).open('a', encoding='utf-8').write(reason + '\n')"
 
+      - name: Route physical-only tests on nonphysical Python runners
+        id: physical-test-routing
+        if: inputs.test_mode == 'full' && !inputs.physical_windows_gpu
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+
+          cinema = "tests/test_cinema_solver.py"
+          mapscene = (
+              "tests/test_mapscene_buildings.py",
+              "tests/test_mapscene_furniture.py",
+              "tests/test_mapscene_render_png.py",
+              "tests/test_mapscene_screen_space_settings.py",
+          )
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              args = " ".join(f"--deselect={path}" for path in (cinema, *mapscene))
+              print(f"args={args}", file=output)
+
+          reasons = (
+              f"AUTOCHIRON: {cinema} (44 cases) runs in required NVIDIA Vulkan acceptance with zero skips and unchanged safety, framing, motion and replay assertions.",
+              f"MapScene: {', '.join(mapscene)} run in required NVIDIA Vulkan acceptance with zero skips and unchanged assertions.",
+          )
+          with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
+              for reason in reasons:
+                  print("::notice::" + reason)
+                  print(reason, file=summary)
+
       - name: Run full default Python lane
         if: inputs.test_mode == 'full'
         env:
           FORGE3D_NO_BOOTSTRAP: '1'
         run: |
-          python scripts/ci_pytest_lane.py --profile full -v --tb=short --durations=30 -rs --junitxml=python-full-junit.xml ${{ runner.os != 'macOS' && '--deselect=tests/test_raster_styles_gpu.py' || '' }}
+          python scripts/ci_pytest_lane.py --profile full -v --tb=short --durations=30 -rs --junitxml=python-full-junit.xml ${{ steps.physical-test-routing.outputs.args }} ${{ runner.os != 'macOS' && '--deselect=tests/test_raster_styles_gpu.py' || '' }}
 
       - name: Record full Python timings and explicit skips
         if: always() && inputs.test_mode == 'full'

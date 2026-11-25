@@ -83,6 +83,12 @@ pub(crate) fn handle_cmd(viewer: &mut Viewer, cmd: &ViewerCmd) -> bool {
             }
             true
         }
+        ViewerCmd::SnapshotGeoTiff { path, width, height, overwrite } => {
+            if let Err(error) = viewer.snapshot_terrain_geotiff(path, *width, *height, *overwrite) {
+                viewer.reject_command(format!("{error:#}"));
+            }
+            true
+        }
         ViewerCmd::SnapshotWithSize {
             path,
             width,

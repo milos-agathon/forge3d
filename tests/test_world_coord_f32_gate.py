@@ -583,35 +583,44 @@ def _complete_conversion_inventory():
     return sites
 
 
-def _littera_scanned_inventory():
+def _current_production_inventory():
+    """The scanned inventory, excluding the exact lossless DD split."""
     return [site for site in _complete_conversion_inventory() if site not in SANCTIONED_DD_SPLITS]
 
 
 def _undo_littera_delivery(sites):
-    from itertools import groupby
-
     transition = _ledger_data()["littera_delivery"]
-    assert (len(sites), _inventory_digest(sites)) == (
-        transition["raw_candidate_count"], transition["raw_candidate_digest"],
-    )
-    by_path = {path: list(rows) for path, rows in groupby(sites, key=lambda site: site[0])}
-    for path, result in transition["result_rows_by_affected_path"].items():
-        assert by_path.get(path, []) == list(map(tuple, result)), f"LITTERA casts changed in {path}"
-        by_path[path] = list(map(tuple, transition["base_rows_by_affected_path"][path]))
-    restored = [site for path in sorted(by_path, key=Path) for site in by_path[path]]
-    assert (len(restored), _inventory_digest(restored)) == (
-        transition["raw_base_count"], transition["raw_base_digest"],
-    )
-    return restored
+    base = transition["base_rows_by_affected_path"]
+    files = {
+        path: {"base": base[path], "result": result}
+        for path, result in transition["result_rows_by_affected_path"].items()
+    }
+    return _restore_file_inventories(sites, files, "LITTERA")
 
 
-def test_littera_delivery_transition_is_exact():
-    _undo_littera_delivery(_littera_scanned_inventory())
+def _undo_registratio_transition(sites):
+    transition = _ledger_data()["registratio"]
+    return _restore_file_inventories(sites, transition["files"], "REGISTRATIO")
+
+
+def _scanned_with_autochiron():
+    sites = _undo_littera_delivery(_current_production_inventory())
+    return _undo_registratio_transition(sites)
+
+
+def _undo_autochiron_transition(sites):
+    transition = _ledger_data()["autochiron"]
+    added = set(map(tuple, transition["added"]))
+    assert len(transition["added"]) == len(added) == 18
+    assert transition["removed"] == []
+    for site in added:
+        assert sites.count(site) == 1, f"AUTOCHIRON conversion missing or duplicated: {site}"
+    return [site for site in sites if site not in added]
 
 
 def _scanned_conversion_inventory():
-    """Restore the reviewed parent inventory after authenticating the transition."""
-    return _undo_littera_delivery(_littera_scanned_inventory())
+    """Restore the main inventory used by the historical freezes below."""
+    return _undo_autochiron_transition(_scanned_with_autochiron())
 
 
 def _undo_viewer_terrain_grid_axes_transition(sites):
@@ -1464,22 +1473,25 @@ def _undo_reviewed_transition(current, transition):
     return current
 
 
-def _undo_sync_side(sites, side):
-    """Restore one branch's exact inventory from the merged tree.
+def _restore_file_inventories(sites, files, transition):
+    """Restore a previous exact inventory from the scanned tree.
 
-    Each changed file's ordered merged sites must match the record exactly;
-    they are replaced by that branch's ordered sites for the same file. Files
-    keep the scanner's sorted-path order, so the digest is reproduced exactly.
+    Each changed file's ordered sites must match the result in the ledger. Keep
+    the scanner's sorted-path order when replacing them with the base sites.
     """
-    files = _ledger_data()["nephele_main_sync"][side]["files"]
     by_file = {}
     for site in sites:
         by_file.setdefault(site[0], []).append(site)
     for rel, change in files.items():
-        assert by_file.get(rel, []) == list(map(tuple, change["result"])), f"{side} sync drift in {rel}"
+        assert by_file.get(rel, []) == list(map(tuple, change["result"])), f"{transition} drift in {rel}"
         by_file[rel] = list(map(tuple, change["base"]))
     # Match the scanner's `sorted(Path)` file order, not plain string order.
     return [site for rel in sorted(by_file, key=Path) for site in by_file[rel]]
+
+
+def _undo_sync_side(sites, side):
+    files = _ledger_data()["nephele_main_sync"][side]["files"]
+    return _restore_file_inventories(sites, files, f"{side} sync")
 
 
 def _main_side_inventory():
@@ -2014,3 +2026,60 @@ def test_latest_main_integration_rejects_missing_duplicate_changed_and_extra_sit
                             sites[:i] + [changed] + sites[i+1:], sites + [changed]):
                 with pytest.raises(AssertionError):
                     _undo_latest_main_integration(mutated, side)
+
+
+def test_autochiron_inventory_transition_is_exact():
+    ledger = _ledger_data()
+    approved = ledger["autochiron"]
+    assert approved["review"]
+    assert (approved["base_count"], approved["base_digest"]) == (
+        1832, "757d9c40e9f4dde8935f45dd6bab69b81c6d82f8d51dfc327c06fd7e21de01f9",
+    )
+    assert (approved["result_count"], approved["result_digest"]) == (
+        1850, "9e7a23747ae95ed6d259bf6d387a3bfb7e7eefdbb38671fe1ad7f87d9e587087",
+    )
+
+    transition = ledger["autochiron_main_integration"]
+    main = ledger["viewer_terrain_clip_planes"]
+    assert (transition["base_count"], transition["base_digest"]) == (
+        main["result_count"], main["result_digest"],
+    )
+    sites = _scanned_with_autochiron()
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    base = _undo_autochiron_transition(sites)
+    assert (len(base), _inventory_digest(base)) == (
+        transition["base_count"], transition["base_digest"],
+    )
+
+
+def test_registratio_inventory_transition_is_exact():
+    ledger = _ledger_data()
+    transition = ledger["registratio"]
+    previous = ledger["autochiron_main_integration"]
+    assert transition["review"].startswith("APPROVED by Milos")
+    assert (transition["base_count"], transition["base_digest"]) == (
+        previous["result_count"], previous["result_digest"],
+    )
+    sites = _undo_littera_delivery(_current_production_inventory())
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["result_count"], transition["result_digest"],
+    )
+    restored = _undo_registratio_transition(sites)
+    assert (len(restored), _inventory_digest(restored)) == (
+        transition["base_count"], transition["base_digest"],
+    )
+
+
+def test_littera_delivery_transition_is_exact():
+    transition = _ledger_data()["littera_delivery"]
+    sites = _undo_registratio_transition(_current_production_inventory())
+    sites = _undo_autochiron_transition(sites)
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["raw_candidate_count"], transition["raw_candidate_digest"],
+    )
+    restored = _undo_littera_delivery(sites)
+    assert (len(restored), _inventory_digest(restored)) == (
+        transition["raw_base_count"], transition["raw_base_digest"],
+    )
