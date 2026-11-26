@@ -588,6 +588,22 @@ def _current_production_inventory():
     return [site for site in _complete_conversion_inventory() if site not in SANCTIONED_DD_SPLITS]
 
 
+def _undo_vacuum_inventory(sites):
+    transition = _ledger_data()["vacuum"]
+    prior = _restore_file_inventories(sites, transition["files"], "VACUUM")
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["result_count"], transition["result_digest"],
+    ), "VACUUM inventory drift"
+    assert (len(prior), _inventory_digest(prior)) == (
+        transition["base_count"], transition["base_digest"],
+    ), "VACUUM base inventory drift"
+    return prior
+
+
+def _pre_vacuum_inventory():
+    return _undo_vacuum_inventory(_current_production_inventory())
+
+
 def _undo_littera_delivery(sites):
     transition = _ledger_data()["littera_delivery"]
     base = transition["base_rows_by_affected_path"]
@@ -604,7 +620,7 @@ def _undo_registratio_transition(sites):
 
 
 def _scanned_with_autochiron():
-    sites = _undo_littera_delivery(_current_production_inventory())
+    sites = _undo_littera_delivery(_pre_vacuum_inventory())
     return _undo_registratio_transition(sites)
 
 
@@ -2062,7 +2078,7 @@ def test_registratio_inventory_transition_is_exact():
     assert (transition["base_count"], transition["base_digest"]) == (
         previous["result_count"], previous["result_digest"],
     )
-    sites = _undo_littera_delivery(_current_production_inventory())
+    sites = _undo_littera_delivery(_pre_vacuum_inventory())
     assert (len(sites), _inventory_digest(sites)) == (
         transition["result_count"], transition["result_digest"],
     )
@@ -2074,7 +2090,7 @@ def test_registratio_inventory_transition_is_exact():
 
 def test_littera_delivery_transition_is_exact():
     transition = _ledger_data()["littera_delivery"]
-    sites = _undo_registratio_transition(_current_production_inventory())
+    sites = _undo_registratio_transition(_pre_vacuum_inventory())
     sites = _undo_autochiron_transition(sites)
     assert (len(sites), _inventory_digest(sites)) == (
         transition["raw_candidate_count"], transition["raw_candidate_digest"],
@@ -2083,3 +2099,23 @@ def test_littera_delivery_transition_is_exact():
     assert (len(restored), _inventory_digest(restored)) == (
         transition["raw_base_count"], transition["raw_base_digest"],
     )
+
+
+def test_vacuum_inventory_transition_rejects_unreviewed_sites():
+    import pytest
+
+    sites = _current_production_inventory()
+    _pre_vacuum_inventory()
+    changed = "src/terrain/masked_height.rs"
+    index = next(i for i, site in enumerate(sites) if site[0] == changed)
+    row = sites[index]
+    extra = ("src/unused.rs", "unexpected", "as_f32", 1, "value as f32")
+    probes = (
+        sites[:index] + sites[index + 1:],
+        sites[:index] + [row] + sites[index:],
+        sites[:index] + [(*row[:-1], "unexpected as f32")] + sites[index + 1:],
+        sites + [extra],
+    )
+    for probe in probes:
+        with pytest.raises(AssertionError, match="VACUUM.*drift"):
+            _undo_vacuum_inventory(probe)
