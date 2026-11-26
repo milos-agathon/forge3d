@@ -312,9 +312,7 @@ fn sample_heightmap_bilinear(heightmap: &[f32], dims: (u32, u32), u: f32, v: f32
     let h11 = heightmap.get(idx(x1, y1)).copied().unwrap_or(0.0);
 
     // Bilinear interpolation
-    let h0 = h00 * (1.0 - fx) + h10 * fx;
-    let h1 = h01 * (1.0 - fx) + h11 * fx;
-    h0 * (1.0 - fy) + h1 * fy
+    crate::terrain::masked_height::bilinear([h00,h10,h01,h11],fx,fy)
 }
 
 /// Compute terrain normal at a point using central differences

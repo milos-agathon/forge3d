@@ -115,7 +115,7 @@ impl HeightfieldRayEngine {
             let terrain_height = self.sample_heightfield(p, heightmap, width, height);
             let ray_height = p[1];
 
-            let above = ray_height > terrain_height;
+            let above = !terrain_height.is_finite() || ray_height > terrain_height;
 
             // Detect crossing from above to below
             if !above && prev_above && t > 0.0 {
@@ -168,9 +168,7 @@ impl HeightfieldRayEngine {
         let h11 = heightmap.get(idx11).copied().unwrap_or(0.0);
 
         // Bilinear interpolation
-        let h0 = h00 * (1.0 - tx) + h10 * tx;
-        let h1 = h01 * (1.0 - tx) + h11 * tx;
-        let h = h0 * (1.0 - ty) + h1 * ty;
+        let h = crate::terrain::masked_height::bilinear([h00, h10, h01, h11], tx, ty);
 
         // Scale height
         (h - self.config.min_elevation) * self.config.z_scale
@@ -195,7 +193,7 @@ impl HeightfieldRayEngine {
 
             let terrain_height = self.sample_heightfield(p, heightmap, width, height);
 
-            if p[1] > terrain_height {
+            if !terrain_height.is_finite() || p[1] > terrain_height {
                 lo = mid;
             } else {
                 hi = mid;
@@ -225,6 +223,10 @@ impl HeightfieldRayEngine {
             / self.config.z_scale
             + self.config.min_elevation;
 
+        if !elevation.is_finite() {
+            return None;
+        }
+
         // Compute normal from gradient
         let normal = self.compute_normal(u, v, heightmap, width, height);
 
@@ -251,6 +253,26 @@ impl HeightfieldRayEngine {
         width: u32,
         height: u32,
     ) -> [f32; 3] {
+        if heightmap.iter().any(|v| !v.is_finite()) {
+            let x = (u * (width - 1) as f32).round() as u32;
+            let y = (v * (height - 1) as f32).round() as u32;
+            let node = |x: i64, y: i64| {
+                if x < 0 || y < 0 || x >= i64::from(width) || y >= i64::from(height) {
+                    return f64::NAN;
+                }
+                f64::from(heightmap[y as usize * width as usize + x as usize])
+            };
+            let (x, y) = (i64::from(x), i64::from(y));
+            let center = node(x, y);
+            let axis = crate::terrain::analysis::axis_difference;
+            let dx = axis(center, node(x - 1, y), node(x + 1, y)) as f32;
+            let dz = axis(center, node(x, y - 1), node(x, y + 1)) as f32;
+            return normalize([
+                -dx * self.config.z_scale * (width - 1) as f32 / self.config.terrain_width,
+                1.0,
+                -dz * self.config.z_scale * (height - 1) as f32 / self.config.terrain_depth,
+            ]);
+        }
         let delta_u = 1.0 / width as f32;
         let delta_v = 1.0 / height as f32;
 

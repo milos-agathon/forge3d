@@ -565,7 +565,7 @@ impl TerrainScene {
             // average ids, which is meaningless.
             false,
             is_clipmap_camera_mode(&offline_params.camera_mode),
-        );
+        )?;
         let hdr_background_blit_pipeline = Self::create_depth_blit_pipeline(
             self.device.as_ref(),
             &self.blit_bind_group_layout,
@@ -1663,9 +1663,7 @@ impl TerrainRenderer {
                 water_mask,
                 jitter_sequence_samples,
             )
-            .map_err(|e| {
-                PyRuntimeError::new_err(format!("Failed to begin offline accumulation: {e:#}"))
-            })?;
+            .map_err(|e| super::py_api::terrain_render_error("Failed to begin offline accumulation", e))?;
 
         let mut guard = self
             .scene

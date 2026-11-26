@@ -229,19 +229,115 @@ fn terrain_pack_node(level: u32, x: u32, y: u32) -> u32 {
 }
 
 // Exaggerated corner heights of DEM cell (cx, cz): h00, h10, h01, h11.
-fn terrain_cell_heights(cx: u32, cz: u32) -> vec4<f32> {
+struct TerrainCorners { heights: vec4<f32>, valid: vec4<f32> }
+fn terrain_cell_heights(cx: u32, cz: u32) -> TerrainCorners {
     let ex = terrain.h_params.z;
     terrain_count(vec4<u32>(0u, 0u, 4u, 0u)); // the four height-texel loads below
-    let h00 = textureLoad(terrain_height_tex, vec2<i32>(i32(cx), i32(cz)), 0).r;
-    let h10 = textureLoad(terrain_height_tex, vec2<i32>(i32(cx + 1u), i32(cz)), 0).r;
-    let h01 = textureLoad(terrain_height_tex, vec2<i32>(i32(cx), i32(cz + 1u)), 0).r;
-    let h11 = textureLoad(terrain_height_tex, vec2<i32>(i32(cx + 1u), i32(cz + 1u)), 0).r;
-    return vec4<f32>(h00, h10, h01, h11) * ex;
+    let h00 = textureLoad(terrain_height_tex, vec2<i32>(i32(cx), i32(cz)), 0).rg;
+    let h10 = textureLoad(terrain_height_tex, vec2<i32>(i32(cx + 1u), i32(cz)), 0).rg;
+    let h01 = textureLoad(terrain_height_tex, vec2<i32>(i32(cx), i32(cz + 1u)), 0).rg;
+    let h11 = textureLoad(terrain_height_tex, vec2<i32>(i32(cx + 1u), i32(cz + 1u)), 0).rg;
+    let flags = vec4<f32>(h00.y,h10.y,h01.y,h11.y);
+    return TerrainCorners(vec4<f32>(h00.x,h10.x,h01.x,h11.x) * ex,
+                          select(vec4<f32>(1.0), vec4<f32>(0.0), flags > vec4<f32>(0.5)));
 }
 
 struct TerrainLeafHit {
     t: f32,
     hit: bool,
+}
+
+// A mixed cell reconstructs N(s)/W(s), where N and W are quadratic
+// along a ray. Intersect Y(s)*W(s)-N(s), at most quartic with curvature.
+struct TerrainPolynomial { c: array<f32,5> }
+struct TerrainRoots { points: array<f32,5>, count: u32 }
+
+fn terrain_poly_eval(p: TerrainPolynomial, s: f32) -> f32 {
+    return (((p.c[4]*s+p.c[3])*s+p.c[2])*s+p.c[1])*s+p.c[0];
+}
+
+fn terrain_roots(p: TerrainPolynomial) -> TerrainRoots {
+    var roots: TerrainRoots;
+    // Roots of each derivative partition its integral into monotone spans.
+    for (var order=3i; order>=0i; order--) {
+        var q = p;
+        for (var k=0i; k<order; k++) {
+            q.c = array<f32,5>(q.c[1],2.0*q.c[2],3.0*q.c[3],4.0*q.c[4],0.0);
+        }
+        var next: TerrainRoots;
+        var lo = 0.0;
+        for (var i=0u; i<=roots.count; i++) {
+            var hi = 1.0;
+            if (i<roots.count) { hi = roots.points[min(i,4u)]; }
+            let edge = hi;
+            let a = terrain_poly_eval(q,lo);
+            let b = terrain_poly_eval(q,hi);
+            var root = -1.0;
+            if ((a<0.0 && b>0.0) || (a>0.0 && b<0.0)) {
+                loop {
+                    let m = (lo+hi)*0.5;
+                    if (m==lo || m==hi) { break; }
+                    let v = terrain_poly_eval(q,m);
+                    if (v==0.0) { lo=m; hi=m; break; }
+                    if ((v<0.0)==(a<0.0)) { lo=m; } else { hi=m; }
+                }
+                root=(lo+hi)*0.5;
+            } else if (b==0.0 && a!=0.0) { root=hi; }
+            if (root>=0.0 && next.count<5u) {
+                next.points[min(next.count,4u)] = root;
+                next.count++;
+            }
+            lo=edge;
+        }
+        roots=next;
+    }
+    return roots;
+}
+
+fn terrain_patch_coeff(taps:vec4<f32>, start:vec2<f32>, delta:vec2<f32>) -> vec3<f32> {
+    let cross_term = taps.x - taps.y - taps.z + taps.w;
+    let gradient = vec2<f32>(taps.y-taps.x, taps.z-taps.x);
+    return vec3<f32>(mix(mix(taps.x,taps.y,start.x),mix(taps.z,taps.w,start.x),start.y),
+        dot(gradient,delta)+cross_term*dot(start,delta.yx), cross_term*delta.x*delta.y);
+}
+
+fn terrain_masked_intersect(ray:Ray, cell:vec2<u32>, t0:f32,t1:f32, curved:bool,
+                            any_hit:bool, corners:TerrainCorners) -> TerrainLeafHit {
+    let origin = terrain.origin_spacing.xy;
+    let spacing = terrain.origin_spacing.zw;
+    let start = clamp((ray.origin.xz+t0*ray.direction.xz-origin)/spacing-vec2<f32>(cell),vec2<f32>(0.0),vec2<f32>(1.0));
+    let end = clamp((ray.origin.xz+t1*ray.direction.xz-origin)/spacing-vec2<f32>(cell),vec2<f32>(0.0),vec2<f32>(1.0));
+    let w = terrain_patch_coeff(corners.valid,start,end-start);
+    let n = terrain_patch_coeff(corners.heights*corners.valid,start,end-start);
+    let y0 = terrain_curved_height(ray,t0,curved);
+    let y1 = terrain_curved_height(ray,t1,curved);
+    let y2 = select(0.0,(t1-t0)*(t1-t0)*dot(ray.direction.xz,ray.direction.xz)*earth_curvature.inv_two_r_prime,
+                    curved && earth_curvature.enabled!=0u);
+    let y = y1-y0-y2;
+    let p = TerrainPolynomial(array<f32,5>(y0*w.x-n.x, y0*w.y+y*w.x-n.y, y0*w.z+y*w.y+y2*w.x-n.z,
+                                          y*w.z+y2*w.y,y2*w.z));
+    var roots = terrain_roots(p);
+    var hit = TerrainLeafHit(1e30,false);
+    if ((p.c[0]==0.0 || (any_hit && p.c[0]<0.0)) && w.x>=0.5 && t0>ray.tmin && t0<ray.tmax) {
+        return TerrainLeafHit(t0,true);
+    }
+    for (var i=0u; i<roots.count; i++) {
+        let s=roots.points[min(i,4u)];
+        let t=mix(t0,t1,s);
+        if ((w.z*s+w.y)*s+w.x>=0.5 && t>ray.tmin && t<ray.tmax) {
+            hit=TerrainLeafHit(t,true); break;
+        }
+    }
+    if (any_hit) {
+        // Entering covered support below the surface also occludes the ray.
+        roots=terrain_roots(TerrainPolynomial(array<f32,5>(w.x-0.5,w.y,w.z,0.0,0.0)));
+        for (var i=0u; i<roots.count; i++) {
+            let s=roots.points[min(i,4u)];
+            let t=mix(t0,t1,s);
+            if (terrain_poly_eval(p,s)<=0.0 && t>ray.tmin && t<min(ray.tmax,hit.t)) { hit=TerrainLeafHit(t,true); }
+        }
+    }
+    return hit;
 }
 
 // Exact ray vs bilinear-patch test inside cell (cx, cz) over ray span
@@ -260,7 +356,11 @@ fn terrain_leaf_intersect(
     var out: TerrainLeafHit;
     out.hit = false;
     out.t = 1e30;
-    let h = terrain_cell_heights(cx, cz);
+    let corners = terrain_cell_heights(cx, cz);
+    if (any(corners.valid < vec4<f32>(1.0))) {
+        return terrain_masked_intersect(ray,vec2<u32>(cx,cz),t0,t1,apply_curvature,any_hit,corners);
+    }
+    let h = corners.heights;
     let sx = terrain.origin_spacing.z;
     let sz = terrain.origin_spacing.w;
     let ox = terrain.origin_spacing.x;
@@ -329,14 +429,49 @@ fn terrain_leaf_intersect(
     return out;
 }
 
+fn terrain_node_difference(node: vec2<i32>, axis: vec2<i32>, center: f32) -> f32 {
+    let last = max(vec2<i32>(textureDimensions(terrain_height_tex, 0)) - vec2<i32>(1), vec2<i32>(0));
+    let left = textureLoad(terrain_height_tex, clamp(node - axis, vec2<i32>(0), last), 0).rg;
+    let right = textureLoad(terrain_height_tex, clamp(node + axis, vec2<i32>(0), last), 0).rg;
+    terrain_count(vec4<u32>(0u, 0u, 2u, 0u));
+    let l = all(node - axis >= vec2<i32>(0)) && left.y <= 0.5;
+    let r = all(node + axis <= last) && right.y <= 0.5;
+    if (l && r) { return (right.x - left.x) * (0.5 * terrain.h_params.z); }
+    if (l) { return center - left.x * terrain.h_params.z; }
+    if (r) { return right.x * terrain.h_params.z - center; }
+    return 0.0;
+}
+
 // Geometric normal from the analytic bilinear gradient at world point p in
 // cell (cx, cz) — the same surface the leaf test intersected.
 fn terrain_normal_at(p: vec3<f32>, cx: u32, cz: u32) -> vec3<f32> {
-    let h = terrain_cell_heights(cx, cz);
+    let corners = terrain_cell_heights(cx, cz);
+    let h = corners.heights;
     let sx = terrain.origin_spacing.z;
     let sz = terrain.origin_spacing.w;
     let u = clamp((p.x - terrain.origin_spacing.x) / sx - f32(cx), 0.0, 1.0);
     let v = clamp((p.z - terrain.origin_spacing.y) / sz - f32(cz), 0.0, 1.0);
+    if (any(corners.valid < vec4<f32>(1.0))) {
+        // Differentiate between valid nodes. Differentiating the quotient
+        // N/W here would tilt even a plane when one corner is missing.
+        let local = vec2<f32>(u, v);
+        var nearest = 4.0;
+        var node = vec2<i32>(i32(cx), i32(cz));
+        var center = 0.0;
+        for (var i = 0u; i < 4u; i++) {
+            let offset = vec2<i32>(i32(i & 1u), i32(i >> 1u));
+            let delta = local - vec2<f32>(offset);
+            let distance = dot(delta, delta);
+            if (corners.valid[i] > 0.5 && distance < nearest) {
+                node = vec2<i32>(i32(cx), i32(cz)) + offset;
+                center = h[i];
+                nearest = distance;
+            }
+        }
+        let dx = terrain_node_difference(node, vec2<i32>(1, 0), center);
+        let dz = terrain_node_difference(node, vec2<i32>(0, 1), center);
+        return normalize(vec3<f32>(-dx / sx, 1.0, -dz / sz));
+    }
     let dh_du = mix(h.y - h.x, h.w - h.z, v);
     let dh_dv = mix(h.z - h.x, h.w - h.y, u);
     return normalize(vec3<f32>(-dh_du / sx, 1.0, -dh_dv / sz));
@@ -570,6 +705,16 @@ fn terrain_albedo_taps_at(p: vec3<f32>) -> TerrainAlbedoTaps {
     t.weights = mapped * vec4<f32>(
         (1.0 - fx) * (1.0 - fz), fx * (1.0 - fz),
         (1.0 - fx) * fz, fx * fz);
+    if (any(mapped == vec4<f32>(0.0))) {
+        let support = dot(t.weights, vec4<f32>(1.0));
+        if (support >= 0.5) {
+            t.weights /= max(support, 0.5);
+            t.alb = a00*t.weights.x + a10*t.weights.y + a01*t.weights.z + a11*t.weights.w;
+        } else {
+            t.weights = vec4<f32>(0.0);
+            t.alb = base;
+        }
+    }
     return t;
 }
 fn terrain_albedo_at(p: vec3<f32>) -> vec3<f32> {

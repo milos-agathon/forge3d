@@ -25,6 +25,13 @@ struct PageTableEntry { lod: u32, x: u32, y: u32, _pad0: u32, sx: u32, sy: u32, 
 // M5: Terrain depth texture for occlusion testing
 @group(0) @binding(6) var depth_tex : texture_2d<f32>;
 @group(0) @binding(7) var depth_samp : sampler;
+@group(0) @binding(8) var height_coverage : texture_2d<f32>;
+fn overlay_height(uv:vec2<f32>) -> vec2<f32> {
+  let sample = textureSampleLevel(height_tex,height_samp,uv,0.0).rg;
+  var support = 1.0 - sample.g;
+  if (U.contour_params.w > 0.5) { support = textureSampleLevel(height_coverage,height_samp,uv,0.0).r; }
+  return vec2<f32>(sample.r / max(0.5,support),support);
+}
 
 struct VsOut {
   @builtin(position) pos : vec4<f32>,
@@ -146,9 +153,10 @@ fn fs_overlay(in: VsOut) -> @location(0) vec4<f32> {
     }
   }
 
-  if (alt_en) {
+  let surface = overlay_height(in.uv);
+  if (alt_en && surface.y >= 0.5) {
     // Sample height; assume height in 0..1 for now
-    let h = textureSampleLevel(height_tex, height_samp, in.uv, 0.0).r;
+    let h = surface.x;
     let alt_col = ramp_color(clamp(h, 0.0, 1.0));
     let alt_a = clamp(U.overlay_params.w, 0.0, 1.0);
     // Composite altitude under overlay in shader, then alpha blend with target
@@ -157,9 +165,9 @@ fn fs_overlay(in: VsOut) -> @location(0) vec4<f32> {
   }
 
   // GPU contour overlay from height texture (line rendering in screen space)
-  if (U.contour_params.x > 0.5) {
+  if (U.contour_params.x > 0.5 && surface.y >= 0.5) {
     let interval = max(1e-6, U.contour_params.y);
-    let h = textureSampleLevel(height_tex, height_samp, in.uv, 0.0).r;
+    let h = surface.x;
     let pos = h / interval;
     // Distance to nearest iso level in repeating unit space
     let g = abs(pos - floor(pos + 0.5));

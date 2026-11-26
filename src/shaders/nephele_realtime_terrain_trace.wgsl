@@ -435,8 +435,15 @@ fn nd_vertex_point(id: vec2<u32>) -> vec3<f32> {
     let uv = vec2<f32>(id)/vec2<f32>(nephele.grid.xy-1u)*vec2<f32>(terrain.dims.xy-1u);
     let cell = min(vec2<u32>(floor(uv)),terrain.dims.xy-2u);
     let f = uv-vec2<f32>(cell);
-    let h = terrain_cell_heights(cell.x,cell.y);
+    let corners = terrain_cell_heights(cell.x,cell.y);
+    let h = corners.heights;
     let xz = terrain.origin_spacing.xy+uv*terrain.origin_spacing.zw;
+    if (any(corners.valid < vec4<f32>(1.0))) {
+        let w = vec4<f32>((1.0-f.x)*(1.0-f.y), f.x*(1.0-f.y), (1.0-f.x)*f.y, f.x*f.y)*corners.valid;
+        let support = dot(w,vec4<f32>(1.0));
+        if (support>=0.5) { return vec3<f32>(xz.x,dot(w,h)/max(0.5,support),xz.y); }
+        return vec3<f32>(xz.x,terrain.h_params.x*terrain.h_params.z,xz.y);
+    }
     return vec3<f32>(xz.x,mix(mix(h.x,h.y,f.x),mix(h.z,h.w,f.x),f.y),xz.y);
 }
 fn nd_f16_fields(packed: vec2<u32>) -> vec3<u32> {

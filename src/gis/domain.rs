@@ -21,6 +21,7 @@ mod py {
     use crate::gis::osm::{parse_osm_features_value, query_osm_features_value};
     use crate::gis::py_json::{json_to_py, py_to_json, warnings_to_py};
     use crate::gis::raster_info::{self, copy_window, raster_to_f64, valid_mask};
+    use crate::gis::raster_values::sample_valid;
     use crate::gis::raster_write::{RasterArray, RasterData};
     use crate::gis::types::{AffineTransform, RasterBounds, RasterInfo, RasterWarning};
     use crate::gis::vector::{read_vector, VectorReadOptions};
@@ -64,6 +65,28 @@ mod py {
         array: RasterArray,
         info: RasterInfo,
         height_system: DemHeightSystem,
+        explicit_mask: Option<Vec<bool>>,
+    }
+
+    impl RasterSource {
+        fn terrain_values(&self, nodata: Option<f64>) -> Vec<f64> {
+            let mut values = raster_to_f64(&self.array);
+            let plane = self.array.width * self.array.height;
+            for (band, samples) in values.chunks_exact_mut(plane).enumerate() {
+                let marker = nodata.or_else(|| self.info.nodata_per_band.get(band).copied().flatten());
+                let coverage = self.explicit_mask.as_deref()
+                    .map(|mask| crate::gis::raster_values::mask_plane(mask, band, plane));
+                let dtype = self.array.dtype();
+                for (pixel, value) in samples.iter_mut().enumerate() {
+                    if coverage.is_some_and(|mask| !mask[pixel])
+                        || !sample_valid(*value, marker, dtype)
+                    {
+                        *value = f64::NAN;
+                    }
+                }
+            }
+            values
+        }
     }
 
     #[pyfunction(name = "read_cog", signature = (path_or_url, window = None, overview = None))]
@@ -422,28 +445,31 @@ mod py {
         target_info: Option<&Bound<'_, PyAny>>,
         nodata: Option<f64>,
     ) -> PyResult<PyObject> {
-        let mut source = raster_source_from_py(source)?;
+        let mut source = raster_source_from_py(source, true)?;
         // Keep a declared EGM96 DEM in f64 while applying its per-pixel geoid
         // correction.  A float32 sample at ordinary terrain elevations has a
         // several-micrometre ULP, which is larger than the ingestion contract.
-        let mut array = if source.height_system == DemHeightSystem::OrthometricEgm96 {
-            RasterArray::new(
-                RasterData::F64(raster_to_f64(&source.array)),
-                &[source.array.bands, source.array.height, source.array.width],
-            )?
+        let mut markers: Vec<_> = (0..source.array.bands)
+            .map(|band| nodata.or_else(|| source.info.nodata_per_band.get(band).copied().flatten()))
+            .collect();
+        let values = source.terrain_values(nodata);
+        let data = if source.height_system == DemHeightSystem::OrthometricEgm96 {
+            RasterData::F64(values)
         } else {
-            to_f32_array(&source.array)?
+            RasterData::F32(values.into_iter().map(|v| v as f32).collect())
         };
+        let mut array = RasterArray::new(
+            data, &[source.array.bands, source.array.height, source.array.width],
+        )?;
         if let Some(target) = target_info {
             let target = raster_info_from_py(target)?;
             warp::require_matching_registration(source.info.registration, target.registration)?;
             if source.info.transform.is_some() || target.transform.is_some() {
-                source.info.nodata_per_band = (0..array.bands)
-                    .map(|band| {
-                        Some(nodata.or_else(|| source.info.nodata_per_band.get(band).copied().flatten())
-                            .unwrap_or(f64::NAN))
-                    })
-                    .collect();
+                // Keep absence distinct from any valid value rounded to the output dtype.
+                source.info.nodata_per_band = vec![Some(f64::NAN); array.bands];
+                for marker in &mut markers {
+                    marker.get_or_insert(f64::NAN);
+                }
                 let aligned = warp::align_raster_data(
                     &array, &source.info, &target, warp::ResamplingMethod::Nearest,
                 )?;
@@ -548,9 +574,14 @@ mod py {
             }
             source.height_system = DemHeightSystem::Ellipsoidal;
         }
-        let nodata_per_band =
-            vec![nodata.or_else(|| source.info.nodata_per_band.first().copied().flatten())];
-        let mask = valid_mask(&array, &nodata_per_band, None);
+        let mask = valid_mask(&array, &[], None);
+        let plane = array.height * array.width;
+        match &mut array.data {
+            RasterData::F32(values) => restore_dem_markers(values, &mask, plane, &mut markers, |v| v as f32),
+            RasterData::F64(values) => restore_dem_markers(values, &mask, plane, &mut markers, |v| v),
+            _ => unreachable!("prepared elevations are floating point"),
+        }
+        let nodata_per_band = markers;
         let valid_count = mask.iter().filter(|&&valid| valid).count();
         if valid_count == 0 {
             return Err(GisError::InvalidRaster(
@@ -560,11 +591,7 @@ mod py {
         }
         let mut info = source.info.clone();
         info.warnings.extend(datum_warnings);
-        info.dtype_per_band = vec![match array.dtype() {
-            crate::gis::types::RasterDType::Float64 => "float64",
-            _ => "float32",
-        }
-        .to_string()];
+        info.dtype_per_band = vec![array.dtype().name().to_string(); array.bands];
         info.nodata_per_band = nodata_per_band.clone();
         // Persist the authoritative (post-conversion) vertical datum onto the
         // returned RasterInfo, not only the sidecar dict key, so it survives
@@ -597,7 +624,7 @@ mod py {
         dem: &Bound<'_, PyAny>,
         derivatives: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyObject> {
-        let source = raster_source_from_py(dem)?;
+        let source = raster_source_from_py(dem, true)?;
         let transform = source.info.transform.ok_or_else(|| {
             GisError::MissingTransform(
                 "missing_transform: terrain derivatives require an affine transform".to_string(),
@@ -613,21 +640,25 @@ mod py {
         ])?;
         let requested = optional_string_list(derivatives)?
             .unwrap_or_else(|| vec!["slope".to_string(), "hillshade".to_string()]);
-        let values = raster_to_f64(&source.array);
+        let values = source.terrain_values(None);
+        let slope = slope_array(&values, &source.array, transform)?;
+        let slopes = raster_to_f64(&slope);
+        let mask = super::super::bool_array_to_py(py, slopes.iter().map(|v| v.is_finite()).collect(), &slope)?;
         let out = PyDict::new_bound(py);
         for derivative in requested {
             match derivative.as_str() {
                 "slope" => {
-                    let array = slope_array(&values, &source.array, transform)?;
                     let item = PyDict::new_bound(py);
-                    item.set_item("array", super::super::raster_array_to_py(py, &array)?)?;
+                    item.set_item("array", super::super::raster_array_to_py(py, &slope)?)?;
+                    item.set_item("mask", &mask)?;
                     item.set_item("units", "degrees")?;
                     out.set_item("slope", item)?;
                 }
                 "hillshade" => {
-                    let array = hillshade_array(&values, &source.array, transform)?;
+                    let array = hillshade_array(&slopes, &source.array)?;
                     let item = PyDict::new_bound(py);
                     item.set_item("array", super::super::raster_array_to_py(py, &array)?)?;
+                    item.set_item("mask", &mask)?;
                     item.set_item("units", "uint8")?;
                     out.set_item("hillshade", item)?;
                 }
@@ -759,7 +790,7 @@ mod py {
         target_info: &Bound<'_, PyAny>,
         classes: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<PyObject> {
-        let mut source = raster_source_from_py(source)?;
+        let mut source = raster_source_from_py(source, false)?;
         let target = raster_info_from_py(target_info)?;
         let mut warnings = Vec::new();
         if source.array.width != target.width as usize
@@ -826,7 +857,7 @@ mod py {
         target_info: Option<&Bound<'_, PyAny>>,
         normalization: Option<&str>,
     ) -> PyResult<PyObject> {
-        let mut source = raster_source_from_py(source)?;
+        let mut source = raster_source_from_py(source, false)?;
         let mut values = raster_to_f64(&source.array);
         if values.iter().any(|value| *value < 0.0) {
             return Err(GisError::InvalidArgument(
@@ -1039,26 +1070,25 @@ mod py {
         Ok(dict.into_py(py))
     }
 
-    fn raster_source_from_py(value: &Bound<'_, PyAny>) -> PyResult<RasterSource> {
-        if let Ok(path) = value.extract::<String>() {
-            let result = raster_info::read_raster(&path, None, None, false)?;
-            return Ok(RasterSource {
-                array: result.array,
-                info: result.info,
-                height_system: DemHeightSystem::Unspecified,
-            });
-        }
-        if let Ok(info) = value.extract::<PyRef<'_, RasterInfo>>() {
+    fn raster_source_from_py(value: &Bound<'_, PyAny>, with_mask: bool) -> PyResult<RasterSource> {
+        let path = if let Ok(path) = value.extract::<String>() {
+            Some(path)
+        } else if let Ok(info) = value.extract::<PyRef<'_, RasterInfo>>() {
             if info.path.is_empty() {
                 return Err(GisError::InvalidArgument(
                     "invalid_argument: RasterInfo source must include a path".to_string(),
-                )
-                .into());
+                ).into());
             }
-            let result = raster_info::read_raster(&info.path, None, None, false)?;
+            Some(info.path.clone())
+        } else {
+            None
+        };
+        if let Some(path) = path {
+            let loaded = crate::gis::raster_read::decode_raster(Path::new(&path), with_mask)?;
             return Ok(RasterSource {
-                array: result.array,
-                info: result.info,
+                array: loaded.array,
+                info: loaded.info,
+                explicit_mask: loaded.explicit_mask,
                 height_system: DemHeightSystem::Unspecified,
             });
         }
@@ -1080,11 +1110,20 @@ mod py {
                 .map(|value| value.extract::<String>())
                 .transpose()?
                 .unwrap_or_else(|| "unspecified".to_string());
-            let height_system = DemHeightSystem::parse(&height_system)?;
+            let explicit_mask = if with_mask {
+                dict.get_item("mask")?.filter(|value| !value.is_none())
+                    .map(|value| super::super::extract_bool_mask(&value)).transpose()?
+            } else {
+                None
+            };
+            if let Some(mask) = &explicit_mask {
+                super::super::validate_mask_len(mask.len(), &array)?;
+            }
             return Ok(RasterSource {
                 array,
                 info,
-                height_system,
+                height_system: DemHeightSystem::parse(&height_system)?,
+                explicit_mask,
             });
         }
         let array = super::super::extract_raster_array(value)?;
@@ -1093,6 +1132,7 @@ mod py {
             array,
             info,
             height_system: DemHeightSystem::Unspecified,
+            explicit_mask: None,
         })
     }
 
@@ -1199,6 +1239,32 @@ mod py {
             .map(Option::flatten)
     }
 
+    /// Preserve the requested output marker only if it remains distinct after conversion.
+    fn restore_dem_markers<T: Copy + PartialEq>(
+        values: &mut [T],
+        valid: &[bool],
+        plane: usize,
+        markers: &mut [Option<f64>],
+        cast: impl Fn(f64) -> T,
+    ) {
+        for ((samples, covered), marker) in values.chunks_exact_mut(plane)
+            .zip(valid.chunks_exact(plane)).zip(markers)
+        {
+            if let Some(number) = *marker {
+                let fill = cast(number);
+                if samples.iter().zip(covered).any(|(&v, &ok)| ok && v == fill) {
+                    *marker = Some(f64::NAN);
+                } else {
+                    for (sample, &ok) in samples.iter_mut().zip(covered) {
+                        if !ok {
+                            *sample = fill;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn to_f32_array(array: &RasterArray) -> PyResult<RasterArray> {
         let values = raster_to_f64(array)
             .into_iter()
@@ -1242,6 +1308,7 @@ mod py {
         transform: AffineTransform,
     ) -> PyResult<RasterArray> {
         let (xres, yres) = transform.resolution();
+        let masked = values[..array.height * array.width].iter().any(|v| !v.is_finite());
         let mut out = vec![0.0f32; array.height * array.width];
         for row in 0..array.height {
             for col in 0..array.width {
@@ -1249,24 +1316,29 @@ mod py {
                 let right = sample(values, array, (col + 1).min(array.width - 1), row);
                 let up = sample(values, array, col, row.saturating_sub(1));
                 let down = sample(values, array, col, (row + 1).min(array.height - 1));
-                let dzdx = (right - left) / (2.0 * xres);
-                let dzdy = (down - up) / (2.0 * yres);
+                let (dzdx, dzdy) = if masked {
+                    use crate::terrain::analysis::axis_difference;
+                    let center = sample(values, array, col, row);
+                    let left = if col == 0 { f64::NAN } else { left };
+                    let right = if col + 1 == array.width { f64::NAN } else { right };
+                    let up = if row == 0 { f64::NAN } else { up };
+                    let down = if row + 1 == array.height { f64::NAN } else { down };
+                    (axis_difference(center, left, right) / xres, axis_difference(center, up, down) / yres)
+                } else {
+                    ((right - left) / (2.0 * xres), (down - up) / (2.0 * yres))
+                };
                 out[row * array.width + col] = dzdx.hypot(dzdy).atan().to_degrees() as f32;
             }
         }
         RasterArray::new(RasterData::F32(out), &[1, array.height, array.width]).map_err(Into::into)
     }
 
-    fn hillshade_array(
-        values: &[f64],
-        array: &RasterArray,
-        transform: AffineTransform,
-    ) -> PyResult<RasterArray> {
-        let slope = raster_to_f64(&slope_array(values, array, transform)?);
+    fn hillshade_array(slope: &[f64], array: &RasterArray) -> PyResult<RasterArray> {
         let azimuth = 315f64.to_radians();
         let altitude = 45f64.to_radians();
         let mut out = Vec::with_capacity(slope.len());
         for slope_deg in slope {
+            if !slope_deg.is_finite() { out.push(0); continue; }
             let slope_rad = slope_deg.to_radians();
             let shade = (altitude.sin() * slope_rad.cos()
                 + altitude.cos() * slope_rad.sin() * azimuth.cos())

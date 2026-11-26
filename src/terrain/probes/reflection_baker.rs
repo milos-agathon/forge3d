@@ -134,7 +134,7 @@ impl<'a> HeightfieldReflectionBaker<'a> {
                 weight += wgt;
             }
         }
-        (weight > 0.0).then_some(sum / weight)
+        (weight >= 0.5).then(|| sum / weight)
     }
 
     fn sample_height_scaled(&self, world_x: f32, world_y: f32) -> Option<f32> {
@@ -154,28 +154,24 @@ impl<'a> HeightfieldReflectionBaker<'a> {
             1.0
         };
 
-        let left = self
-            .sample_height_scaled(world_x - step_x, world_y)
-            .or_else(|| self.sample_height_scaled(world_x, world_y))
-            .unwrap_or(0.0);
-        let right = self
-            .sample_height_scaled(world_x + step_x, world_y)
-            .or_else(|| self.sample_height_scaled(world_x, world_y))
-            .unwrap_or(0.0);
-        let down = self
-            .sample_height_scaled(world_x, world_y - step_y)
-            .or_else(|| self.sample_height_scaled(world_x, world_y))
-            .unwrap_or(0.0);
-        let up = self
-            .sample_height_scaled(world_x, world_y + step_y)
-            .or_else(|| self.sample_height_scaled(world_x, world_y))
-            .unwrap_or(0.0);
-
-        normalize3([
-            -(right - left) / (2.0 * step_x.max(1e-4)),
-            -(up - down) / (2.0 * step_y.max(1e-4)),
-            1.0,
-        ])
+        let center = self.sample_height_scaled(world_x, world_y);
+        let gradient = |lo: Option<f32>, hi: Option<f32>, step: f32| match (lo, hi) {
+            (Some(l), Some(r)) => (r - l) / (2.0 * step),
+            (Some(l), None) => center.map_or(0.0, |c| (c - l) / step),
+            (None, Some(r)) => center.map_or(0.0, |c| (r - c) / step),
+            _ => 0.0,
+        };
+        let dx = gradient(
+            self.sample_height_scaled(world_x - step_x, world_y),
+            self.sample_height_scaled(world_x + step_x, world_y),
+            step_x.max(1e-4),
+        );
+        let dy = gradient(
+            self.sample_height_scaled(world_x, world_y - step_y),
+            self.sample_height_scaled(world_x, world_y + step_y),
+            step_y.max(1e-4),
+        );
+        normalize3([-dx, -dy, 1.0])
     }
 
     fn trace_surface(&self, origin: [f32; 3], direction: [f32; 3]) -> Option<SurfaceHit> {

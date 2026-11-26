@@ -292,6 +292,10 @@ impl MemoryPageStore {
     /// its own store, so pages are keyed by (mip, x, y) and the family axis of
     /// the key is not part of this store's address space.
     pub fn new(rgba: &[u8], virtual_size: (u32, u32), family_count: u32) -> Result<Self, String> {
+        Self::from_source(rgba, virtual_size, family_count, false)
+    }
+
+    pub(crate) fn from_source(rgba: &[u8], virtual_size: (u32,u32), family_count: u32, masked_color: bool) -> Result<Self,String> {
         if virtual_size.0 == 0 || virtual_size.1 == 0 {
             return Err("VT ingest virtual size must be > 0 in both dimensions".to_string());
         }
@@ -306,7 +310,7 @@ impl MemoryPageStore {
         }
         Ok(Self {
             content_hash: sha256(rgba),
-            mips: Arc::new(build_mip_chain(rgba, virtual_size)),
+            mips: Arc::new(build_mip_chain(rgba, virtual_size, masked_color)),
             metadata: StoreMetadata {
                 virtual_width: u64::from(virtual_size.0),
                 virtual_height: u64::from(virtual_size.1),
@@ -424,7 +428,7 @@ impl VirtualTextureStore for MemoryPageStore {
 }
 
 /// Box-filtered RGBA8 mip chain, down to 1x1.
-fn build_mip_chain(data: &[u8], size: (u32, u32)) -> Vec<MemoryMip> {
+fn build_mip_chain(data: &[u8], size: (u32, u32), masked_color: bool) -> Vec<MemoryMip> {
     let mut chain = vec![MemoryMip {
         width: size.0,
         height: size.1,
@@ -443,10 +447,13 @@ fn build_mip_chain(data: &[u8], size: (u32, u32)) -> Vec<MemoryMip> {
             for x in 0..next_width {
                 let mut accum = [0u32; INGEST_BYTES_PER_PIXEL];
                 let mut sample_count = 0u32;
+                let mut footprint = 0u32;
                 for src_y in (y * 2)..((y * 2 + 2).min(previous.height)) {
                     for src_x in (x * 2)..((x * 2 + 2).min(previous.width)) {
                         let src = (src_y as usize * previous.width as usize + src_x as usize)
                             * INGEST_BYTES_PER_PIXEL;
+                        footprint += 1;
+                        if masked_color && previous.data[src+3] == 0 { continue; }
                         for channel in 0..INGEST_BYTES_PER_PIXEL {
                             accum[channel] += u32::from(previous.data[src + channel]);
                         }
@@ -454,6 +461,7 @@ fn build_mip_chain(data: &[u8], size: (u32, u32)) -> Vec<MemoryMip> {
                     }
                 }
                 let dst = (y as usize * next_width as usize + x as usize) * INGEST_BYTES_PER_PIXEL;
+                if sample_count * 2 < footprint { continue; }
                 for channel in 0..INGEST_BYTES_PER_PIXEL {
                     next_data[dst + channel] = (accum[channel] / sample_count.max(1)) as u8;
                 }
@@ -1525,6 +1533,23 @@ mod tests {
         assert!(error.contains("not strictly sorted"), "{error}");
         std::fs::remove_file(path).unwrap();
         std::fs::remove_file(swapped).unwrap();
+    }
+
+    #[test]
+    fn vacuum_albedo_mips_ignore_hidden_rgb() {
+        // The fifth column exercises the singleton parent at an odd edge.
+        let pixels = [[10,20,30,255], [250,0,220,0], [250,0,220,0], [250,0,220,0], [50,60,70,255]];
+        let levels = build_mip_chain(pixels.as_flattened(), (5,1), true);
+        let expected: &[&[[u8;4]]] = &[
+            &pixels,
+            &[[10,20,30,255], [0;4], [50,60,70,255]],
+            &[[10,20,30,255], [50,60,70,255]],
+            &[[30,40,50,255]],
+        ];
+        assert_eq!(levels.len(), expected.len());
+        for (level, reference) in levels.iter().zip(expected) {
+            assert_eq!(level.data, reference.as_flattened());
+        }
     }
 
     #[test]

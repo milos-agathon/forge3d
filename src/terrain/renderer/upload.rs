@@ -202,35 +202,45 @@ impl TerrainScene {
             depth_or_array_layers: 1,
         };
 
+        use crate::terrain::masked_height::{masked_texels, reduce_level};
+        let mut masked = masked_texels(data);
+        let levels = if masked.is_some() { width.max(height).ilog2() + 1 } else { 1 };
+        let format = if masked.is_some() { wgpu::TextureFormat::Rg32Float } else { wgpu::TextureFormat::R32Float };
         let texture = tracked_create_texture(
             &self.device,
             &wgpu::TextureDescriptor {
                 label: Some("terrain.heightmap"),
                 size,
-                mip_level_count: 1,
+                mip_level_count: levels,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R32Float,
+                format,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             },
         )?;
 
-        self.queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            bytemuck::cast_slice(data),
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(width * 4),
-                rows_per_image: Some(height),
-            },
-            size,
-        );
+        let floor = masked.as_ref().and_then(|level| {
+            level.iter().find(|sample| sample[1] > 0.5).map(|sample| sample[0])
+        }).unwrap_or(0.0);
+        let (mut w, mut h) = (width, height);
+        for mip_level in 0..levels {
+            let (bytes, stride) = if let Some(ref texels) = masked {
+                (bytemuck::cast_slice(texels), 8)
+            } else {
+                (bytemuck::cast_slice(data), 4)
+            };
+            self.queue.write_texture(
+                wgpu::ImageCopyTexture { texture: &texture, mip_level, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                bytes, wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(w * stride), rows_per_image: Some(h) },
+                wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            );
+            if mip_level + 1 < levels {
+                masked = masked.as_ref().map(|previous| reduce_level(previous, w, h, floor));
+                w = (w / 2).max(1);
+                h = (h / 2).max(1);
+            }
+        }
 
         Ok(texture)
     }

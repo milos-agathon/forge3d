@@ -68,6 +68,7 @@ pub fn make_bg_height(
     device: &Device,
     view: &TextureView,
     samp: &Sampler,
+    coverage: &TextureView,
 ) -> BindGroup {
     device.create_bind_group(&BindGroupDescriptor {
         label: Some("vf.Terrain.bg.height"),
@@ -80,6 +81,10 @@ pub fn make_bg_height(
             BindGroupEntry {
                 binding: 1,
                 resource: BindingResource::Sampler(samp),
+            },
+            BindGroupEntry {
+                binding: 2,
+                resource: BindingResource::TextureView(coverage),
             },
         ],
     })

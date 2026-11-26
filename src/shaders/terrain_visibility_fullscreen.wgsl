@@ -56,24 +56,9 @@ struct VisibilityReconstructedVertex {
 fn visibility_reconstruct_vertex(index: u32) -> VisibilityReconstructedVertex {
     let source = terrain_visibility_vertices[index];
     let uv = clamp(source.uv, vec2<f32>(0.0), vec2<f32>(1.0));
-    let h_fine = sample_height_bilinear(uv);
-    // Geomorphing, mirrored from `vs_clipmap_main`. Reconstructing from the
-    // FINE height alone put every morphing vertex at a different clip position
-    // than pass 1 rasterised it from, which tilts the triangle and biases the
-    // barycentrics -- and therefore the interpolated UV -- by a fraction of a
-    // pixel across the whole morph band of every clipmap ring.
-    let height_dims = vec2<f32>(textureDimensions(height_tex));
-    let coarse_texels = det_exp2(min(max(source.morph_data.y, 0.0) + 1.0, 16.0));
-    let coarse_step = det_div2(vec2<f32>(coarse_texels), max(height_dims - vec2<f32>(1.0), vec2<f32>(1.0)));
-    let coarse_cell = det_div2(uv, coarse_step);
-    let coarse_base = floor(coarse_cell) * coarse_step;
-    let coarse_t = fract(coarse_cell);
-    let h00 = sample_height_bilinear(clamp(coarse_base, vec2<f32>(0.0), vec2<f32>(1.0)));
-    let h10 = sample_height_bilinear(clamp(det_barrier2(coarse_base) + vec2<f32>(coarse_step.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)));
-    let h01 = sample_height_bilinear(clamp(det_barrier2(coarse_base) + vec2<f32>(0.0, coarse_step.y), vec2<f32>(0.0), vec2<f32>(1.0)));
-    let h11 = sample_height_bilinear(clamp(det_barrier2(coarse_base) + coarse_step, vec2<f32>(0.0), vec2<f32>(1.0)));
-    let h_coarse = det_mix(det_mix(h00, h10, coarse_t.x), det_mix(h01, h11, coarse_t.x), coarse_t.y);
-    let h_raw = det_barrier(det_mix(h_fine, h_coarse, clamp(source.morph_data.x, 0.0, 1.0)));
+    let ring = select(source.morph_data.y, -source.morph_data.y - 1.0, source.morph_data.y < 0.0);
+    let fine = select(0.0, ring, source.morph_data.y < 0.0);
+    let h_raw = clipmap_morphed_height(uv, fine, ring, logical_height_dimensions(), clamp(source.morph_data.x, 0.0, 1.0));
     let t_geom = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;

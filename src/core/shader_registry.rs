@@ -200,6 +200,18 @@ pub fn create_compute_pipeline_scoped(
     with_error_scope(device, label, || device.create_compute_pipeline(descriptor))
 }
 
+/// Return a compiler failure before a terrain draw can use an invalid pipeline.
+pub fn try_create_render_pipeline_scoped(
+    device: &wgpu::Device,
+    descriptor: &wgpu::RenderPipelineDescriptor<'_>,
+) -> Result<wgpu::RenderPipeline, crate::core::error::RenderError> {
+    let label = descriptor
+        .label
+        .expect("render pipelines require a stable label");
+    try_create_pipeline(device, label, || device.create_render_pipeline(descriptor))
+        .map_err(crate::core::error::RenderError::degraded_capability)
+}
+
 /// Create a compute pipeline under a validation error scope and return the
 /// backend compiler error to callers that must fail closed.
 pub fn try_create_compute_pipeline_scoped(
@@ -209,8 +221,16 @@ pub fn try_create_compute_pipeline_scoped(
     let label = descriptor
         .label
         .expect("compute pipelines require a stable label");
+    try_create_pipeline(device, label, || device.create_compute_pipeline(descriptor))
+}
+
+fn try_create_pipeline<T>(
+    device: &wgpu::Device,
+    label: &str,
+    create: impl FnOnce() -> T,
+) -> Result<T, String> {
     device.push_error_scope(wgpu::ErrorFilter::Validation);
-    let pipeline = device.create_compute_pipeline(descriptor);
+    let pipeline = create();
     if let Some(error) = pollster::block_on(device.pop_error_scope()) {
         let message = error.to_string();
         record_degradation("validation_error", label, &message);

@@ -1041,14 +1041,15 @@ def hybrid_render_terrain_reference(
             "hybrid_render_terrain_reference requires the native forge3d "
             "module with GPU support"
         )
-    dem = np.ascontiguousarray(heightmap, dtype=np.float32)
+    from ._raster_sampling import height_array
+    dem = height_array(heightmap)
     if dem.ndim != 2:
         raise ValueError(f"heightmap must be 2D (H, W), got shape {dem.shape}")
     if dem.shape[0] < 2 or dem.shape[1] < 2:
         raise ValueError(
             f"terrain heightfield must be at least 2x2 texels, got {dem.shape[1]}x{dem.shape[0]}"
         )
-    if not np.isfinite(dem).all():
+    if np.isinf(dem).any() or not np.isfinite(dem).any():
         raise ValueError("heightmap contains non-finite samples")
     if int(min_frames) > int(max_frames):
         raise ValueError(
@@ -1388,15 +1389,16 @@ def render_terrain_poster(
     if output_width <= 0 or output_height <= 0 or tile_size <= 0:
         raise ValueError("width, height, and tile must be positive")
 
+    from ._raster_sampling import height_array
+
+    dem = height_array(heightmap)
     # A checkpointed job hashes and renders the same owned scene data.
     # A caller can change its arrays while a tile receipt is being published.
-    dem = (
-        np.array(heightmap, dtype=np.float32, order="C", copy=True)
-        if path is not None else np.ascontiguousarray(np.asarray(heightmap, dtype=np.float32))
-    )
+    if path is not None:
+        dem = dem.copy()
     if dem.ndim != 2:
         raise ValueError(f"heightmap must be 2D (H, W), got shape {dem.shape}")
-    if not np.isfinite(dem).all():
+    if np.isinf(dem).any() or not np.isfinite(dem).any():
         raise ValueError("heightmap contains non-finite samples")
 
     material = None

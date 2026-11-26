@@ -9,6 +9,7 @@ pub fn create_terrain_pipeline(
     sample_count: u32,
     depth_format: Option<TextureFormat>,
     height_filterable: bool,
+    scene_effects: bool,
 ) -> TerrainPipeline {
     // Detect descriptor indexing capabilities from current device
     let features = device.features();
@@ -65,6 +66,18 @@ pub fn create_terrain_pipeline(
                 } else {
                     SamplerBindingType::NonFiltering
                 }),
+                count: None,
+            },
+            BindGroupLayoutEntry {
+                binding: 2,
+                visibility: ShaderStages::VERTEX_FRAGMENT,
+                ty: BindingType::Texture {
+                    sample_type: TextureSampleType::Float {
+                        filterable: height_filterable,
+                    },
+                    view_dimension: TextureViewDimension::D2,
+                    multisampled: false,
+                },
                 count: None,
             },
         ],
@@ -232,7 +245,7 @@ pub fn create_terrain_pipeline(
 
     // Respect device bind group limit (some devices only support 4)
     let max_groups = limits.max_bind_groups;
-    let use_minimal_layout = max_groups < 6;
+    let use_minimal_layout = !scene_effects || max_groups < 6;
 
     let mut bgls: Vec<&BindGroupLayout> = vec![&bgl_globals, &bgl_height, &bgl_lut];
     // Always put tile at group(3)

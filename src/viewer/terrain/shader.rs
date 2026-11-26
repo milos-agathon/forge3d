@@ -1,7 +1,9 @@
 // src/viewer/terrain/shader.rs
 // WGSL shader for terrain rendering
 
-pub const TERRAIN_SHADER: &str = r#"
+pub const TERRAIN_SHADER: &str = concat!(
+    include_str!("shader_pbr/masked_grid.wgsl"),
+    r#"
 struct Uniforms {
     view_proj: mat4x4<f32>,
     sun_dir: vec4<f32>,
@@ -33,6 +35,9 @@ fn height_to_world_y(h: f32) -> f32 {
 }
 
 fn compute_heightmap_normal(uv: vec2<f32>) -> vec3<f32> {
+    let node = viewer_height_node(uv);
+    let tap = textureLoad(heightmap,node,0).rg;
+    if (tap.y != 0.0) { return viewer_masked_normal(node,tap.x,1.0); }
     let dims_u = textureDimensions(heightmap);
     let dims = vec2<f32>(f32(dims_u.x), f32(dims_u.y));
     let max_texel = vec2<i32>(i32(dims_u.x) - 1, i32(dims_u.y) - 1);
@@ -71,18 +76,19 @@ fn vs_main(@location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOut
     let h = textureLoad(heightmap, texel, 0).r;
     let world_y = height_to_world_y(h);
 
-    let world_xz = u.render_origin_xz + uv * u.render_span_xz;
+    let world_xz = u.render_origin_xz + pos * u.render_span_xz;
     
     var out: VertexOutput;
     out.world_pos = vec3<f32>(world_xz.x, world_y, world_xz.y);
     out.position = u.view_proj * vec4<f32>(out.world_pos, 1.0);
-    out.uv = uv;
+    out.uv = pos;
     out.raw_height = h;
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    if (textureLoad(heightmap,viewer_height_node(in.uv),0).g > 0.5) { discard; }
     let sun_intensity = u.lighting.x;
     let ambient = u.lighting.y;
     let shadow_strength = u.lighting.z;
@@ -130,4 +136,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     
     return vec4<f32>(final_color, 1.0);
 }
-"#;
+"#
+);

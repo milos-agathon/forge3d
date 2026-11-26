@@ -270,7 +270,7 @@ impl ViewerTerrainScene {
                         // Heightmap texture (R32Float is non-filterable, use textureLoad in shader)
                         wgpu::BindGroupLayoutEntry {
                             binding: 1,
-                            visibility: wgpu::ShaderStages::VERTEX,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                             ty: wgpu::BindingType::Texture {
                                 sample_type: wgpu::TextureSampleType::Float { filterable: false },
                                 view_dimension: wgpu::TextureViewDimension::D2,
@@ -305,47 +305,57 @@ impl ViewerTerrainScene {
             });
 
         // Create depth-only render pipeline
-        let pipeline = crate::core::shader_registry::create_render_pipeline_scoped(
-            &self.device,
-            &wgpu::RenderPipelineDescriptor {
-                label: Some("terrain_viewer.shadow_depth.pipeline"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: "vs_shadow",
-                    buffers: &[], // Vertices generated procedurally from vertex_index
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: "fs_shadow",
-                    targets: &[], // Depth-only, no color attachments
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None, // Disable culling - light view may flip winding
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState {
-                        constant: 2, // Small bias to prevent shadow acne
-                        slope_scale: 2.0,
-                        clamp: 0.0,
+        let make_pipeline = |entry_point, buffers: &[wgpu::VertexBufferLayout<'_>]| {
+            crate::core::shader_registry::create_render_pipeline_scoped(
+                &self.device,
+                &wgpu::RenderPipelineDescriptor {
+                    label: Some("terrain_viewer.shadow_depth.pipeline"),
+                    layout: Some(&pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &shader,
+                        entry_point,
+                        buffers,
                     },
-                }),
-                multisample: wgpu::MultisampleState::default(),
-                multiview: None,
-            },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &shader,
+                        entry_point: "fs_shadow",
+                        targets: &[], // Depth-only, no color attachments
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleList,
+                        strip_index_format: None,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode: None, // Disable culling - light view may flip winding
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                        unclipped_depth: false,
+                        conservative: false,
+                    },
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: wgpu::TextureFormat::Depth32Float,
+                        depth_write_enabled: true,
+                        depth_compare: wgpu::CompareFunction::Less,
+                        stencil: wgpu::StencilState::default(),
+                        bias: wgpu::DepthBiasState {
+                            constant: 2, // Small bias to prevent shadow acne
+                            slope_scale: 2.0,
+                            clamp: 0.0,
+                        },
+                    }),
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
+                },
+            )
+        };
+        let dense = make_pipeline("vs_shadow", &[]);
+        let masked = make_pipeline(
+            "vs_shadow_masked",
+            &[wgpu::VertexBufferLayout {
+                array_stride: 16,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2],
+            }],
         );
-
-        self.shadow_pipeline = Some(pipeline);
+        self.shadow_pipeline = Some((dense, masked));
 
         // Create per-cascade uniform buffers
         self.shadow_uniform_buffers.clear();
@@ -474,7 +484,7 @@ impl ViewerTerrainScene {
                         },
                         wgpu::BindGroupLayoutEntry {
                             binding: 1,
-                            visibility: wgpu::ShaderStages::VERTEX,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                             ty: wgpu::BindingType::Texture {
                                 sample_type: wgpu::TextureSampleType::Float { filterable: false },
                                 view_dimension: wgpu::TextureViewDimension::D2,

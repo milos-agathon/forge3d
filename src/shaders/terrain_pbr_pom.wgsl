@@ -475,7 +475,13 @@ fn height_overview_uv(global_uv: vec2<f32>) -> vec3<f32> {
 // R32Float height textures are intentionally bound as unfilterable on the
 // portable terrain path. Reconstruct bilinear filtering explicitly so height
 // sampling is identical on adapters that cannot filter this format.
-fn sample_height_bilinear_level(uv: vec2<f32>, lod: f32) -> f32 {
+// Local R32F uploads have one level. A holed local DEM uses RG32F plus
+// its full mip chain. One-cell rasters cannot be partially covered.
+fn local_height_has_mask() -> bool {
+    return textureNumLevels(height_tex) > 1u && height_pages.header.enabled == 0u;
+}
+
+fn overview_sample(uv: vec2<f32>, lod: f32) -> vec3<f32> {
     let last_level = i32(textureNumLevels(height_tex)) - 1;
     var level = clamp(i32(floor(lod + 0.5)), 0, last_level);
     let dimensions = textureDimensions(height_tex, level);
@@ -495,15 +501,22 @@ fn sample_height_bilinear_level(uv: vec2<f32>, lod: f32) -> f32 {
         vec2<f32>(0.0),
         vec2<f32>(1.0),
     );
-    let h00 = textureLoad(height_tex, vec2<i32>(x0, y0), level).r;
-    let h10 = textureLoad(height_tex, vec2<i32>(x1, y0), level).r;
-    let h01 = textureLoad(height_tex, vec2<i32>(x0, y1), level).r;
-    let h11 = textureLoad(height_tex, vec2<i32>(x1, y1), level).r;
-    let overview_height = det_barrier(overview_mapping.z * det_mix(
-        det_mix(h00, h10, blend.x),
-        det_mix(h01, h11, blend.x),
-        blend.y),
-    );
+    let h00 = textureLoad(height_tex, vec2<i32>(x0, y0), level).rg;
+    let h10 = textureLoad(height_tex, vec2<i32>(x1, y0), level).rg;
+    let h01 = textureLoad(height_tex, vec2<i32>(x0, y1), level).rg;
+    let h11 = textureLoad(height_tex, vec2<i32>(x1, y1), level).rg;
+    if (!local_height_has_mask()) {
+        let value = det_mix(det_mix(h00.x, h10.x, blend.x), det_mix(h01.x, h11.x, blend.x), blend.y);
+        return vec3<f32>(det_barrier(overview_mapping.z * value), 1.0, 0.0);
+    }
+    let result = height_footprint(h00, h10, h01, h11, blend);
+    return vec3<f32>(det_barrier(overview_mapping.z * result.x), result.yz);
+}
+
+fn sample_height_bilinear_level(uv: vec2<f32>, lod: f32) -> f32 {
+    let overview = overview_sample(uv, lod);
+    let overview_mapping = height_overview_uv(uv);
+    let overview_height = overview.x;
     if (height_pages.header.enabled != 0u) {
         let rounded_lod = u32(max(floor(lod + 0.5), 0.0));
         let target_lod = height_target_lod();
@@ -820,14 +833,22 @@ fn water_surface_sample(uv: vec2<f32>) -> vec4<f32> {
     let a = clamp(vec2<i32>(floor(p)), vec2<i32>(0), last);
     let b = clamp(a + vec2<i32>(1), vec2<i32>(0), last);
     let w = p - vec2<f32>(a);
-    return det_mix4(det_mix4(textureLoad(water_mask_tex, a, 0),
-                   textureLoad(water_mask_tex, vec2<i32>(b.x, a.y), 0), w.x),
-               det_mix4(textureLoad(water_mask_tex, vec2<i32>(a.x, b.y), 0),
-                   textureLoad(water_mask_tex, b, 0), w.x), w.y);
+    let p00 = textureLoad(water_mask_tex, a, 0);
+    let p10 = textureLoad(water_mask_tex, vec2<i32>(b.x, a.y), 0);
+    let p01 = textureLoad(water_mask_tex, vec2<i32>(a.x, b.y), 0);
+    let p11 = textureLoad(water_mask_tex, b, 0);
+    let value = det_mix4(det_mix4(p00,p10,w.x),det_mix4(p01,p11,w.x),w.y);
+    let coverage = vec4<f32>(p00.x,p10.x,p01.x,p11.x);
+    if (all(coverage > vec4<f32>(0.0))) { return value; }
+    let weights = vec4<f32>((1.0-det_barrier(w.x))*(1.0-det_barrier(w.y)),w.x*(1.0-det_barrier(w.y)),(1.0-det_barrier(w.x))*w.y,w.x*w.y);
+    let support = det_dot4(weights,select(vec4<f32>(0.0),vec4<f32>(1.0),coverage>vec4<f32>(0.0)));
+    if (support < 0.5) { return vec4<f32>(0.0); }
+    return vec4<f32>(value.x,det_div3(value.yzw,vec3<f32>(max(support,0.5))));
 }
 
 fn water_coverage(uv: vec2<f32>) -> f32 {
     let tex_uv = raster_texture_uv(uv, textureDimensions(water_mask_tex));
+    if (physical_water_enabled()) { return water_surface_sample(uv).x; }
     return textureSampleLevel(water_mask_tex, height_samp, tex_uv, 0.0).r;
 }
 
@@ -1002,6 +1023,37 @@ fn raster_texture_uv(node_uv: vec2<f32>, dimensions: vec2<u32>) -> vec2<f32> {
     let dims = vec2<f32>(dimensions);
     let node = det_barrier2(node_uv * (dims - vec2<f32>(1.0)));
     return det_div2(node + vec2<f32>(0.5), dims);
+}
+
+// RGB underneath fully transparent geographic texels is zeroed at upload.
+// Fractional opacity is independent of support: only zero-alpha nodes are holes.
+fn sample_drape(uv: vec2<f32>) -> vec4<f32> {
+    let color = textureSampleLevel(material_drape_tex, material_map_samp, uv, 0.0);
+    if (color.a == 0.0 || color.a == 1.0) { return color; }
+    let dims = vec2<i32>(textureDimensions(material_drape_tex, 0));
+    let last = max(dims - vec2<i32>(1), vec2<i32>(0));
+    let xy = clamp(det_barrier2(uv * vec2<f32>(dims)) - vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(last));
+    let p = vec2<i32>(floor(xy));
+    let f = fract(xy);
+    let ca = textureLoad(material_drape_tex,clamp(p,vec2<i32>(0),last),0);
+    let cb = textureLoad(material_drape_tex,clamp(p+vec2<i32>(1,0),vec2<i32>(0),last),0);
+    let cc = textureLoad(material_drape_tex,clamp(p+vec2<i32>(0,1),vec2<i32>(0),last),0);
+    let cd = textureLoad(material_drape_tex,clamp(p+vec2<i32>(1,1),vec2<i32>(0),last),0);
+    let present = select(vec4<f32>(0.0), vec4<f32>(1.0), vec4<bool>(ca.a>0.0, cb.a>0.0, cc.a>0.0, cd.a>0.0));
+    if (all(present == vec4<f32>(1.0))) { return color; }
+    let w = det_barrier4(vec4<f32>((1.0-f.x)*(1.0-f.y), f.x*(1.0-f.y), (1.0-f.x)*f.y, f.x*f.y));
+    let support = det_dot4(w, present);
+    if (support < 0.5) { return vec4<f32>(0.0); }
+    // Reconstruct from matching software weights. Hardware filtering may
+    // quantize its fractional coordinates differently on different adapters.
+    let weighted = w * present;
+    let a = det_barrier4(ca * det_barrier(weighted.x));
+    let b = det_barrier4(cb * det_barrier(weighted.y));
+    let c = det_barrier4(cc * det_barrier(weighted.z));
+    let d = det_barrier4(cd * det_barrier(weighted.w));
+    let numerator = det_barrier4(det_barrier4(a + b) + c) + d;
+    let result = det_div4(numerator, vec4<f32>(max(support, 0.5)));
+    return clamp(result, vec4<f32>(0.0), vec4<f32>(1.0));
 }
 
 struct TerrainFrameCounters {
@@ -2181,7 +2233,54 @@ fn sample_height_geom_level(uv: vec2<f32>, lod: f32) -> f32 {
 // terrain mode this mirrors hybrid_terrain_traversal.wgsl::terrain_normal_at:
 // the same four corner heights, exaggeration, cell spacing, and analytic
 // bilinear derivatives are used by the production reference surface.
+fn height_node(node: vec2<i32>) -> vec2<f32> {
+    let extent = vec2<i32>(textureDimensions(height_tex, 0));
+    let raw = textureLoad(height_tex, clamp(node, vec2<i32>(0), max(extent - vec2<i32>(1), vec2<i32>(0))), 0).rg;
+    if (raw.y > 0.5) { return raw; }
+    let range = u_shading.clamp0.y - u_shading.clamp0.x;
+    let height = det_fma(apply_height_curve01(get_height_geom_t(raw.x)), range, u_shading.clamp0.x);
+    return vec2<f32>(height, raw.y);
+}
+
+fn masked_height_axis(center: f32, lo: vec2<f32>, hi: vec2<f32>, low_ok: bool, high_ok: bool) -> f32 {
+    let l = low_ok && lo.y <= 0.5;
+    let r = high_ok && hi.y <= 0.5;
+    if (l && r) { return (hi.x - lo.x) * 0.5; }
+    if (l) { return center - lo.x; }
+    if (r) { return hi.x - center; }
+    return 0.0;
+}
+
+fn masked_height_normal(uv: vec2<f32>) -> vec3<f32> {
+    let last = vec2<i32>(textureDimensions(height_tex,0)) - vec2<i32>(1);
+    let cells = vec2<f32>(max(last, vec2<i32>(1)));
+    let xy = det_barrier2(clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)) * cells);
+    var node = vec2<i32>(round(xy));
+    if (height_node(node).y > 0.5) {
+        var nearest = 4.0;
+        let base = vec2<i32>(floor(xy));
+        for (var i=0; i<4; i++) {
+            let candidate = min(base+vec2<i32>(i%2,i/2), last);
+            let d = vec2<f32>(candidate) - xy;
+            let distance = det_dot2(d,d);
+            if (height_node(candidate).y <= 0.5 && distance < nearest) {
+                node = candidate;
+                nearest = distance;
+            }
+        }
+    }
+    let step = det_div2(vec2<f32>(1.0), cells);
+    let c = det_barrier(height_node(node).x);
+    let ex = vec2<i32>(1,0);
+    let ey = vec2<i32>(0,1);
+    let dx = masked_height_axis(c,det_barrier2(height_node(node-ex)),det_barrier2(height_node(node+ex)),node.x>0,node.x<last.x);
+    let dy = masked_height_axis(c,det_barrier2(height_node(node-ey)),det_barrier2(height_node(node+ey)),node.y>0,node.y<last.y);
+    let grad = det_div2(det_barrier2(vec2<f32>(dx,dy)) * u_terrain.spacing_h_exag.z, max(step * u_terrain.spacing_h_exag.xy, vec2<f32>(1.17549435e-38)));
+    return det_normalize3(terrain_zup_to_geometry(vec3<f32>(-grad, 1.0)));
+}
+
 fn terrain_reference_geometric_normal(uv: vec2<f32>) -> vec3<f32> {
+    if (local_height_has_mask()) { return masked_height_normal(uv); }
     let dimensions = max(logical_height_dimensions(), vec2<f32>(2.0));
     let cell_count = max(dimensions - vec2<f32>(1.0), vec2<f32>(1.0));
     let texel = det_barrier2(clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)) * cell_count);
@@ -3495,7 +3594,9 @@ fn sample_dem_detail_normal(uv: vec2<f32>) -> vec3<f32> {
     // Sample the detail normal texture
     // The uploaded map has one mip. Explicit LOD also allows distance/water
     // gating without relying on derivatives in non-uniform control flow.
-    let sample = textureSampleLevel(detail_normal_tex, detail_normal_samp, uv, 0.0);
+    let filtered = textureSampleLevel(detail_normal_tex, detail_normal_samp, uv, 0.0);
+    if (filtered.a < 0.5) { return vec3<f32>(0.0,0.0,1.0); }
+    let sample = det_div4(filtered, vec4<f32>(max(filtered.a, 0.5)));
     // Decode from [0,1] to [-1,1] per channel (tangent space: R=X, G=Y, B=Z)
     let decoded = det_barrier3(sample.rgb * 2.0) - 1.0;
     // Ensure valid normal (avoid NaN from zero-length vectors)
@@ -4345,11 +4446,8 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
         uv = det_barrier2(vec2<f32>(det_barrier(input.world_position.x * inv_span) + 0.5,
                                   0.5 - det_barrier(input.world_position.y * inv_span)));
     }
-    // No-data cells (params6.z enables, params6.y is the raw-height
-    // threshold): the caller stores them just below the lowest valid height,
-    // so a fragment whose unclamped height falls under the threshold lies on
-    // no source data and is left empty rather than shaded or attributed.
-    if (u_overlay.params6.z > 0.5 && sample_height(uv) < u_overlay.params6.y) {
+    let masked_height = local_height_has_mask();
+    if (masked_height && overview_sample(uv, 0.0).y < 0.5) {
         discard;
     }
     let debug_mode = u32(u_overlay.params1.y + 0.5);
@@ -4372,6 +4470,8 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
     var height_normal_lod: vec3<f32>;
     if (orbis_globe) {
         height_normal_lod = orbis_globe_height_normal(uv, base_normal);
+    } else if (masked_height) {
+        height_normal_lod = masked_height_normal(uv);
     } else {
         height_normal_lod = calculate_normal_lod_aware(uv);
     }
@@ -4434,7 +4534,10 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
 
     let normal_blend = select(lod_fade, 1.0, physical_normals);
     // Capture pre-normalized normal for specular AA (Toksvig)
-    let mixed_normal = det_mix3(base_normal, amplified_height_normal, normal_blend);
+    // Interpolated mesh normals may use vertices over a hole. Use the
+    // supported derivative over masked terrain at every viewing distance.
+    let mixed_normal = select(det_mix3(base_normal, amplified_height_normal, normal_blend),
+                              height_normal, masked_height && !orbis_globe);
     let normal_len = det_sqrt(det_dot3(mixed_normal, mixed_normal));
     let blended_normal = det_barrier3(mixed_normal * det_rcp(max(normal_len, 1e-5)));
 
@@ -4914,7 +5017,7 @@ fn shade_main(input : VertexOutput) -> FragmentOutput {
             // image's top-to-bottom row convention, without the old zoom.
             drape_uv = vec2<f32>(input.tex_coord.x, 1.0 - input.tex_coord.y);
         }
-        let drape = textureSampleLevel(material_drape_tex, material_map_samp, raster_texture_uv(drape_uv, textureDimensions(material_drape_tex)), 0.0);
+        let drape = sample_drape(raster_texture_uv(drape_uv, textureDimensions(material_drape_tex)));
         final_albedo = det_mix3(final_albedo, drape.rgb, drape.a);
     }
 
@@ -6257,6 +6360,22 @@ fn clipmap_sample_height_level(
     return det_mix(det_mix(h00, h10, level_t.x), det_mix(h01, h11, level_t.x), level_t.y);
 }
 
+// Geometry and the visibility resolve must reconstruct the same morph.
+fn clipmap_morphed_height(uv: vec2<f32>, fine_level: f32, clip_ring_index: f32,
+                          height_dims: vec2<f32>, morph: f32) -> f32 {
+    if (local_height_has_mask()) {
+        let fine = overview_sample(uv, fine_level);
+        let coarse = overview_sample(uv, det_barrier(clip_ring_index + 1.0));
+        let wf = select(0.0, 1.0 - morph, fine.y >= 0.5);
+        let wc = select(0.0, morph, coarse.y >= 0.5);
+        if (wf + wc < 0.5) { return min(fine.x, coarse.x); }
+        return det_div(det_barrier(wf * fine.x) + det_barrier(wc * coarse.x), max(wf + wc, 0.5));
+    }
+    let h_fine = clipmap_sample_height_level(uv, fine_level, height_dims);
+    let h_coarse = clipmap_sample_height_level(uv, clip_ring_index + 1.0, height_dims);
+    return det_barrier(det_mix(h_fine, h_coarse, morph));
+}
+
 fn clipmap_resolve_vertex(
     clip_position: vec3<f32>,
     clip_uv: vec2<f32>,
@@ -6269,9 +6388,7 @@ fn clipmap_resolve_vertex(
     let height_dims = logical_height_dimensions();
     let clip_ring_index = select(clip_morph.y, -clip_morph.y - 1.0, clip_morph.y < 0.0);
     let fine_level = select(0.0, clip_ring_index, clip_morph.y < 0.0);
-    let h_fine = clipmap_sample_height_level(uv, fine_level, height_dims);
-    let h_coarse = clipmap_sample_height_level(uv, clip_ring_index + 1.0, height_dims);
-    let h_raw = det_barrier(det_mix(h_fine, h_coarse, clamp(clip_morph.x, 0.0, 1.0)));
+    let h_raw = clipmap_morphed_height(uv, fine_level, clip_ring_index, height_dims, clamp(clip_morph.x, 0.0, 1.0));
     let t_geom = get_height_geom_t(h_raw);
     let h_min = u_shading.clamp0.x;
     let h_max = u_shading.clamp0.y;
@@ -6345,7 +6462,7 @@ fn water_terrain_vertex(uv: vec2<f32>) -> vec3<f32> {
 fn water_trace_terrain(origin: vec3<f32>, direction: vec3<f32>) -> vec4<f32> {
     let span = u_terrain.spacing_h_exag.x;
     let cells = vec2<i32>(terrain_mesh_grid_dimensions()) - vec2<i32>(1);
-    let start_uv = det_div2(origin.xy, vec2<f32>(span)) + vec2<f32>(0.5);
+    let start_uv = det_barrier2(det_div2(origin.xy, vec2<f32>(span)) + vec2<f32>(0.5));
     let speed = det_div2(direction.xy, vec2<f32>(span));
     var cell = clamp(vec2<i32>(floor(start_uv * vec2<f32>(cells))), vec2<i32>(0), cells - vec2<i32>(1));
     let step = vec2<i32>(select(-1, 1, speed.x >= 0.0), select(-1, 1, speed.y >= 0.0));
@@ -6368,8 +6485,12 @@ fn water_trace_terrain(origin: vec3<f32>, direction: vec3<f32>) -> vec4<f32> {
         let b = det_barrier3(water_terrain_vertex(vec2<f32>(uv1.x, uv0.y)));
         let c = det_barrier3(water_terrain_vertex(uv1));
         let d = det_barrier3(water_terrain_vertex(vec2<f32>(uv0.x, uv1.y)));
-        let t0 = water_triangle_hit(origin, direction, a, b, c, begin, end);
-        let t1 = water_triangle_hit(origin, direction, a, c, d, begin, end);
+        var t0 = water_triangle_hit(origin, direction, a, b, c, begin, end);
+        var t1 = water_triangle_hit(origin, direction, a, c, d, begin, end);
+        if (local_height_has_mask()) {
+            if (t0 > 0.0 && overview_sample(det_barrier2(start_uv + det_barrier2(speed * t0)), 0.0).y < 0.5) { t0 = -1.0; }
+            if (t1 > 0.0 && overview_sample(det_barrier2(start_uv + det_barrier2(speed * t1)), 0.0).y < 0.5) { t1 = -1.0; }
+        }
         var hit = t0;
         if (t1 > 0.0 && (hit < 0.0 || t1 < hit)) { hit = t1; }
         if (hit > 0.0) { return vec4<f32>(origin + det_barrier3(direction * hit), 1.0); }
@@ -6422,7 +6543,7 @@ fn water_reflected_terrain(hit: vec3<f32>, light_dir: vec3<f32>, roughness: f32)
         albedo = det_mix3(material, overlay, clamp(u_overlay.params0.z, 0.0, 1.0));
     }
     if (material_layer_uniforms.map_flags.w > 0.5) {
-        let drape = textureSampleLevel(material_drape_tex, material_map_samp, raster_texture_uv(uv, textureDimensions(material_drape_tex)), 0.0);
+        let drape = sample_drape(raster_texture_uv(uv, textureDimensions(material_drape_tex)));
         albedo = det_mix3(albedo, drape.rgb, drape.a);
     }
     let env_normal = rotate_y(terrain_to_env(normal), u_ibl.sin_theta, u_ibl.cos_theta);

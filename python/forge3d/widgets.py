@@ -53,12 +53,7 @@ def _load_height_array(src: Any) -> np.ndarray:
     if data.size == 0:
         raise ValueError("Inline preview source must not be empty")
 
-    finite = np.isfinite(data)
-    if not finite.any():
-        return np.zeros_like(data, dtype=np.float32)
-
-    fill_value = float(np.nanmin(data[finite]))
-    return np.where(finite, data, fill_value).astype(np.float32)
+    return np.where(np.isfinite(data), data, np.nan)
 
 
 def _palette_rgb(name: Optional[str]) -> np.ndarray:
@@ -95,9 +90,11 @@ def _sample_palette(rgb_lut: np.ndarray, values: np.ndarray) -> np.ndarray:
 
 def _hillshade(heightmap: np.ndarray, azimuth_deg: float, elevation_deg: float, *,
                dx_m: float = 1.0, dy_m: float = 1.0) -> np.ndarray:
+    from ._raster_sampling import gradient
+
     if not np.isfinite([dx_m, dy_m]).all() or min(dx_m, dy_m) <= 0:
         raise ValueError("hillshade spacing must be finite and positive")
-    dy, dx = np.gradient(heightmap.astype(np.float32), dy_m, dx_m)
+    dy, dx = gradient(heightmap.astype(np.float32), dy_m, dx_m)
 
     azimuth = np.deg2rad(float(azimuth_deg))
     elevation = np.deg2rad(float(elevation_deg))
@@ -149,6 +146,13 @@ def _rotate_heightmap(heightmap: np.ndarray, phi_deg: float) -> np.ndarray:
         return heightmap
 
     finite = np.isfinite(heightmap)
+    if not finite.all():
+        def rotate(field):
+            img = Image.fromarray(field.astype(np.float32))
+            return np.asarray(img.rotate(-float(phi_deg), Image.BILINEAR), np.float32)
+        weight = rotate(finite)
+        total = rotate(np.where(finite, heightmap, 0))
+        return np.divide(total, weight, out=np.full_like(total, np.nan), where=weight >= 0.5)
     min_value = float(heightmap[finite].min()) if finite.any() else 0.0
     max_value = float(heightmap[finite].max()) if finite.any() else 1.0
     span = max(max_value - min_value, 1e-6)
@@ -189,7 +193,7 @@ def _render_dem_preview(
     normalized = np.clip((terrain - min_value) / span, 0.0, 1.0)
 
     shade = _hillshade(normalized, lighting_azimuth, lighting_elevation)
-    palette_rgb = _sample_palette(_palette_rgb(palette), normalized)
+    palette_rgb = _sample_palette(_palette_rgb(palette), np.where(finite, normalized, 0))
 
     canvas = np.zeros((int(height), int(width), 4), dtype=np.uint8)
     sky_top = np.array([143, 186, 233], dtype=np.float32)
@@ -213,16 +217,26 @@ def _render_dem_preview(
         row_shade = shade[row]
         row_height = normalized[row]
 
-        color_interp = np.column_stack(
-            [np.interp(x_samples, np.arange(cols, dtype=np.float32), row_color[:, channel]) for channel in range(3)]
-        )
-        shade_interp = np.interp(x_samples, np.arange(cols, dtype=np.float32), row_shade)
-        height_interp = np.interp(x_samples, np.arange(cols, dtype=np.float32), row_height)
+        nodes = np.arange(cols, dtype=np.float32)
+        valid = np.isfinite(row_height) & np.isfinite(row_shade)
+        support = np.interp(x_samples, nodes, valid)
+
+        def interpolate(values):
+            if valid.all():
+                return np.interp(x_samples, nodes, values)
+            total = np.interp(x_samples, nodes, np.where(valid, values, 0))
+            return np.divide(total, support, where=support >= 0.5, out=np.full_like(total, np.nan))
+
+        color_interp = np.column_stack([interpolate(channel) for channel in row_color.T])
+        shade_interp = interpolate(row_shade)
+        height_interp = interpolate(row_height)
 
         lit_rgb = np.clip(color_interp * (0.35 + 0.75 * shade_interp[:, None]), 0.0, 1.0)
         y_line = horizon + row * depth_scale - height_interp * relief_scale
 
         for sx in range(int(width)):
+            if not np.isfinite(y_line[sx]) or not np.isfinite(shade_interp[sx]):
+                continue
             sy = int(np.clip(y_line[sx], 0, height - 1))
             if sy < hidden_y[sx]:
                 canvas[sy:hidden_y[sx], sx, :3] = (lit_rgb[sx] * 255.0).astype(np.uint8)

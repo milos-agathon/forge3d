@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ._raster_sampling import output_nodata, read_band_validity
 from .raster_registration import PixelRegistration, geotiff_registration
 from typing import Dict, List, Optional, Tuple, Any
 
@@ -61,7 +62,7 @@ class DEMData:
 def _valid_dem_mask(data: np.ndarray, nodata: Optional[float]) -> np.ndarray:
     valid = np.isfinite(data)
     if nodata is not None and not np.isnan(nodata):
-        valid &= ~np.isclose(data, nodata, rtol=1e-5)
+        valid &= data != nodata
     return valid
 
 
@@ -331,10 +332,15 @@ def load_dem(
     # Open GeoTIFF
     with rasterio.open(path) as src:
         # Read first band (elevation)
-        data = src.read(1, masked=False).astype(dtype)
-
-        # Get metadata
-        nodata = src.nodata
+        band, valid_mask = read_band_validity(src, 1)
+        data = band.astype(dtype)
+        nodata = output_nodata(data, valid_mask, src.nodata)
+        if not valid_mask.all():
+            if nodata is None:
+                nodata = np.nan
+            if not np.isfinite(nodata) and not np.issubdtype(data.dtype, np.floating):
+                data = data.astype(np.float64)
+            data[~valid_mask] = nodata
         crs = src.crs.to_string() if src.crs else None
         transform = src.transform
         resolution = (abs(transform.a), abs(transform.e))
@@ -342,25 +348,14 @@ def load_dem(
         registration = geotiff_registration(src)
 
     # Fill nodata if requested
-    if fill_nodata_values and nodata is not None:
+    if fill_nodata_values and nodata is not None and valid_mask.any():
         data = fill_nodata(data, float(nodata), method=fill_method)
         nodata = None  # No more nodata after filling
 
-    # Calculate domain
-    if nodata is not None:
-        valid_mask = _valid_dem_mask(data, nodata)
-        valid_data = data[valid_mask]
-        if len(valid_data) > 0:
-            domain = (float(np.min(valid_data)), float(np.max(valid_data)))
-        else:
-            domain = (0.0, 1.0)
-    else:
-        domain = (float(np.min(data)), float(np.max(data)))
+    valid_mask = _valid_dem_mask(data, nodata)
+    valid_data = data[valid_mask]
+    domain = (float(valid_data.min()), float(valid_data.max())) if valid_data.size else (0.0, 1.0)
 
-    # Transform only valid samples so the nodata sentinel remains meaningful.
-    valid_mask = np.isfinite(data)
-    if nodata is not None and not np.isnan(nodata):
-        valid_mask &= ~np.isclose(data, nodata, rtol=1e-5)
     if normalize or target_domain is not None:
         data = data.astype(np.float64, copy=True)
     if normalize:
@@ -371,6 +366,10 @@ def load_dem(
         normalized = (data[valid_mask] - domain[0]) / max(domain[1] - domain[0], 1e-8)
         data[valid_mask] = normalized * (target_domain[1] - target_domain[0]) + target_domain[0]
         domain = target_domain
+
+    if (normalize or target_domain is not None) and nodata is not None and np.any(data[valid_mask] == nodata):
+        nodata = np.nan
+        data[~valid_mask] = nodata
 
     return DEMData(
         data=data,
@@ -413,15 +412,8 @@ def load_dem_from_array(
         raise ValueError(f"DEM data must be 2D, got shape {data.shape}")
 
     if domain is None:
-        if nodata is not None:
-            valid_mask = _valid_dem_mask(data, nodata)
-            valid_data = data[valid_mask]
-            if len(valid_data) > 0:
-                domain = (float(np.min(valid_data)), float(np.max(valid_data)))
-            else:
-                domain = (0.0, 1.0)
-        else:
-            domain = (float(np.min(data)), float(np.max(data)))
+        valid_data = data[_valid_dem_mask(data, nodata)]
+        domain = (float(valid_data.min()), float(valid_data.max())) if valid_data.size else (0.0, 1.0)
 
     return DEMData(
         data=data,

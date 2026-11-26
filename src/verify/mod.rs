@@ -13,6 +13,7 @@ pub(crate) mod determinism_lint;
 pub(crate) mod domain;
 mod ir;
 
+
 use serde::Serialize;
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -40,6 +41,27 @@ const fn determinism_target(entry: &'static str) -> Target {
 }
 
 const PROVEN_TARGETS: &[Target] = &[
+    Target {
+        module: "terrain_masked_patch",
+        path: "src/shaders/hybrid_terrain_traversal.wgsl",
+        entry: "terrain_patch_coeff",
+        contract: "shaders/contracts/hybrid_terrain_traversal.toml",
+        kind: "lemma",
+    },
+    Target {
+        module: "masked_height",
+        path: "src/shaders/includes/masked_height.wgsl",
+        entry: "height_footprint",
+        contract: "shaders/contracts/masked_height.toml",
+        kind: "lemma",
+    },
+    Target {
+        module: "viewer_masked_grid",
+        path: "src/viewer/terrain/shader_pbr/masked_grid.wgsl",
+        entry: "viewer_masked_normal",
+        contract: "shaders/contracts/viewer_masked_grid.toml",
+        kind: "lemma",
+    },
     determinism_target("det_barrier"),
     determinism_target("det_barrier3"),
     determinism_target("det_barrier4"),
@@ -224,6 +246,13 @@ const PROVEN_TARGETS: &[Target] = &[
         entry: "fs_main",
         contract: "shaders/contracts/terrain_pbr_pom.toml",
         kind: "entry",
+    },
+    Target {
+        module: "terrain_drape",
+        path: "src/shaders/terrain_pbr_pom.wgsl",
+        entry: "sample_drape",
+        contract: "shaders/contracts/terrain_pbr_pom.toml",
+        kind: "lemma",
     },
     Target {
         module: "aether_terrain_segment",
@@ -466,10 +495,13 @@ fn verify_source(
 
 fn load_target_source(target: Target) -> anyhow::Result<String> {
     match target.module {
-        "terrain_pbr_pom" | "aether_terrain_segment" | "aether_terrain_apply" => {
+        "masked_height" => Ok(format!("{}\n{}", include_str!("../shaders/includes/determinism.wgsl"),
+            include_str!("../shaders/includes/masked_height.wgsl"))),
+        "viewer_masked_grid" => Ok(crate::viewer::TERRAIN_SHADER.to_owned()),
+        "terrain_pbr_pom" | "terrain_drape" | "aether_terrain_segment" | "aether_terrain_apply" => {
             Ok(crate::shader_sources::terrain())
         }
-        "hybrid_terrain_traversal" => Ok(crate::shader_sources::hybrid_kernel()),
+        "hybrid_terrain_traversal" | "terrain_masked_patch" => Ok(crate::shader_sources::hybrid_kernel()),
         "tonemap_common" => Ok(format!(
             "{}\n{}",
             include_str!("../shaders/includes/determinism.wgsl"),
@@ -512,6 +544,8 @@ fn embedded_contract(path: &str) -> Option<&'static str> {
         "shaders/contracts/hybrid_terrain_traversal.toml" => {
             include_str!("../../shaders/contracts/hybrid_terrain_traversal.toml")
         }
+        "shaders/contracts/masked_height.toml" => include_str!("../../shaders/contracts/masked_height.toml"),
+        "shaders/contracts/viewer_masked_grid.toml" => include_str!("../../shaders/contracts/viewer_masked_grid.toml"),
         "shaders/contracts/line_aa.toml" => include_str!("../../shaders/contracts/line_aa.toml"),
         "shaders/contracts/overlays.toml" => include_str!("../../shaders/contracts/overlays.toml"),
         "shaders/contracts/polygon_fill.toml" => {
@@ -1007,6 +1041,29 @@ mod tests {
     }
 
     #[test]
+    fn vacuum_drape_offset_requires_the_upper_bound() {
+        let target = PROVEN_TARGETS
+            .iter()
+            .find(|t| t.entry == "sample_drape")
+            .unwrap();
+        let source = load_target_source(*target).unwrap();
+        let coordinate = "clamp(p+vec2<i32>(1,0),vec2<i32>(0),last)";
+        assert_eq!(source.matches(coordinate).count(), 1);
+        let removed = source.replace(coordinate, "(p+vec2<i32>(1,0))");
+        let report = verify_source(
+            target.module,
+            target.path,
+            target.entry,
+            &removed,
+            target.contract,
+        );
+        assert!(report
+            .alarms
+            .iter()
+            .any(|alarm| alarm.kind == "possible_oob"));
+    }
+
+    #[test]
     fn terrain_pbr_baseline_proven_then_ablation_rejected() {
         let target = Target {
             module: "terrain_pbr_pom",
@@ -1167,8 +1224,8 @@ mod tests {
         assert_eq!(verify_target(target, None).unwrap().proof_status, "proven");
         let source = crate::shader_sources::terrain();
         let safe = concat!(
-            "let drape = textureSampleLevel(material_drape_tex, material_map_samp, ",
-            "raster_texture_uv(drape_uv, textureDimensions(material_drape_tex)), 0.0);",
+            "let drape = sample_drape(",
+            "raster_texture_uv(drape_uv, textureDimensions(material_drape_tex)));",
         );
         assert_eq!(source.matches(safe).count(), 1);
         let source = source.replace(

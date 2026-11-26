@@ -441,7 +441,8 @@ def displace_heightmap(
     """
     _forge3d = _ensure_native()
     payload = _mesh_to_py(mesh)
-    hm = np.asarray(heightmap, dtype=np.float32)
+    from ._raster_sampling import height_array
+    hm = height_array(heightmap)
     if hm.ndim != 2:
         raise ValueError("heightmap must be a 2D array")
     out = _forge3d.geometry_displace_heightmap_py(payload, hm, float(scale), bool(uv_space))

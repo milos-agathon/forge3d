@@ -35,14 +35,23 @@ def load_dem(path: Path) -> np.ndarray:
             "Install with: pip install rasterio"
         )
     with rasterio.open(path) as src:
-        data = src.read(1, masked=False).astype(np.float32)
+        from ._raster_sampling import read_band_validity
+
+        raw, valid = read_band_validity(src, 1)
+        data = raw.astype(np.float32)
+        data[~valid] = np.nan
     return data
 
 
 def gaussian_blur(arr: np.ndarray, sigma_px: float) -> np.ndarray:
     """Apply Gaussian blur with given sigma in pixels."""
     from scipy.ndimage import gaussian_filter
-    return gaussian_filter(arr, sigma=sigma_px, mode="reflect")
+    valid = np.isfinite(arr)
+    if valid.all():
+        return gaussian_filter(arr, sigma=sigma_px, mode="reflect")
+    weights = gaussian_filter(valid.astype(np.float64), sigma=sigma_px, mode="reflect")
+    sums = gaussian_filter(np.where(valid, arr, 0).astype(np.float64), sigma=sigma_px, mode="reflect")
+    return np.divide(sums, weights, out=np.full_like(sums, np.nan), where=weights >= 0.5).astype(arr.dtype)
 
 
 def compute_detail_residual(height: np.ndarray, sigma_px: float) -> np.ndarray:
@@ -65,22 +74,11 @@ def detail_to_normal_map(
         RGB uint8 array (H, W, 3) with tangent-space normals
         Channel mapping: R=X, G=Y, B=Z (OpenGL convention)
     """
-    h, w = detail.shape
+    from ._raster_sampling import gradient
 
-    # Compute gradients using Sobel-like finite differences
-    # Central differences for interior, one-sided at edges
-    dx = np.zeros_like(detail)
-    dy = np.zeros_like(detail)
-
-    # Central differences for X gradient
-    dx[:, 1:-1] = (detail[:, 2:] - detail[:, :-2]) * 0.5
-    dx[:, 0] = detail[:, 1] - detail[:, 0]
-    dx[:, -1] = detail[:, -1] - detail[:, -2]
-
-    # Central differences for Y gradient
-    dy[1:-1, :] = (detail[2:, :] - detail[:-2, :]) * 0.5
-    dy[0, :] = detail[1, :] - detail[0, :]
-    dy[-1, :] = detail[-1, :] - detail[-2, :]
+    dy, dx = gradient(detail)
+    missing = ~np.isfinite(dx) | ~np.isfinite(dy)
+    dx[missing] = dy[missing] = 0
 
     # Scale gradients
     dx *= scale
@@ -104,7 +102,9 @@ def detail_to_normal_map(
     g = ((ny * 0.5 + 0.5) * 255.0).astype(np.uint8)
     b = ((nz * 0.5 + 0.5) * 255.0).astype(np.uint8)
 
-    return np.stack([r, g, b], axis=-1)
+    normals = np.stack([r, g, b], axis=-1)
+    normals[missing] = 0  # Reserved RGB triplet, outside the unit-normal encoding.
+    return normals
 
 
 def save_normal_map(normal_map: np.ndarray, path: Path) -> None:

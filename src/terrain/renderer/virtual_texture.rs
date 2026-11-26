@@ -437,10 +437,11 @@ impl TerrainMaterialVT {
         // warning above keeps for diagnostics: a source is now an ingested
         // store handle, and a store cannot be built from a buffer whose length
         // disagrees with its declared virtual size.
-        let store = crate::terrain::vt::MemoryPageStore::new(
+        let store = crate::terrain::vt::MemoryPageStore::from_source(
             &data,
             virtual_size_px,
             TERRAIN_VT_FAMILY_COUNT,
+            family == "albedo",
         )
         .map_err(|error| format!("VT source '{family}': {error}"))?;
 

@@ -39,6 +39,10 @@ impl TerrainScene {
         let mut data = Vec::<[f32; 4]>::with_capacity((tex_width * tex_height) as usize);
         for y in 0..tex_height as usize {
             for x in 0..tex_width as usize {
+                if mask[y * width as usize + x] == 0.0 {
+                    data.push([0.0; 4]);
+                    continue;
+                }
                 let h = optics
                     .surface_height
                     .as_ref()
@@ -49,21 +53,38 @@ impl TerrainScene {
                     let length = n.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>().sqrt();
                     n.map(|v| (f64::from(v) / length) as f32)
                 } else if let Some(rows) = optics.surface_height.as_ref().filter(|_| supplied) {
-                    let x0 = x.saturating_sub(1);
-                    let x1 = (x + 1).min(width as usize - 1);
-                    let y0 = y.saturating_sub(1);
-                    let y1 = (y + 1).min(height as usize - 1);
+                    let covered = |xx, yy| mask[yy * width as usize + xx] > 0.0;
+                    let x0 = if covered(x.saturating_sub(1), y) {
+                        x.saturating_sub(1)
+                    } else {
+                        x
+                    };
+                    let x1 = if covered((x + 1).min(width as usize - 1), y) {
+                        (x + 1).min(width as usize - 1)
+                    } else {
+                        x
+                    };
+                    let y0 = if covered(x, y.saturating_sub(1)) {
+                        y.saturating_sub(1)
+                    } else {
+                        y
+                    };
+                    let y1 = if covered(x, (y + 1).min(height as usize - 1)) {
+                        (y + 1).min(height as usize - 1)
+                    } else {
+                        y
+                    };
                     // Match the renderer's existing minimum mesh span. Compute
                     // differences in f64 so finite f32 heights do not overflow here.
                     let span = f64::from(params.terrain_span.max(1e-3));
                     let dx = (f64::from(rows[y][x1]) - f64::from(rows[y][x0]))
                         * f64::from(params.z_scale)
                         * f64::from(width - 1)
-                        / ((x1 - x0) as f64 * span);
+                        / ((x1 - x0).max(1) as f64 * span);
                     let dy = (f64::from(rows[y1][x]) - f64::from(rows[y0][x]))
                         * f64::from(params.z_scale)
                         * f64::from(height - 1)
-                        / ((y1 - y0) as f64 * span);
+                        / ((y1 - y0).max(1) as f64 * span);
                     let n = glam::DVec3::new(-dx, -dy, 1.0).normalize();
                     [n.x as f32, n.y as f32, n.z as f32]
                 } else {

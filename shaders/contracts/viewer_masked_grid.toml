@@ -1,0 +1,11 @@
+[module]
+path = "src/viewer/terrain/shader_pbr/masked_grid.wgsl"
+owner = "render-quality"
+expiry = "2027-01-17"
+
+[[entry]]
+name = "viewer_masked_normal"
+proof_status = "proven"
+inputs = ["value:p:0:16384", "value:center:-65536:65536", "value:strength:0:16", "uniform:u.terrain_params:0:65536", "uniform:u.render_span_xz:0.000001:10000000", "texture:heightmap:-65536:65536:2:heightmap.width:heightmap.height"]
+outputs = ["return:-1.01:1.01"]
+invariants = []

@@ -40,10 +40,27 @@ pub(crate) fn copy_window(
     f64_to_raster_data(source.dtype(), out, source.bands, out_height, out_width)
 }
 
+/// A file may store one validity plane for the dataset or one for each band.
+pub(crate) fn mask_plane(mask: &[bool], band: usize, pixels: usize) -> &[bool] {
+    let start = if mask.len() == pixels { 0 } else { band * pixels };
+    &mask[start..start + pixels]
+}
+
 pub(crate) fn valid_mask(
     array: &RasterArray,
     nodata: &[Option<f64>],
     explicit_mask: Option<&[bool]>,
+) -> Vec<bool> {
+    let pixels = array.height * array.width;
+    valid_mask_where(array, nodata, |band, pixel| {
+        explicit_mask.is_none_or(|mask| mask_plane(mask, band, pixels)[pixel])
+    })
+}
+
+pub(crate) fn valid_mask_where(
+    array: &RasterArray,
+    nodata: &[Option<f64>],
+    covered: impl Fn(usize, usize) -> bool,
 ) -> Vec<bool> {
     let values = raster_to_f64(array);
     let pixels = array.height * array.width;
@@ -53,11 +70,7 @@ pub(crate) fn valid_mask(
         for pixel in 0..pixels {
             let index = band * pixels + pixel;
             let value = values[index];
-            let explicit_valid = explicit_mask
-                .and_then(|mask| mask.get(index))
-                .copied()
-                .unwrap_or(true);
-            mask.push(explicit_valid && !value.is_nan() && !nodata_matches(value, nodata));
+            mask.push(covered(band, pixel) && sample_valid(value, nodata, array.dtype()));
         }
     }
     mask
@@ -120,8 +133,15 @@ pub(crate) fn f64_to_raster_data(
     RasterArray::new(data, &shape)
 }
 
-fn nodata_matches(value: f64, nodata: Option<f64>) -> bool {
-    nodata.is_some_and(|nodata| value == nodata || (value.is_nan() && nodata.is_nan()))
+pub(crate) fn sample_valid(value: f64, nodata: Option<f64>, dtype: RasterDType) -> bool {
+    let marker = nodata.map(|v| {
+        if dtype == RasterDType::Float32 {
+            f64::from(v as f32)
+        } else {
+            v
+        }
+    });
+    value.is_finite() && marker != Some(value)
 }
 
 pub(crate) fn deinterleave<T: Copy>(data: Vec<T>, bands: usize) -> Vec<T> {

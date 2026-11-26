@@ -286,6 +286,16 @@ impl HeightMosaic {
                 sz
             ));
         }
+        let mut coverage = Cow::Borrowed(coverage_data);
+        let mut heights = Cow::Borrowed(height_data);
+        for (i, &h) in height_data.iter().enumerate() {
+            if !h.is_finite() || coverage_data[i] == 0 {
+                heights.to_mut()[i] = 0.0;
+                coverage.to_mut()[i] = 0;
+            }
+        }
+        let height_data = heights.as_ref();
+        let coverage_data = coverage.as_ref();
         let (sx, sy) = self.allocate_slot(id)?;
 
         let rows_per_image = self.config.tile_size_px;

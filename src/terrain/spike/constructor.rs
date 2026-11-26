@@ -122,12 +122,10 @@ impl TerrainSpike {
         let init_height_filterable = device
             .features()
             .contains(wgpu::Features::FLOAT32_FILTERABLE);
-        let tp = crate::terrain::pipeline::TerrainPipeline::create(
+        let tp = crate::terrain::pipeline::TerrainPipeline::create_spike(
             &device,
             TEXTURE_FORMAT,
             NORMAL_FORMAT,
-            1,
-            None,
             init_height_filterable,
         );
         // T33-END:terrainspike-use-t33

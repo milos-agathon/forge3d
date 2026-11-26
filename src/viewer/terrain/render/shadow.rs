@@ -115,12 +115,23 @@ impl ViewerTerrainScene {
                 occlusion_query_set: None,
             });
 
-            render_pass.set_pipeline(self.shadow_pipeline.as_ref().unwrap());
+            let (dense, masked) = self.shadow_pipeline.as_ref().unwrap();
+            render_pass.set_pipeline(if terrain.masked_geometry {
+                masked
+            } else {
+                dense
+            });
             render_pass.set_bind_group(0, &self.shadow_bind_groups[cascade_idx], &[]);
 
             // Draw terrain grid (6 vertices per quad, (grid_res-1)^2 quads)
             let vertex_count = 6 * (grid_res - 1) * (grid_res - 1);
-            render_pass.draw(0..vertex_count, 0..1);
+            if terrain.masked_geometry {
+                render_pass.set_vertex_buffer(0, terrain.vertex_buffer.slice(..));
+                render_pass.set_index_buffer(terrain.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                render_pass.draw_indexed(0..terrain.index_count, 0, 0..1);
+            } else {
+                render_pass.draw(0..vertex_count, 0..1);
+            }
         }
 
         // Execute moment generation pass for VSM/EVSM/MSM techniques

@@ -36,6 +36,41 @@ pub(crate) use crate::gis::raster_window::read_window_from_decoder;
 pub(crate) struct LoadedRaster {
     pub(crate) array: RasterArray,
     pub(crate) info: RasterInfo,
+    /// True-valid bits in one shared plane or in band-first order, independent of stored samples.
+    pub(crate) explicit_mask: Option<Vec<bool>>,
+}
+
+impl LoadedRaster {
+    /// Intersect source mask bits with stored sample validity on the returned grid.
+    pub(crate) fn selected_validity(
+        &self,
+        array: &RasterArray,
+        nodata: &[Option<f64>],
+        bands: Option<&[u16]>,
+        window: Option<PixelWindow>,
+    ) -> Vec<bool> {
+        let (left, top) = window.map_or((0, 0), |w| (w.col_off, w.row_off));
+        let width = self.array.width;
+        let height = self.array.height;
+        if self.explicit_mask.is_none() && left >= 0 && top >= 0
+            && left <= width as i64 - array.width as i64
+            && top <= height as i64 - array.height as i64
+        {
+            return valid_mask(array, nodata, None);
+        }
+        let plane = width * height;
+        super::raster_values::valid_mask_where(array, nodata, |band, pixel| {
+            let x = left.saturating_add((pixel % array.width) as i64);
+            let y = top.saturating_add((pixel / array.width) as i64);
+            if x < 0 || y < 0 || x >= width as i64 || y >= height as i64 {
+                return false;
+            }
+            self.explicit_mask.as_ref().is_none_or(|mask| {
+                let source_band = bands.map_or(band, |selected| usize::from(selected[band]) - 1);
+                super::raster_values::mask_plane(mask, source_band, plane)[y as usize * width + x as usize]
+            })
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -193,7 +228,7 @@ pub fn read_raster(
     window: Option<PixelWindow>,
     masked: bool,
 ) -> GisResult<RasterReadResult> {
-    let loaded = read_raster_data(path)?;
+    let loaded = super::raster_read::decode_raster(path.as_ref(), masked)?;
     let selected_bands = validate_bands(bands, loaded.info.band_count)?;
     let window = window
         .map(|window| validate_read_window(window, loaded.info.width, loaded.info.height))
@@ -220,7 +255,7 @@ pub fn read_raster(
     );
     let mut warnings = info.warnings.clone();
     let mask = if masked {
-        let mask = valid_mask(&array, &nodata_per_band, None);
+        let mask = loaded.selected_validity(&array, &nodata_per_band, Some(&selected_bands), window);
         if mask.iter().all(|valid| !*valid) {
             push_warning_if_absent(
                 &mut warnings,

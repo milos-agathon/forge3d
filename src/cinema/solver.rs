@@ -1,7 +1,7 @@
 //! Visibility graph on the DEM lattice, clipped to the framing distance shell.
 //! Routed edges use dilated PROMETHEUS bounds; dolly checks its exact straight trace.
 use super::{binding, Segment, Shot, Solution};
-use crate::path_tracing::hybrid_compute::terrain_heightfield::{build_minmax_mips, MinMaxMips};
+use crate::path_tracing::hybrid_compute::terrain_heightfield::{build_traversal_bounds, MinMaxMips};
 use glam::DVec3;
 use std::{cmp::Ordering, collections::BinaryHeap};
 
@@ -23,7 +23,14 @@ impl Terrain {
         if !width.is_finite() || width <= 0.0 {
             return Err(binding("terrain", "width must be positive and finite"));
         }
-        let pyramid = build_minmax_mips(&heights, w, h).map_err(|e| binding("terrain", e))?;
+        // A camera clearance certificate needs surveyed ground along the route.
+        if heights.iter().any(|h| !h.is_finite()) {
+            return Err(binding(
+                "terrain",
+                "terrain heightfield contains non-finite samples",
+            ));
+        }
+        let pyramid = build_traversal_bounds(&heights, w, h).map_err(|e| binding("terrain", e))?;
         Ok(Self {
             heights,
             w: w as usize,

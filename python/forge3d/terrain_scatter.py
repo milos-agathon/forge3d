@@ -93,6 +93,12 @@ def bilinear_sample(field: np.ndarray, row: float, col: float) -> float:
     v10 = float(arr[row1, col0])
     v11 = float(arr[row1, col1])
 
+    if not all(np.isfinite(v) for v in (v00, v01, v10, v11)):
+        taps = zip((v00, v01, v10, v11),
+                   ((1-tr)*(1-tc), (1-tr)*tc, tr*(1-tc), tr*tc))
+        valid = [(v,w) for v,w in taps if np.isfinite(v)]
+        support = sum(w for _,w in valid)
+        return sum(v*w for v,w in valid)/support if support >= 0.5 else float("nan")
     top = (1.0 - tc) * v00 + tc * v01
     bottom = (1.0 - tc) * v10 + tc * v11
     return float((1.0 - tr) * top + tr * bottom)
@@ -194,7 +200,8 @@ class TerrainScatterSource:
         z_scale: float = 1.0,
         terrain_width: float | None = None,
     ) -> None:
-        heights = np.asarray(heightmap, dtype=np.float32)
+        from ._raster_sampling import height_array
+        heights = height_array(heightmap)
         if heights.ndim != 2:
             raise ValueError("heightmap must be a 2D float32 array")
         if heights.size == 0:
@@ -203,8 +210,7 @@ class TerrainScatterSource:
         finite = heights[np.isfinite(heights)]
         if finite.size == 0:
             raise ValueError("heightmap must contain at least one finite sample")
-        fill_value = float(finite.min())
-        heights = np.where(np.isfinite(heights), heights, fill_value).astype(np.float32)
+        heights = np.where(np.isfinite(heights), heights, np.nan)
 
         self.heightmap = np.ascontiguousarray(heights)
         self.z_scale = float(z_scale)
@@ -215,17 +221,23 @@ class TerrainScatterSource:
         self.terrain_width = float(terrain_width) if terrain_width is not None else float(max(self.heightmap.shape))
         if not np.isfinite(self.terrain_width) or self.terrain_width <= 0.0:
             raise ValueError("terrain_width must be a positive finite float")
-        self.min_height = float(np.min(self.heightmap))
-        self.max_height = float(np.max(self.heightmap))
+        self.min_height = float(finite.min())
+        self.max_height = float(finite.max())
 
         with np.errstate(over="ignore", invalid="ignore"):
             scaled_heights = (self.heightmap - self.min_height) * self.z_scale
-        if not np.all(np.isfinite(scaled_heights)):
+        if not np.all(np.isfinite(scaled_heights[np.isfinite(heights)])):
             raise ValueError("z_scale produces non-finite scaled heights")
         self._scaled_heights = np.ascontiguousarray(scaled_heights)
         x_step = self.terrain_width / max(self.width - 1, 1)
         z_step = self.terrain_width / max(self.height - 1, 1)
-        dz_dz, dz_dx = np.gradient(self._scaled_heights, z_step, x_step)
+        if finite.size == heights.size:
+            dz_dz, dz_dx = np.gradient(self._scaled_heights, z_step, x_step)
+        else:
+            from ._raster_sampling import gradient
+            dz_dz, dz_dx = gradient(self._scaled_heights)
+            dz_dz /= z_step
+            dz_dx /= x_step
         slope = np.degrees(np.arctan(np.sqrt(dz_dx * dz_dx + dz_dz * dz_dz)))
         self._slope_degrees = np.ascontiguousarray(slope.astype(np.float32))
 
@@ -524,6 +536,8 @@ def _passes_filters(
 ) -> bool:
     slope = source.sample_slope_degrees(row, col)
     height = source.sample_height(row, col)
+    if not np.isfinite(height) or not np.isfinite(slope):
+        return False
 
     if filters.min_slope_deg is not None and slope < float(filters.min_slope_deg):
         return False
