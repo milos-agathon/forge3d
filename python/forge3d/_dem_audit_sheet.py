@@ -56,6 +56,22 @@ def sheet(z, transform, findings, source, grid_shape=None):
                     (x - 2, y - 2, x + 2, y + 2),
                     fill=color if f["class"] == "spike" else "#3889ff",
                 )
+            elif "support_runs" in f:
+                support = Image.new("L", size)
+                raster = ImageDraw.Draw(support)
+                for row, first, end in f["support_runs"]:
+                    x, y = int(first * sx), int(row * sy)
+                    raster.rectangle(
+                        (
+                            x,
+                            y,
+                            max(x, int(end * sx) - 1),
+                            max(y, int((row + 1) * sy) - 1),
+                        ),
+                        fill=255,
+                    )
+                tint = Image.blend(image, Image.new("RGB", size, color), 0.45)
+                image.paste(tint, mask=support)
             elif "rings" in f:
                 for ring in f["rings"]:
                     ink.line(
@@ -85,11 +101,11 @@ def sheet(z, transform, findings, source, grid_shape=None):
         if classes == {"spike", "pit"}:
             note = "Orange: spike   Blue: pit"
         elif "striping" in classes and selected:
-            note = "Analysis window  /  " + ", ".join(
+            note = "Supported windows  /  " + ", ".join(
                 f"{f['axis']} {f['period_cells']:.2f} px" for f in selected
             )
         elif "quantization" in classes and selected:
-            note = f"Analysis window  /  height step {selected[0]['step']:g}"
+            note = f"Aligned cells  /  height step {selected[0]['step']:g}"
         # Two corner labels tie every panel to the JSON pixel coordinates.
         draw.text((x0, y0 + 21 + size[1]), "0", fill="black")
         draw.text(

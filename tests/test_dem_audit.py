@@ -12,6 +12,7 @@ import forge3d
 from forge3d import dem_audit as da
 from forge3d.io import load_dem
 from forge3d.preparation import (
+    PreparationError,
     PreparationGrid,
     PreparationRecipe,
     PreparationSource,
@@ -319,28 +320,51 @@ def test_unselected_nonfinite_mask_bits_survive_repair():
 
 
 @pytest.mark.parametrize("kind", ["striping", "quantization"])
-def test_population_findings_require_a_separate_spatial_selection(kind):
+@pytest.mark.parametrize("side", ["left", "right"])
+@pytest.mark.parametrize("transpose", [False, True])
+def test_population_findings_require_a_separate_spatial_selection(
+    kind, side, transpose
+):
     _, z, _ = surfaces()
+    width = 64 if kind == "striping" else 88
+    start = 0 if side == "left" else 96 - width
+    end = start + width
     if kind == "striping":
-        end = 64
-        z[:, :end] += np.resize([0.0, 6.0, 0.0, -6.0], 96)[:, None]
+        z[:, start:end] += np.resize([0.0, 6.0, 0.0, -6.0], 96)[:, None]
         repair = da.notch_filter
-        kwargs = {"frequencies": [0.25], "axis": "row"}
+        kwargs = {"frequencies": [0.25], "axis": "column" if transpose else "row"}
     else:
-        end = 88
-        z[:, :end] = np.round(z[:, :end] * 4) / 4
+        z[:, start:end] = np.round(z[:, start:end] * 4) / 4
         repair = da.dequantize
         kwargs = {"step": 0.25}
-    finding = next(f for f in da.audit(z).findings if f["class"] == kind)
+    injected = np.zeros(z.shape, bool)
+    injected[:, start:end] = True
+    if transpose:
+        z, injected = z.T, injected.T
+    report = da.audit(z)
+    finding = next(f for f in report.findings if f["class"] == kind)
+    support = np.zeros(z.shape, bool)
+    for row, c, stop in finding["support_runs"]:
+        support[row, c:stop] = True
+    np.testing.assert_array_equal(support, injected)
+    # Inspect the panel at the centers of cells on the two sides.
+    panel = 2 if kind == "striping" else 4
+    left, top = 16 + panel % 3 * 443, 78 + panel // 3 * 340
+    rgb = np.asarray(report.hillshade)
+    for row, col in [(3, 3), (92, 92)]:
+        pixel = rgb[
+            top + int((row + 0.5) * 290 / 96), left + int((col + 0.5) * 290 / 96)
+        ]
+        assert bool(np.ptp(pixel)) == bool(injected[row, col])
     assert finding["analysis_bounds"] == [0, 0, 96, 96]
     assert "bounds" not in finding and finding["repair_region"] is None
     with pytest.raises(ValueError, match="region"):
         repair(z, region=finding, **kwargs)
     with pytest.raises(ValueError, match="region"):
         repair(z, region=finding["repair_region"], **kwargs)
-    out, record = repair(z, region={"bounds": [0, 0, end, 96]}, **kwargs)
+    out, record = repair(z, region={"runs": finding["support_runs"]}, **kwargs)
     assert record["cells_changed"] > 0
-    assert z[:, end:].tobytes() == out.data[:, end:].tobytes()
+    assert z[~injected].tobytes() == out.data[~injected].tobytes()
 
 
 @pytest.mark.parametrize("step", [-9.0, 9.0])
@@ -386,3 +410,229 @@ def test_numpy_scalar_settings_serialize_and_invalid_settings_are_structured(tmp
         diagnostic = error.value.diagnostic
         assert diagnostic.code == "invalid_audit_parameter"
         assert diagnostic.details == {"parameter": key} and diagnostic.remediation
+
+
+@pytest.mark.parametrize("shift", [0.0, 0.25])
+def test_undeclared_repairs_preserve_band_mask_precedence(tmp_path, shift):
+    grid = PreparationGrid("EPSG:32632", 5, 5, (100, 1, 0, 200, 0, -1))
+    target = PreparationGrid(grid.crs, 5, 5, (100 + shift, 1, 0, 200 - shift, 0, -1))
+    values = np.arange(25, dtype="int16").reshape(5, 5)
+    values[2, 2] = -9999
+    valid = np.ones((5, 5), bool)
+    valid[3, 3] = False
+    path = tmp_path / "both.tif"
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        width=5,
+        height=5,
+        count=1,
+        dtype="int16",
+        crs=grid.crs,
+        transform=grid.transform,
+        nodata=-9999,
+    ) as ds:
+        ds.write(values, 1)
+        ds.write_mask(valid)
+    np.save(tmp_path / "values.npy", values)
+    np.save(tmp_path / "valid.npy", valid)
+    dem = PreparationSource(
+        "dem", path, "elevation", grid=grid, units="m", vertical_reference="NAP"
+    )
+    cat = PreparationSource("classes", path, "categorical", grid=grid)
+    recipe = PreparationRecipe(target, [dem, cat], "NAP")
+    actual = prepare_scene(recipe)
+    # The existing recipe contract used GDAL's effective mask at the source.
+    expected = prepare_scene(
+        replace(
+            recipe,
+            sources=[
+                replace(
+                    source,
+                    path=tmp_path / "values.npy",
+                    mask_path=tmp_path / "valid.npy",
+                )
+                for source in [dem, cat]
+            ],
+        )
+    )
+    for key, layer in actual.layers.items():
+        reference = expected.layers[key]
+        assert layer.data.dtype == reference.data.dtype
+        assert layer.data.tobytes() == reference.data.tobytes()
+        assert layer.valid_mask.tobytes() == reference.valid_mask.tobytes()
+        if not shift:
+            assert layer.valid_mask.sum() == 24 and layer.data[2, 2] == -9999
+    repaired = prepare_scene(
+        replace(
+            recipe,
+            sources=[
+                replace(
+                    dem,
+                    repairs=[
+                        {"operation": "fill_missing", "region": {"cells": [[2, 2]]}}
+                    ],
+                ),
+                cat,
+            ],
+        )
+    )
+    assert (
+        repaired.layers["classes"].data.tobytes()
+        == actual.layers["classes"].data.tobytes()
+    )
+    assert (
+        repaired.layers["classes"].valid_mask.tobytes()
+        == actual.layers["classes"].valid_mask.tobytes()
+    )
+    assert repaired.layers["dem"].metadata["operations"][0]["newly_valid"] == 1
+
+
+@pytest.mark.parametrize(
+    "dtype, extreme",
+    [
+        ("int64", 2**53 + 1),
+        ("int64", 2**63 - 1),
+        ("int64", -(2**63)),
+        ("uint64", 2**64 - 1),
+    ],
+)
+def test_unrepresentable_repairs_rejected_before_conversion(tmp_path, dtype, extreme):
+    z = np.zeros((3, 3), dtype=dtype)
+    z[1, 1] = extreme
+    region = {"cells": [[1, 1]]}
+    before = z.tobytes()
+    with pytest.raises(PreparationError, match="integer range") as error:
+        da.remove_spikes(z, region=region)
+    assert error.value.diagnostic.code == "invalid_repair"
+    assert z.tobytes() == before
+    path = tmp_path / "source.npy"
+    np.save(path, z)
+    source = PreparationSource(
+        "z",
+        path,
+        "elevation",
+        grid=PreparationGrid("EPSG:32632", 3, 3, TRANSFORM.to_gdal()),
+        units="m",
+        vertical_reference="NAP",
+        repairs=[dict(operation="remove_spikes", region=region)],
+    )
+    with pytest.raises(PreparationError, match="integer range"):
+        prepare_scene(PreparationRecipe(source.grid, [source], "NAP"))
+    assert np.load(path).tobytes() == before
+
+
+def test_integer_change_measured_before_float_conversion():
+    z = np.full((3, 3), 2**53 - 1, dtype="int64")
+    z[1, 1] = -(2**53)
+    out, record = da.remove_spikes(z, region={"cells": [[1, 1]]})
+    assert out[1, 1] == 2**53 - 1
+    assert isinstance(record["maximum_change"], int)
+    assert (
+        record["maximum_change"]
+        == record["mean_change"]
+        == record["total_change"]
+        == 2**54 - 1
+    )
+    assert record["cells_changed"] == 1
+    z[1, 1] = 2**53
+    _, record = da.remove_spikes(z, region={"cells": [[1, 1]]})
+    assert record["maximum_change"] == record["mean_change"] == 1
+
+
+@pytest.mark.parametrize(
+    "operation, args",
+    [
+        ("notch_filter", {"frequencies": [np.float32(0.25)], "axis": "row"}),
+        ("dequantize", {"step": np.float32(0.25)}),
+    ],
+)
+def test_numpy_repair_declaration_hash_and_replay(tmp_path, operation, args):
+    z = surfaces()[2]
+    path = tmp_path / "input.npy"
+    np.save(path, z)
+    region = {"bounds": np.array([48, 48, 64, 64], dtype="int32")}
+    out, record = getattr(da, operation)(z, region=region, **args)
+    assert (
+        record["cells_changed"]
+        and json.loads(json.dumps(record, allow_nan=False)) == record
+    )
+    grid = PreparationGrid("EPSG:32632", 96, 96, TRANSFORM.to_gdal())
+    step = dict(operation=operation, region=region, **args)
+    source = PreparationSource(
+        "dem",
+        path,
+        "elevation",
+        grid=grid,
+        units="m",
+        vertical_reference="NAP",
+        repairs=[step],
+    )
+    recipe = PreparationRecipe(grid, [source], "NAP")
+    # Source declarations remain editable until execution. Saving and hashing
+    # must also normalize newly supplied NumPy values.
+    source.repairs[0].update(args)
+    recipe.save(tmp_path / "recipe.json")
+    prepared = prepare_scene(recipe).layers["dem"]
+    replay = prepare_scene(PreparationRecipe.load(tmp_path / "recipe.json")).layers[
+        "dem"
+    ]
+    canonical = prepare_scene(
+        replace(
+            recipe,
+            sources=[
+                replace(
+                    source, repairs=[{"operation": operation, **record["parameters"]}]
+                )
+            ],
+        )
+    ).layers["dem"]
+    for layer in (prepared, replay, canonical):
+        assert layer.data.tobytes() == out.data.tobytes()
+        assert layer.metadata["operations"][0] == record
+        assert layer.metadata["repairs_sha256"] == prepared.metadata["repairs_sha256"]
+
+
+@pytest.mark.parametrize(
+    "operation,args",
+    [
+        ("fill_missing", {"method": "unknown"}),
+        ("dequantize", {"step": np.nan}),
+        ("notch_filter", {"frequencies": [0.25, 0.25], "axis": "row"}),
+    ],
+)
+def test_invalid_repair_settings_return_structured_errors(operation, args):
+    region = {"bounds": [0, 0, 4, 4]}
+    with pytest.raises(PreparationError) as direct:
+        getattr(da, operation)(np.ones((4, 4)), region=region, **args)
+    with pytest.raises(PreparationError) as declared:
+        PreparationSource(
+            "z",
+            "input.npy",
+            "elevation",
+            units="m",
+            vertical_reference="NAP",
+            repairs=[dict(operation=operation, region=region, **args)],
+        )
+    for err in (direct, declared):
+        assert (
+            err.value.diagnostic.code == "invalid_repair"
+            and err.value.diagnostic.remediation
+        )
+
+
+def test_stripes_supported_by_incomplete_transects_remain_located():
+    _, z, _ = surfaces()
+    y, x = np.indices(z.shape)
+    z[:, :64] += np.resize([0.0, 6.0, 0.0, -6.0], 96)[:, None]
+    z[(x + y) % 6 == 0] = np.nan
+    finding = next(f for f in da.audit(z).findings if f["class"] == "striping")
+    assert (
+        finding["period_cells"] == 4
+        and finding["support_basis"] == "pooled_transect_windows"
+    )
+    assert finding["support_runs"]
+    for row, first, end in finding["support_runs"]:
+        assert 0 <= first < end <= 64
+        assert np.isfinite(z[row, first:end]).all()

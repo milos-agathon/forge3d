@@ -149,6 +149,84 @@ def _regions(z, cell_area, flat_cells):
                 }
 
 
+def _cell_runs(mask):
+    """Encode measured support as zero-based [row, first column, end column]."""
+    runs = []
+    for r in np.flatnonzero(mask.any(axis=1)):
+        edges = np.flatnonzero(np.diff(np.r_[False, mask[r], False]))
+        runs.extend(
+            [int(r), int(c), int(end)] for c, end in zip(edges[::2], edges[1::2])
+        )
+    return runs
+
+
+def _stripe_support(a, k, coefficient, fraction):
+    """Test the measured harmonic separately on short stretches of each transect."""
+    n = a.shape[0]
+    # Two repetitions are the same minimum used by the global spectrum.
+    length = (2 * n + k - 1) // k
+    phase = 2 * np.pi * k * np.arange(n) / n
+    # This coefficient describes first differences (the analyzed signal).
+    factor = 1 if 2 * k == n else 2
+    template = factor / n * (coefficient * np.exp(1j * phase)).real
+    support = np.zeros(a.shape, dtype=bool)
+    for offset in range(0, n, length):
+        start = min(offset, n - length)
+        end = start + length
+        values = a[start:end]
+        diffs = np.diff(values, axis=0)
+        valid = np.isfinite(diffs)
+        count = valid.sum(axis=0)
+        observed = np.where(valid, diffs, 0.0)
+        expected = np.where(valid, template[start : end - 1, None], 0.0)
+        # Remove the local slope before comparing explained energy.
+        denom = np.maximum(count, 1)
+        observed = np.where(valid, observed - observed.sum(axis=0) / denom, 0.0)
+        expected = np.where(valid, expected - expected.sum(axis=0) / denom, 0.0)
+        energy = (observed**2).sum(axis=0)
+        error = ((observed - expected) ** 2).sum(axis=0)
+        supported = (
+            (count == length - 1) & (energy > 0) & (error <= (1 - fraction) * energy)
+        )
+        support[start:end] |= supported
+    return support
+
+
+def _profile_spectrum(profile):
+    trend = _median(profile)
+    if not np.isfinite(trend):
+        return None
+    signal = np.append(np.nan_to_num(profile - trend, nan=0.0), 0.0)
+    spectrum = np.fft.rfft(signal)
+    power = abs(spectrum) ** 2
+    power[0] = 0
+    return spectrum, power
+
+
+def _pooled_support(a, k, fraction):
+    """Narrow a peak visible only after pooling noisy or incomplete transects."""
+    support = np.zeros(a.shape, bool)
+    # The complete group passed the spectrum test in the caller.
+    groups = [(0, a.shape[1])]
+    while groups:
+        left, right = groups.pop()
+        mid = (left + right) // 2
+        children = []
+        if left < mid:
+            for first, end in ((left, mid), (mid, right)):
+                profile = _median(np.diff(a[:, first:end], axis=0), axis=1)
+                result = _profile_spectrum(profile)
+                if result is not None:
+                    _, power = result
+                    if power[k] > 0 and power[k] >= fraction * power.sum():
+                        children.append((first, end))
+        if children:
+            groups.extend(children)
+        else:
+            support[:, left:right] = np.isfinite(a[:, left:right])
+    return support
+
+
 def _stripes(z, axis, stripe_fraction):
     a = z if axis == "row" else z.T
     n = a.shape[0]
@@ -157,18 +235,20 @@ def _stripes(z, axis, stripe_fraction):
     if n < 4:
         return peaks, correction
     profile = _median(np.diff(a, axis=0), axis=1)
-    trend = _median(profile)
-    if not np.isfinite(trend):
+    result = _profile_spectrum(profile)
+    if result is None:
         return peaks, correction
-    signal = np.append(np.nan_to_num(profile - trend, nan=0.0), 0.0)
-    spectrum = np.fft.rfft(signal)
-    power = abs(spectrum) ** 2
-    power[0] = 0
+    spectrum, power = result
     total = power.sum()
     if total > 0:
         heights = np.zeros_like(spectrum)
         for k in np.flatnonzero(power >= stripe_fraction * total):
             if k >= 2:
+                support = _stripe_support(a, int(k), spectrum[k], stripe_fraction)
+                basis = "two_period_windows"
+                if not support.any():
+                    support = _pooled_support(a, int(k), stripe_fraction)
+                    basis = "pooled_transect_windows"
                 peaks.append(
                     {
                         "class": "striping",
@@ -176,6 +256,10 @@ def _stripes(z, axis, stripe_fraction):
                         "period_cells": n / int(k),
                         "frequency": int(k) / n,
                         "power_fraction": float(power[k] / total),
+                        "support_basis": basis,
+                        "support_runs": _cell_runs(
+                            support if axis == "row" else support.T
+                        ),
                         "analysis_bounds": [0, 0, z.shape[1], z.shape[0]],
                         "repair_region": None,
                     }
@@ -265,8 +349,13 @@ def _quantization(z, fraction, sample_resolution):
         return
     aligned = float(counts[errors <= tolerance].sum() / values.size)
     if aligned >= fraction:
+        residual = z - anchor
+        supported = np.isfinite(z) & (
+            abs(residual - np.rint(residual / step) * step) <= tolerance
+        )
         return {
             "class": "quantization",
+            "support_runs": _cell_runs(supported),
             "analysis_bounds": [0, 0, z.shape[1], z.shape[0]],
             "repair_region": None,
             "step": step,

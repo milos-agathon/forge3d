@@ -167,6 +167,9 @@ class PreparationSource:
     def __post_init__(self) -> None:
         if self.repairs and self.kind != "elevation":
             _fail("invalid_recipe", "DEM repairs require an elevation source.", "Declare repairs on the terrain source.", self.source_id)
+        if self.repairs:
+            from ._dem_repairs import normalize_repair
+            object.__setattr__(self, "repairs", tuple(normalize_repair(step) for step in self.repairs))
         if self.registration_conversion is not None:
             require_compatible_registration("area", "area", self.registration_conversion)
         if not self.source_id or self.kind not in _KINDS:
@@ -182,7 +185,11 @@ class PreparationSource:
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
-        if not self.repairs:
+        if self.repairs:
+            # Nested declaration values can be edited after source construction.
+            from ._dem_repairs import normalize_repair
+            result["repairs"] = [normalize_repair(step) for step in self.repairs]
+        else:
             result.pop("repairs")
         if self.registration_conversion is None:
             result.pop("registration_conversion")
@@ -232,6 +239,8 @@ class PreparationRecipe:
                       "For vectors and observations use source_xy, or choose a raster source for source_pixel.")
         try:
             _json(self.to_dict())
+        except PreparationError:
+            raise
         except (TypeError, ValueError, OverflowError) as exc:
             raise PreparationError("invalid_recipe", f"Recipe is not finite JSON: {exc}",
                                    "Use finite JSON values in metadata and settings; replace NaN/infinity with an explicit missing-value representation.") from exc
@@ -328,9 +337,10 @@ def _decode_raster(source: PreparationSource, path: Path, base: Path) -> tuple[n
             data = ds.read()
             valid = ds.read_masks() != 0
             # GDAL can give a dataset mask precedence over per-band nodata.
-            for band, sentinel in enumerate(ds.nodatavals):
-                if sentinel is not None:
-                    valid[band] &= data[band] != sentinel
+            if source.repairs:
+                for band, sentinel in enumerate(ds.nodatavals):
+                    if sentinel is not None:
+                        valid[band] &= data[band] != sentinel
             if source.nodata is not None:
                 valid &= data != source.nodata
             extra = {"tags": ds.tags(), "scales": list(ds.scales), "offsets": list(ds.offsets),
@@ -354,6 +364,9 @@ def _decode_raster(source: PreparationSource, path: Path, base: Path) -> tuple[n
             if any(s != 1 for s in ds.scales) or any(o != 0 for o in ds.offsets):
                 if source.kind in {"categorical", "count"}:
                     _fail("encoded_discrete_values", "Discrete data has scale/offset encoding.", "Decode and verify class/count meaning externally before preparation.", source.source_id)
+                if source.repairs:
+                    from ._dem_repairs import require_exact_integers
+                    require_exact_integers(data, valid)
                 data = data.astype(np.float64)
                 for band, (scale, offset) in enumerate(zip(ds.scales, ds.offsets)):
                     data[band] = data[band] * scale + offset
@@ -463,7 +476,7 @@ def prepare_scene(recipe: PreparationRecipe, *, base_dir: str | Path = ".") -> P
     """Execute a recipe. No network access, rendering, or provider guessing."""
     if any(source.repairs for source in recipe.sources):
         # Hash, execute and save one detached snapshot of the declarations.
-        recipe = deepcopy(recipe)
+        recipe = PreparationRecipe.from_dict(deepcopy(recipe.to_dict()))
     base = Path(base_dir).resolve()
     layers: dict[str, PreparedLayer] = {}
     reports = []
