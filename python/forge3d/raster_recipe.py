@@ -384,8 +384,10 @@ class RasterRecipe:
 
     @contextmanager
     def _for_render(self, recipe: SceneRecipe):
+        from ._map_scene_materials import physical_vector
         from .map_scene import (
             RasterOverlay,
+            VectorOverlay,
             _is_geotiff_path,
             _terrain_alignment_grid,
             _terrain_scene_diagonal,
@@ -394,7 +396,9 @@ class RasterRecipe:
         with self._lock:
             terrain = recipe.terrain
             if terrain.style is not None or any(
-                isinstance(layer, RasterOverlay) for layer in recipe.layers
+                isinstance(layer, RasterOverlay)
+                or (isinstance(layer, VectorOverlay) and physical_vector(layer))
+                for layer in recipe.layers
             ):
                 raise ValueError(
                     "Raster recipe requires the single native thematic terrain slot"

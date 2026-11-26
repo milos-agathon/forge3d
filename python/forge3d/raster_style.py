@@ -283,6 +283,12 @@ def raster_style_from_dict(data: Mapping[str, Any] | None):
         return CategoricalRasterStyle(palette={r["class_id"]: r["rgba"] for r in rows}, labels={r["class_id"]: r["label"] for r in rows}, **values)
     if kind == "bivariate":
         return BivariateRasterStyle(**values)
+    if kind == "terrain_material":
+        from .terrain_materials import TerrainMaterialStyle
+        return TerrainMaterialStyle.from_dict(values)
+    if kind == "geospatial_material_raster":
+        from .geospatial_materials import MaterialRasterStyle
+        return MaterialRasterStyle.from_dict(values)
     raise ValueError(f"invalid_argument: unknown raster style {kind!r}")
 
 

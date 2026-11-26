@@ -307,6 +307,21 @@ def test_physical_render_uses_resident_d02_palette(tmp_path, registration):
     with pytest.raises(ValueError, match="grid mismatch"):
         wrong_registration.render(str(rejected), raster_recipe=recipe)
     assert not rejected.exists()
+    physical_scene = scene()
+    point = grid.xy(4, 4)
+    layer = f3d.VectorOverlay(
+        "station",
+        crs=grid.crs,
+        features=[{"type": "Feature", "properties": {},
+                   "geometry": {"type": "Point", "coordinates": point}}],
+    )
+    paint = f3d.GeospatialMaterialRecipe(
+        (f3d.MaterialLayer("paint", (150, 100, 50)),), presentation="physical",
+    )
+    physical_scene.recipe.layers = [paint.bind_vector(layer, [point], units="m")]
+    with pytest.raises(ValueError, match="single native thematic terrain slot"):
+        physical_scene.render(str(rejected), raster_recipe=recipe)
+    assert not rejected.exists()
     for i, edges in enumerate([BINS, [-0.25, 0, 0.25]]):
         recipe.set_bins(edges)
         resident = tmp_path / f"resident-{i}.png"

@@ -314,6 +314,8 @@ impl TerrainScatterContactConfig {
 pub struct TerrainScatterBatch {
     pub name: Option<String>,
     pub color: [f32; 4],
+    pub physical_color: bool,
+    pub(crate) surface_depth: bool,
     pub max_draw_distance: f32,
     pub wind: ScatterWindSettingsNative,
     pub terrain_blend: TerrainScatterBlendConfig,
@@ -392,6 +394,8 @@ impl TerrainScatterBatch {
         Ok(Self {
             name,
             color,
+            physical_color: false,
+            surface_depth: false,
             max_draw_distance,
             wind,
             terrain_blend,
