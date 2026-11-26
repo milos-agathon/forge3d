@@ -41,6 +41,30 @@ def test_population_heights_mask_shade_units():
     np.testing.assert_array_equal(style.apply(np.ones((2, 2), np.float32)).rgba[0, 0], style.low_color)
 
 
+def test_elevation_change_d02_colors(tmp_path):
+    import json
+    import numpy as np
+    import rasterio
+    from forge3d.raster_style import raster_style_from_dict
+
+    paths = [tmp_path / name for name in ("pre.tif", "post.tif")]
+    for path, data in zip(paths, ([[0, 0, 0, 0]], [[-3, 0, 3, np.nan]])):
+        with rasterio.open(path, "w", driver="GTiff", dtype="float64", count=1, width=4,
+                           height=1, crs="EPSG:2056", nodata=np.nan,
+                           transform=rasterio.transform.from_origin(2600000, 1200000, 1, 1)) as ds:
+            ds.update_tags(vertical_reference="LN02")
+            ds.write(np.asarray(data, dtype="float64"), 1)
+    output = f3d.elevation_change(*paths, tmp_path / "result", sigma1=0., sigma2=1., confidence=.95)
+    with rasterio.open(output / "change.tif") as ds:
+        style = raster_style_from_dict(json.loads(ds.tags(4)["forge3d_style"]))
+        overlay = style.apply(ds.read(4))
+    legend = overlay.legend
+    np.testing.assert_array_equal(overlay.rgba[0], [entry["rgba"] for entry in legend["entries"]]
+                                  + [legend["nodata_rgba"]])
+    np.testing.assert_array_equal(overlay.valid_mask, [[True, True, True, False]])
+    assert "95% confidence" in legend["caption"]
+
+
 def test_categorical_exact_ids_colors_and_legend():
     style = f3d.CategoricalRasterStyle({7: PALETTE[0][2], 0: PALETTE[0][0], 2: PALETTE[0][1]},
                                      {0: "bare", 2: "forest", 7: "water"}, nodata=-1, units="class")

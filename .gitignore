@@ -436,6 +436,7 @@ examples/c07_unreal/*
 !examples/c07_unreal/README.md
 !examples/splat_fused_map.py
 !examples/autochiron_reveal_orbit.py
+!examples/blatten_elevation_change.py
 !examples/autochiron_render_golden.py
 tests/test_*example*.py
 tests/test_*examples*.py

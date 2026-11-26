@@ -27,6 +27,7 @@ organized by workflow rather than by Rust module layout.
 | Typed map scenes | `MapScene`, `LabelLayer`, `MapSceneBuildingLayer`, `Tiles3DLayer`, `MapScene.save_bundle`, `MapScene.load_bundle` | `mapscene_terrain_raster.py`, `mapscene_vector_labels.py`, `mapscene_buildings_labels.py` |
 | Map scale continuity | `forge3d.semantic_scale` | [Semantic scale guide](semantic_scale.md), `c03_semantic_scale.py` |
 | Reusable geographic preparation | `PreparationRecipe`, `prepare_scene`, `PreparedScene`, `export_landscape` | `prepare_scene.py`, [data-to-scene guide](data_to_scene.md) |
+| Elevation change between surveys | `elevation_change` produces a registered difference, significance map and volume bounds | [Elevation change and Blatten example](elevation_change.md) |
 | Terrain material recipes | `TerrainMaterialRecipe`, `MaterialGrid`, `MaterialMask`, `MaterialTexture`, `TerrainMaterialStyle` | `terrain_material_recipe.py`; [recipe contract](terrain_material_recipes.md) |
 | Geospatial material authoring | `GeospatialMaterialRecipe`, `MaterialLayer`, `MaterialRasterStyle` | [Terrain, raster, vector and building bindings](geospatial_materials.md) |
 | Ordered map composition | `RenderPassInput`, `RenderPassSpec`, `MapScene.render_passes` | [Composition contracts](ordered_map_composition.md), [physical render example](../examples/mapscene_render_passes.py) |

@@ -147,6 +147,7 @@ class CategoricalRasterStyle:
     labels: Mapping[int, str] | None = None
     nodata: float | None = None
     units: str = ""
+    caption: str | None = None
 
     def __deepcopy__(self, memo):
         # All fields are frozen scalars or read-only mappings of immutable
@@ -156,6 +157,8 @@ class CategoricalRasterStyle:
 
     def __post_init__(self) -> None:
         from types import MappingProxyType
+        if self.caption is not None:
+            _text(self.caption, "legend caption")
         if not self.palette or any(isinstance(k, bool) or not isinstance(k, (int, np.integer)) for k in self.palette):
             raise ValueError("invalid_argument: categorical palette needs integer class IDs")
         palette = {int(k): _rgba(v) for k, v in sorted(self.palette.items())}
@@ -171,7 +174,10 @@ class CategoricalRasterStyle:
         object.__setattr__(self, "nodata", _nodata(self.nodata))
 
     def legend(self) -> dict[str, Any]:
-        return categorical_legend(self.palette, self.labels, units=self.units)
+        legend = categorical_legend(self.palette, self.labels, units=self.units)
+        if self.caption is not None:
+            legend["caption"] = self.caption
+        return legend
 
     def apply(self, source: Any, *, valid_mask: Any = None) -> RasterStyleResult:
         arr, valid, _ = _normalized(source, self.nodata, valid_mask)
@@ -192,7 +198,11 @@ class CategoricalRasterStyle:
         return RasterStyleResult(colors[classes], valid, self.legend(), classes=classes)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"kind": "categorical", "classes": self.legend()["entries"], "nodata": self.nodata, "units": self.units}
+        result = {"kind": "categorical", "classes": self.legend()["entries"],
+                  "nodata": self.nodata, "units": self.units}
+        if self.caption is not None:
+            result["caption"] = self.caption
+        return result
 
 
 @dataclass(frozen=True)

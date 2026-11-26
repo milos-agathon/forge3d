@@ -723,6 +723,7 @@ from .map_scene import (
     VectorOverlay,
 )
 from . import recipe_manifest
+from .elevation_change import elevation_change
 from .preparation import (
     PreparationError, PreparationGrid, PreparationSource, PreparationRecipe,
     PreparedLayer, PreparedScene, prepare_scene,
@@ -1132,6 +1133,7 @@ __all__ = [
     "SubjectShotInfeasible",
     "compile_subject_shot",
     "recipe_manifest",
+    "elevation_change",
     "PreparationError",
     "PreparationGrid",
     "PreparationSource",

@@ -149,6 +149,7 @@ from .map_scene import (
     VectorOverlay as VectorOverlay,
 )
 from .recipe_manifest import recipe_manifest as recipe_manifest
+from .elevation_change import elevation_change as elevation_change
 from .preparation import (
     PreparationError as PreparationError,
     PreparationGrid as PreparationGrid,
