@@ -234,6 +234,7 @@ jobs:
           cinema = "tests/test_cinema_solver.py"
           mapscene = (
               "tests/test_mapscene_buildings.py",
+              "tests/test_mapscene_building_anchoring.py",
               "tests/test_mapscene_furniture.py",
               "tests/test_mapscene_render_png.py",
               "tests/test_mapscene_screen_space_settings.py",

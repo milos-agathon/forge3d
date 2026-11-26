@@ -58,9 +58,15 @@ def test_c01_triplanar_projection_follows_steep_surface_geometry():
             Path(hdr).unlink()
 
 
-def test_c01_building_scatter_uses_world_axes_and_declared_height():
+@pytest.mark.parametrize("span_scale", [1.0, 2.0])
+def test_c01_building_scatter_uses_world_axes_and_declared_height(span_scale):
     grid, recipe = _scene()
     recipe = _material("physical").bind(recipe, grid)
+    base_span = ms._terrain_frame(recipe.terrain)[2]
+    if span_scale != 1.0:
+        recipe = replace(recipe, terrain=replace(recipe.terrain, metadata={
+            **recipe.terrain.metadata, "terrain_span": float(base_span) * span_scale,
+        }))
     layer = _material("protected").bind_buildings(
         f3d.MapSceneBuildingLayer("block", metadata={"crs": grid.crs},
             features=[_feature("block", 500015, 500032, height=25)]),
@@ -71,9 +77,12 @@ def test_c01_building_scatter_uses_world_axes_and_declared_height():
     batch = batches[0]
     # Native pack_instance_transforms maps translation through the contract,
     # then uniformly scales the mesh's already-world-oriented local axes.
-    scale = ms._terrain_scene_diagonal(recipe.terrain) / max(heights.shape)
+    scale = max(1.0, ms._terrain_frame(recipe.terrain)[2] or ms._terrain_scene_diagonal(recipe.terrain)) / max(heights.shape)
     local = np.asarray(batch["levels"][0]["mesh"]["positions"]) * scale
-    np.testing.assert_allclose(np.ptp(local, axis=0), (17, 24, 25), atol=1e-4)
+    np.testing.assert_allclose(
+        np.ptp(local[:, :2], axis=0), (17 * span_scale, 24 * span_scale), atol=1e-4
+    )
+    np.testing.assert_allclose(np.ptp(local[:, 2]), 25, atol=1e-4)
     assert np.min(local[:, 2]) == 0, "The building bottom must sit on sampled terrain"
 
 
