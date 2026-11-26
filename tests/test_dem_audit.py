@@ -281,7 +281,7 @@ def test_decimal_lattice_in_source_precision():
     z = (np.rint(terrain / 0.1) * 0.1).astype("float32")
     q = next(f for f in da.audit(z).findings if f["class"] == "quantization")
     assert q["aligned_fraction"] == 1.0
-    assert q["step"] == pytest.approx(0.1, abs=np.spacing(z.max()))
+    assert q["step"] == pytest.approx(0.1, abs=float(np.spacing(z.max())))
 
 
 def test_direct_and_recipe_use_same_integer_repair(tmp_path):
