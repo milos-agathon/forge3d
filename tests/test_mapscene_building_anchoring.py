@@ -849,6 +849,37 @@ def test_eight_exaggeration_far_plane_is_invariant_to_elevation_shift():
         assert params.clip[1] > expected_reach
 
 
+def test_flat_dem_far_plane_uses_native_clamp_domain(monkeypatch):
+    from dataclasses import replace
+
+    scene = _country_scene([])
+    scene.recipe.terrain.data = np.zeros((128, 128), dtype=np.float32)
+    scene.recipe.terrain.metadata = {**scene.recipe.terrain.metadata, "terrain_span": 1.0}
+    scene.recipe.camera = replace(scene.recipe.camera, distance=1000.0)
+    settings = dict(scene.recipe.lighting.settings or {})
+    settings["exaggeration"] = 50.0
+    scene.recipe.lighting.settings = settings
+    monkeypatch.setattr(map_scene, "_heightmap_domain", lambda _heightmap: (0.0, 1000.0))
+    params = map_scene._build_mapscene_terrain_params(
+        scene.recipe, scene.recipe.terrain.data, (128, 128), projection_only=True
+    )
+    # Native geometry centres on the clamp domain, not the raw flat array.
+    expected_reach = 1000.0 + 1000.0 * 50.0 + 500.0 * 50.0
+    assert params.clip[1] > expected_reach
+
+
+def test_point_registered_footprint_uses_sample_centres():
+    from affine import Affine
+
+    transform = Affine.translation(500000.0, 5200000.0) * Affine.scale(100.0, -100.0)
+    bounds = (500000.0, 5190000.0, 501000.0, 5200000.0)
+    corner = transform * (0.0, 0.0)
+    area = map_scene._building_point_to_scene(corner, bounds, transform, (10, 10), "area")
+    point = map_scene._building_point_to_scene(corner, bounds, transform, (10, 10), "point")
+    assert area == pytest.approx((-0.85, -0.85))
+    assert point == pytest.approx((-0.85 - 0.85 / 9.0, -0.85 - 0.85 / 9.0))
+
+
 @pytest.mark.parametrize("elevation_offset", [0.0, 100.0])
 @engine_required
 def test_eight_exaggeration_keeps_low_terrain_and_matches_wide_far_control(tmp_path, elevation_offset):
@@ -1042,6 +1073,17 @@ def test_explicit_dimensions_resolve_independently_from_header(tmp_path):
     )
     assert frame[4] == (50, 10)
     assert frame[2] == pytest.approx(5000.0)
+    terrain = f3d.TerrainSource(
+        path=str(path), crs="EPSG:32632", metadata={"width": 50, "height": 10}
+    )
+    grid = map_scene._terrain_alignment_grid(terrain, fallback_shape=(10, 100))
+    assert grid["registered_raster"] is False
+    assert map_scene._terrain_alignment_grid(terrain)["registered_raster"] is False
+    matching = map_scene._terrain_alignment_grid(
+        f3d.TerrainSource(path=str(path), crs="EPSG:32632", metadata={"height": 10}),
+        fallback_shape=(10, 100),
+    )
+    assert matching["registered_raster"] is True
 
 
 def test_caller_affine_survives_header_crs_and_bad_affine_falls_back(tmp_path):
@@ -1075,3 +1117,93 @@ def test_caller_affine_survives_header_crs_and_bad_affine_falls_back(tmp_path):
     assert fallback[4] == (100, 100)
     assert fallback[2] == pytest.approx(10000.0)
     assert fallback[0] == pytest.approx((500000.0, 5190000.0, 510000.0, 5200000.0))
+
+
+@pytest.mark.parametrize("invalid", [
+    (500000.0, 0.0, 0.0, 5200000.0, 0.0, -100.0),
+    (500000.0, float("nan"), 0.0, 5200000.0, 0.0, -100.0),
+    (float("inf"), 100.0, 0.0, 5200000.0, 0.0, -100.0),
+])
+def test_singular_or_nonfinite_affine_falls_back_to_header(tmp_path, invalid):
+    import rasterio
+    from rasterio.transform import from_origin
+
+    path = tmp_path / "cells.tif"
+    header = from_origin(500000.0, 5200000.0, 100.0, 100.0)
+    with rasterio.open(
+        path, "w", driver="GTiff", width=100, height=100, count=1,
+        dtype="float32", crs="EPSG:32632", transform=header,
+    ) as dataset:
+        dataset.write(np.zeros((100, 100), np.float32), 1)
+    frame = map_scene._terrain_grid_frame(
+        f3d.TerrainSource(path=str(path), metadata={"transform": invalid})
+    )
+    assert frame[3] == header
+    assert frame[2] == pytest.approx(10000.0)
+
+
+def test_target_crs_only_header_and_metadata_aliases(tmp_path):
+    import rasterio
+    from rasterio.transform import from_origin
+
+    path = tmp_path / "unreferenced.tif"
+    header = from_origin(500000.0, 5200000.0, 100.0, 100.0)
+    with rasterio.open(
+        path, "w", driver="GTiff", width=100, height=10, count=1,
+        dtype="float32", crs=None, transform=header,
+    ) as dataset:
+        dataset.write(np.zeros((10, 100), np.float32), 1)
+    grid = map_scene._terrain_alignment_grid(
+        f3d.TerrainSource(path=str(path)), target_crs="EPSG:32632",
+        fallback_shape=(10, 100),
+    )
+    assert grid["crs"] == "EPSG:32632"
+    assert grid["width"] == 100 and grid["height"] == 10
+
+    aliases = map_scene._terrain_alignment_grid(
+        f3d.TerrainSource(
+            data=np.zeros((10, 100), np.float32), crs="EPSG:32632",
+            metadata={"width": None, "cols": 100, "rows": 10,
+                      "geotransform": header.to_gdal()},
+        ),
+        fallback_shape=(10, 100),
+    )
+    assert (aliases["width"], aliases["height"]) == (100, 10)
+    assert tuple(aliases["transform"])[:6] == tuple(header)[:6]
+
+
+def test_affine_validation_does_not_require_rasterio(monkeypatch):
+    from affine import Affine
+    from forge3d import alignment
+
+    monkeypatch.setattr(alignment, "_require_rasterio", lambda: (_ for _ in ()).throw(RuntimeError("no Rasterio")))
+    transform = Affine.translation(1.0, 2.0) * Affine.scale(3.0, -4.0)
+    assert alignment._affine_from_metadata(transform) == transform
+    assert alignment._affine_from_metadata(transform.to_gdal()) == transform
+
+
+def test_header_only_terrain_crs_and_different_building_crs_reach_scatter(tmp_path):
+    from dataclasses import replace
+    import rasterio
+    from rasterio.transform import from_origin
+
+    path = tmp_path / "terrain.tif"
+    with rasterio.open(
+        path, "w", driver="GTiff", width=10, height=10, count=1,
+        dtype="float32", crs="EPSG:3857",
+        transform=from_origin(0.0, 0.0, 1000.0, 1000.0),
+    ) as dataset:
+        dataset.write(np.zeros((10, 10), np.float32), 1)
+    ring = [[0.001, 0.001], [0.002, 0.001], [0.002, 0.002], [0.001, 0.002], [0.001, 0.001]]
+    layer = f3d.MapSceneBuildingLayer(
+        "buildings", metadata={"crs": "EPSG:4326"},
+        features=[{"type": "Feature", "id": "one", "properties": {"height": 10},
+                   "geometry": {"type": "Polygon", "coordinates": [ring]}}],
+    )
+    scene = _country_scene([layer])
+    recipe = replace(scene.recipe, terrain=f3d.TerrainSource(path=str(path)))
+    batches, metadata = map_scene._terrain_scatter_building_batches_for_recipe(
+        recipe, np.zeros((10, 10), np.float32)
+    )
+    assert batches and metadata["building_batch_count"] == 1
+    assert metadata["building_coordinate_space"] == "terrain_crs"

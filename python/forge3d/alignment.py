@@ -104,7 +104,6 @@ def _affine_to_metadata(transform: Any) -> list[float]:
 
 
 def _affine_from_metadata(value: Any) -> Any:
-    _require_rasterio()
     from affine import Affine
 
     if isinstance(value, Affine):
@@ -120,7 +119,7 @@ def _affine_from_metadata(value: Any) -> Any:
             return Affine.from_gdal(*values)
         if len(values) >= 9:
             return Affine(values[0], values[1], values[2], values[3], values[4], values[5])
-    raise ValueError("target grid requires a rasterio Affine transform or a 6-value GDAL geotransform")
+    raise ValueError("target grid requires an Affine transform or a 6-value GDAL geotransform")
 
 
 def _grid_shape(grid: Mapping[str, Any]) -> tuple[int, int]:
