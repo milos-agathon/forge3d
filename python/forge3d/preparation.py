@@ -6,6 +6,7 @@ display of those cells may subsequently be sampled onto the terrain grid.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 import hashlib
 import json
@@ -161,7 +162,11 @@ class PreparationSource:
 
     registration_conversion: RegistrationConversion | None = None
 
+    repairs: Sequence[Mapping[str, Any]] = ()
+
     def __post_init__(self) -> None:
+        if self.repairs and self.kind != "elevation":
+            _fail("invalid_recipe", "DEM repairs require an elevation source.", "Declare repairs on the terrain source.", self.source_id)
         if self.registration_conversion is not None:
             require_compatible_registration("area", "area", self.registration_conversion)
         if not self.source_id or self.kind not in _KINDS:
@@ -177,6 +182,8 @@ class PreparationSource:
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
+        if not self.repairs:
+            result.pop("repairs")
         if self.registration_conversion is None:
             result.pop("registration_conversion")
         result["path"] = str(self.path)
@@ -320,6 +327,10 @@ def _decode_raster(source: PreparationSource, path: Path, base: Path) -> tuple[n
                 _fail("conflicting_grid", "Declared grid differs from GeoTIFF metadata.", "Correct the grid declaration or the source geotransform.", source.source_id)
             data = ds.read()
             valid = ds.read_masks() != 0
+            # GDAL can give a dataset mask precedence over per-band nodata.
+            for band, sentinel in enumerate(ds.nodatavals):
+                if sentinel is not None:
+                    valid[band] &= data[band] != sentinel
             if source.nodata is not None:
                 valid &= data != source.nodata
             extra = {"tags": ds.tags(), "scales": list(ds.scales), "offsets": list(ds.offsets),
@@ -450,6 +461,9 @@ def _transform_geometry_checked(geometry: Mapping[str, Any], source_crs: str, ta
 
 def prepare_scene(recipe: PreparationRecipe, *, base_dir: str | Path = ".") -> PreparedScene:
     """Execute a recipe. No network access, rendering, or provider guessing."""
+    if any(source.repairs for source in recipe.sources):
+        # Hash, execute and save one detached snapshot of the declarations.
+        recipe = deepcopy(recipe)
     base = Path(base_dir).resolve()
     layers: dict[str, PreparedLayer] = {}
     reports = []
@@ -531,6 +545,26 @@ def prepare_scene(recipe: PreparationRecipe, *, base_dir: str | Path = ".") -> P
                             and (int(data[valid].min()) < -(2**53) or int(data[valid].max()) > 2**53)):
                         _fail("category_precision", "Warp scratch cannot exactly represent these IDs.", "Remap IDs to exactly representable integers with a recorded lookup table.", source.source_id)
                 if source.kind == "elevation":
+                    if source.repairs:
+                        from ._dem_repairs import apply_repair
+                        raster = np.ma.array(data[0], mask=~valid[0])
+                        metadata["repairs_sha256"] = hashlib.sha256(
+                            _json(list(source.repairs)).encode("utf-8")).hexdigest()
+                        for step in source.repairs:
+                            try:
+                                operation = step["operation"]
+                                params = {k: v for k, v in step.items() if k != "operation"}
+                                raster, record = apply_repair(raster, operation, **params)
+                            except (KeyError, ValueError, TypeError, IndexError) as exc:
+                                raise PreparationError("invalid_repair", str(exc),
+                                                       "Check the operation and source-grid region.", source.source_id) from exc
+                            if source.mask_path and record["newly_valid"]:
+                                protected = ~np.load(_local(source.mask_path, base), allow_pickle=False)
+                                if np.any(protected & ~np.ma.getmaskarray(raster)):
+                                    _fail("invalid_repair", "Fill crosses the declared source mask.",
+                                          "Limit the fill region to disclosed cells.", source.source_id)
+                            operations.append(record)
+                        data, valid = raster.data[None], (~np.ma.getmaskarray(raster))[None]
                     data = _height_conversion(data, valid, original_grid, source, recipe.vertical_reference)
                     metadata.update({"units": "m", "vertical_reference": recipe.vertical_reference})
                     operations.append({"operation": "height_reference", "from": source.vertical_reference,

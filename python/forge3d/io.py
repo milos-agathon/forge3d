@@ -52,6 +52,8 @@ class DEMData:
     stats: Dict[str, float] = None  # type: ignore
     registration: PixelRegistration = "area"
 
+    fill_record: Optional[Dict[str, Any]] = None
+
     def __post_init__(self):
         """Initialize stats if not provided."""
         if self.stats is None:
@@ -207,6 +209,9 @@ def infer_dem_domain(
 def fill_nodata(data: np.ndarray, nodata: float, method: str = "nearest") -> np.ndarray:
     """Fill nodata values in DEM using interpolation.
 
+    This legacy array-returning helper is the owner-approved exception to
+    EXTREMA repair records. Use dem_audit.fill_missing for a recorded repair.
+
     Parameters
     ----------
     data : np.ndarray
@@ -221,20 +226,26 @@ def fill_nodata(data: np.ndarray, nodata: float, method: str = "nearest") -> np.
     np.ndarray
         Filled elevation data
     """
+    return _fill_nodata_with_method(data, nodata, method)[0]
+
+
+def _fill_nodata_with_method(data, nodata, method):
     # Create mask of nodata pixels
     nodata_mask = ~_valid_dem_mask(data, nodata)
 
     if not np.any(nodata_mask):
-        return data.copy()
+        return data.copy(), None
 
     if np.all(nodata_mask):
-        return data.copy()
+        return data.copy(), None
     filled = data.copy()
 
     try:
         from scipy import interpolate
         from scipy.ndimage import distance_transform_edt
 
+        if method not in ("nearest", "linear", "cubic"):
+            method = "nearest"
         # Get indices of valid and invalid pixels
         valid_mask = ~nodata_mask
         rows, cols = np.indices(data.shape)
@@ -260,10 +271,11 @@ def fill_nodata(data: np.ndarray, nodata: float, method: str = "nearest") -> np.
 
     except ImportError:
         # Fallback to simple mean filling if scipy not available
+        method = "mean"
         valid_mean = np.mean(data[~nodata_mask])
         filled[nodata_mask] = valid_mean
 
-    return filled
+    return filled, method
 
 
 def load_dem(
@@ -342,8 +354,13 @@ def load_dem(
         registration = geotiff_registration(src)
 
     # Fill nodata if requested
+    fill_record = {"requested": fill_nodata_values, "requested_method": fill_method,
+                   "method": None, "cells_filled": 0}
     if fill_nodata_values and nodata is not None:
-        data = fill_nodata(data, float(nodata), method=fill_method)
+        invalid = ~_valid_dem_mask(data, nodata)
+        data, method = _fill_nodata_with_method(data, float(nodata), method=fill_method)
+        filled_count = int(np.count_nonzero(invalid & _valid_dem_mask(data, nodata)))
+        fill_record.update(method=method if filled_count else None, cells_filled=filled_count)
         nodata = None  # No more nodata after filling
 
     # Calculate domain
@@ -382,6 +399,7 @@ def load_dem(
         resolution=resolution,
         bounds=(bounds.left, bounds.bottom, bounds.right, bounds.top) if bounds else None,
         stats=calculate_dem_stats(data, nodata),
+        fill_record=fill_record,
     )
 
 

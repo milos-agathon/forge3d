@@ -723,6 +723,7 @@ from .map_scene import (
     VectorOverlay,
 )
 from . import recipe_manifest
+from . import dem_audit
 from .preparation import (
     PreparationError, PreparationGrid, PreparationSource, PreparationRecipe,
     PreparedLayer, PreparedScene, prepare_scene,
@@ -757,6 +758,7 @@ from .precision import dd_harness, dd_jitter_demo, dd_selftest
 # Public API
 # -----------------------------------------------------------------------------
 __all__ = [
+    "dem_audit",
     "cinema", "Subject", "FramingSpec", "Shot", "ShotPlan", "CinemaInfeasible", "CinemaNativeUnavailable", "plan_shots",
     "GeospatialMaterialRecipe", "MaterialLayer", "MaterialEvaluation", "MaterialRasterStyle",
     "MaterialGrid", "MaterialTexture", "MaterialMask", "TerrainMaterialLayer",

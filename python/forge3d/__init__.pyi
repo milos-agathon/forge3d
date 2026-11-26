@@ -149,6 +149,7 @@ from .map_scene import (
     VectorOverlay as VectorOverlay,
 )
 from .recipe_manifest import recipe_manifest as recipe_manifest
+from . import dem_audit as dem_audit
 from .preparation import (
     PreparationError as PreparationError,
     PreparationGrid as PreparationGrid,
