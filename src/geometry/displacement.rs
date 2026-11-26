@@ -73,9 +73,7 @@ fn sample_height_bilinear(hm: &[f32], w: usize, h: usize, u: f32, v: f32) -> f32
     let h10 = hm[y0 * w + x1];
     let h01 = hm[y1 * w + x0];
     let h11 = hm[y1 * w + x1];
-    let a = h00 * (1.0 - tx) + h10 * tx;
-    let b = h01 * (1.0 - tx) + h11 * tx;
-    a * (1.0 - ty) + b * ty
+    crate::terrain::masked_height::bilinear([h00, h10, h01, h11], tx, ty)
 }
 
 pub fn displace_heightmap(
@@ -97,6 +95,7 @@ pub fn displace_heightmap(
     let dy = (max[1] - min[1]).abs().max(1e-8);
     let use_uv = uv_space && mesh.uvs.len() == mesh.positions.len();
     let uvs_copy = if use_uv { Some(mesh.uvs.clone()) } else { None };
+    let mut missing = Vec::new();
     for (i, p) in mesh.positions.iter_mut().enumerate() {
         let (u, v) = if let (true, Some(ref uvc)) = (use_uv, &uvs_copy) {
             let uv = uvc[i];
@@ -105,10 +104,23 @@ pub fn displace_heightmap(
             ((p[0] - min[0]) / dx, (p[1] - min[1]) / dy)
         };
         let hval = sample_height_bilinear(heightmap, w, h, u, v);
+        if !hval.is_finite() {
+            missing.push(i as u32);
+            continue;
+        }
         let n = mesh.normals[i];
         p[0] += n[0] * hval * scale;
         p[1] += n[1] * hval * scale;
         p[2] += n[2] * hval * scale;
+    }
+    if !missing.is_empty() {
+        mesh.indices = mesh
+            .indices
+            .chunks_exact(3)
+            .filter(|tri| tri.iter().all(|id| missing.binary_search(id).is_err()))
+            .flatten()
+            .copied()
+            .collect();
     }
     // Update normals after displacement
     recompute_normals(mesh);

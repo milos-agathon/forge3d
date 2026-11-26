@@ -54,7 +54,7 @@ impl HeightfieldAnalyticalBaker {
                 weight += wgt;
             }
         }
-        (weight > 0.0).then_some(sum / weight)
+        (weight >= 0.5).then(|| sum / weight)
     }
 
     fn sample_texel(&self, x: u32, y: u32) -> Option<f32> {

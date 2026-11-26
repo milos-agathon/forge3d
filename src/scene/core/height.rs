@@ -8,6 +8,10 @@ impl Scene {
         })?;
 
         let g = crate::core::gpu::try_ctx()?;
+        // Hardware filtering over these channels gives the numerator and
+        // missing weight independently, including for legacy contour overlays.
+        let packed = data.iter().any(|v| !v.is_finite()).then(|| data.iter()
+            .map(|&v| if v.is_finite() { [v,0.0] } else { [0.0,1.0] }).collect::<Vec<_>>());
         let tex = tracked_create_texture(
             &g.device,
             &wgpu::TextureDescriptor {
@@ -20,14 +24,14 @@ impl Scene {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R32Float,
+                format: if packed.is_some() { wgpu::TextureFormat::Rg32Float } else { wgpu::TextureFormat::R32Float },
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             },
         )?;
-        let row_bytes = w * 4;
+        let row_bytes = w * if packed.is_some() { 8 } else { 4 };
         let padded_bpr = crate::core::gpu::align_copy_bpr(row_bytes);
-        let src_bytes: &[u8] = bytemuck::cast_slice::<f32, u8>(data);
+        let src_bytes: &[u8] = packed.as_deref().map(bytemuck::cast_slice).unwrap_or_else(|| bytemuck::cast_slice(data));
         let mut padded = vec![0u8; (padded_bpr * h) as usize];
         for y in 0..h as usize {
             let s = y * row_bytes as usize;

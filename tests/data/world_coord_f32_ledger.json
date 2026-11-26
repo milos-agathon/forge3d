@@ -7469,5 +7469,735 @@
         ]
       ]
     }
+  },
+  "vacuum": {
+    "review": "APPROVED by Milos in the PR #330 follow-up to fix the failing conversion inventory checks.",
+    "base_commit": "cf678e48a332e982c96db11ba747d7c913746c63",
+    "base_count": 1954,
+    "base_digest": "09992181fe1f6377a7c9ac4f25835b9ae7fd8f2c4d12854126f685559dc75168",
+    "result_count": 1961,
+    "result_digest": "e0339f8170f466946f13a959f184a90323e8ef8ee2502835746a5df9bb5bb021",
+    "files": {
+      "src/gis/raster_values.rs": {
+        "base": [
+          [
+            "src/gis/raster_values.rs",
+            "f64_to_raster_data",
+            "as_f32",
+            1,
+            "RasterDType::UInt8 => RasterData::U8( values .iter() .map(|&value| value.round().clamp(0.0, u8::MAX as f64) as u8) .collect(), ), RasterDType::Int16 => RasterData::I16( values .iter() .map(|&value| value.round().clamp(i16::MIN as f64, i16::MAX as f64) as i16) .collect(), ), RasterDType::UInt16 => RasterData::U16( values .iter() .map(|&value| value.round().clamp(0.0, u16::MAX as f64) as u16) .collect(), ), RasterDType::Int32 => RasterData::I32( values .iter() .map(|&value| value.round().clamp(i32::MIN as f64, i32::MAX as f64) as i32) .collect(), ), RasterDType::UInt32 => RasterData::U32( values .iter() .map(|&value| value.round().clamp(0.0, u32::MAX as f64) as u32) .collect(), ), RasterDType::Float32 => RasterData::F32(values.iter().map(|&value| value as f32).collect()), RasterDType::Float64 => RasterData::F64(values),"
+          ]
+        ],
+        "result": [
+          [
+            "src/gis/raster_values.rs",
+            "f64_to_raster_data",
+            "as_f32",
+            1,
+            "RasterDType::UInt8 => RasterData::U8( values .iter() .map(|&value| value.round().clamp(0.0, u8::MAX as f64) as u8) .collect(), ), RasterDType::Int16 => RasterData::I16( values .iter() .map(|&value| value.round().clamp(i16::MIN as f64, i16::MAX as f64) as i16) .collect(), ), RasterDType::UInt16 => RasterData::U16( values .iter() .map(|&value| value.round().clamp(0.0, u16::MAX as f64) as u16) .collect(), ), RasterDType::Int32 => RasterData::I32( values .iter() .map(|&value| value.round().clamp(i32::MIN as f64, i32::MAX as f64) as i32) .collect(), ), RasterDType::UInt32 => RasterData::U32( values .iter() .map(|&value| value.round().clamp(0.0, u32::MAX as f64) as u32) .collect(), ), RasterDType::Float32 => RasterData::F32(values.iter().map(|&value| value as f32).collect()), RasterDType::Float64 => RasterData::F64(values),"
+          ],
+          [
+            "src/gis/raster_values.rs",
+            "sample_valid",
+            "as_f32",
+            1,
+            "f64::from(v as f32)"
+          ]
+        ]
+      },
+      "src/picking/heightfield_ray.rs": {
+        "base": [
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            1,
+            "let fx = u * (width - 1) as f32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            2,
+            "let fy = v * (height - 1) as f32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            3,
+            "let tx = fx - x0 as f32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            4,
+            "let ty = fy - y0 as f32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            5,
+            "let delta_u = 1.0 / width as f32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            6,
+            "let delta_v = 1.0 / height as f32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            7,
+            "let fx = uu * (width - 1) as f32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            8,
+            "let fy = vv * (height - 1) as f32"
+          ]
+        ],
+        "result": [
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            1,
+            "let fx = u * (width - 1) as f32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            2,
+            "let fy = v * (height - 1) as f32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            3,
+            "let tx = fx - x0 as f32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            4,
+            "let ty = fy - y0 as f32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            5,
+            "let x = (u * (width - 1) as f32).round() as u32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            6,
+            "let y = (v * (height - 1) as f32).round() as u32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            7,
+            "let dx = axis(center, node(x - 1, y), node(x + 1, y)) as f32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            8,
+            "let dz = axis(center, node(x, y - 1), node(x, y + 1)) as f32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            9,
+            "return normalize([ -dx * self.config.z_scale * (width - 1) as f32 / self.config.terrain_width, 1.0, -dz * self.config.z_scale * (height - 1) as f32 / self.config.terrain_depth, ])"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            10,
+            "return normalize([ -dx * self.config.z_scale * (width - 1) as f32 / self.config.terrain_width, 1.0, -dz * self.config.z_scale * (height - 1) as f32 / self.config.terrain_depth, ])"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            11,
+            "} let delta_u = 1.0 / width as f32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            12,
+            "let delta_v = 1.0 / height as f32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            13,
+            "let fx = uu * (width - 1) as f32"
+          ],
+          [
+            "src/picking/heightfield_ray.rs",
+            "<module>",
+            "as_f32",
+            14,
+            "let fy = vv * (height - 1) as f32"
+          ]
+        ]
+      },
+      "src/terrain/analysis.rs": {
+        "base": [
+          [
+            "src/terrain/analysis.rs",
+            "compute_slope_aspect_at_point",
+            "as_f32",
+            1,
+            "let dz_dx = (h_right - h_left) / (dx * (x_next - x_prev) as f32)"
+          ],
+          [
+            "src/terrain/analysis.rs",
+            "compute_slope_aspect_at_point",
+            "as_f32",
+            2,
+            "let dz_dy = (h_top - h_bottom) / (dy * (y_next - y_prev) as f32)"
+          ],
+          [
+            "src/terrain/analysis.rs",
+            "extract_contours_for_level",
+            "as_f32",
+            1,
+            "} let segments = get_marching_squares_segments( case, h00, h10, h01, h11, level, x as f32 * dx, y as f32 * dy, dx, dy, )"
+          ],
+          [
+            "src/terrain/analysis.rs",
+            "extract_contours_for_level",
+            "as_f32",
+            2,
+            "} let segments = get_marching_squares_segments( case, h00, h10, h01, h11, level, x as f32 * dx, y as f32 * dy, dx, dy, )"
+          ]
+        ],
+        "result": [
+          [
+            "src/terrain/analysis.rs",
+            "compute_slope_aspect_at_point",
+            "as_f32",
+            1,
+            "(after - before) / (step * span as f32)"
+          ],
+          [
+            "src/terrain/analysis.rs",
+            "compute_slope_aspect_at_point",
+            "as_f32",
+            2,
+            "axis_difference(center.into(), before.into(), after.into()) as f32 / step"
+          ],
+          [
+            "src/terrain/analysis.rs",
+            "extract_contours_for_level",
+            "as_f32",
+            1,
+            "} let segments = get_marching_squares_segments( case, h00, h10, h01, h11, level, x as f32 * dx, y as f32 * dy, dx, dy, )"
+          ],
+          [
+            "src/terrain/analysis.rs",
+            "extract_contours_for_level",
+            "as_f32",
+            2,
+            "} let segments = get_marching_squares_segments( case, h00, h10, h01, h11, level, x as f32 * dx, y as f32 * dy, dx, dy, )"
+          ]
+        ]
+      },
+      "src/terrain/masked_height.rs": {
+        "base": [],
+        "result": [
+          [
+            "src/terrain/masked_height.rs",
+            "<module>",
+            "as_f32",
+            1,
+            "[(sum / f64::from(count)) as f32, 0.5]"
+          ],
+          [
+            "src/terrain/masked_height.rs",
+            "<module>",
+            "as_f32",
+            2,
+            "(sum / weight) as f32"
+          ],
+          [
+            "src/terrain/masked_height.rs",
+            "<module>",
+            "as_f32",
+            3,
+            "let fx = uv[0].clamp(0.0, 1.0) * dims.0.saturating_sub(1) as f32"
+          ],
+          [
+            "src/terrain/masked_height.rs",
+            "<module>",
+            "as_f32",
+            4,
+            "let fy = uv[1].clamp(0.0, 1.0) * dims.1.saturating_sub(1) as f32"
+          ],
+          [
+            "src/terrain/masked_height.rs",
+            "<module>",
+            "as_f32",
+            5,
+            "let tx = fx - x0 as f32"
+          ],
+          [
+            "src/terrain/masked_height.rs",
+            "<module>",
+            "as_f32",
+            6,
+            "let ty = fy - y0 as f32"
+          ]
+        ]
+      },
+      "src/terrain/renderer/resources/ao.rs": {
+        "base": [
+          [
+            "src/terrain/renderer/resources/ao.rs",
+            "compute_coarse_ao_from_heightmap",
+            "as_f32",
+            1,
+            "let dist = ((dx * dx + dy * dy) as f32).sqrt()"
+          ],
+          [
+            "src/terrain/renderer/resources/ao.rs",
+            "compute_coarse_ao_from_heightmap",
+            "as_f32",
+            2,
+            "let avg_occlusion = occlusion / sample_count as f32"
+          ]
+        ],
+        "result": [
+          [
+            "src/terrain/renderer/resources/ao.rs",
+            "compute_coarse_ao_from_heightmap",
+            "as_f32",
+            1,
+            "} let dist = ((dx * dx + dy * dy) as f32).sqrt()"
+          ],
+          [
+            "src/terrain/renderer/resources/ao.rs",
+            "compute_coarse_ao_from_heightmap",
+            "as_f32",
+            2,
+            "let avg_occlusion = occlusion / sample_count as f32"
+          ]
+        ]
+      },
+      "src/terrain/renderer/visibility_buffer.rs": {
+        "base": [
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "build",
+            "as_f32",
+            1,
+            "let legacy_skirt_depth = super::core::clipmap_camera_config(&params.camera_mode) .map(|config| config.ring_resolution as f32 * 0.001) .unwrap_or(0.0)"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "pick",
+            "as_f32",
+            1,
+            "let ray = crate::picking::Ray::new( [x as f32 + 0.5, y as f32 + 0.5, -1.0], [0.0, 0.0, 1.0], )"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "pick",
+            "as_f32",
+            2,
+            "let ray = crate::picking::Ray::new( [x as f32 + 0.5, y as f32 + 0.5, -1.0], [0.0, 0.0, 1.0], )"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "<module>",
+            "as_f32",
+            1,
+            "let fx = uv[0].clamp(0.0, 1.0) * dims.0.saturating_sub(1) as f32"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "<module>",
+            "as_f32",
+            2,
+            "let fy = uv[1].clamp(0.0, 1.0) * dims.1.saturating_sub(1) as f32"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "<module>",
+            "as_f32",
+            3,
+            "let tx = fx - x0 as f32"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "<module>",
+            "as_f32",
+            4,
+            "let ty = fy - y0 as f32"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "sample_clipmap_height",
+            "as_f32",
+            1,
+            "let coarse_step = [ coarse_texels / dims.0.saturating_sub(1).max(1) as f32, coarse_texels / dims.1.saturating_sub(1).max(1) as f32, ]"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "sample_clipmap_height",
+            "as_f32",
+            2,
+            "let coarse_step = [ coarse_texels / dims.0.saturating_sub(1).max(1) as f32, coarse_texels / dims.1.saturating_sub(1).max(1) as f32, ]"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "apply_height_curve",
+            "as_f32",
+            1,
+            "let index = (t * lut.len().saturating_sub(1) as f32).round() as usize"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "<module>",
+            "as_f32",
+            5,
+            "*slot = [ (((ndc.x * 0.5 + 0.5) * viewport.0 as f32) * SUBPIXEL_SCALE).round() / SUBPIXEL_SCALE, (((0.5 - ndc.y * 0.5) * viewport.1 as f32) * SUBPIXEL_SCALE).round() / SUBPIXEL_SCALE, ndc.z, ]"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "<module>",
+            "as_f32",
+            6,
+            "*slot = [ (((ndc.x * 0.5 + 0.5) * viewport.0 as f32) * SUBPIXEL_SCALE).round() / SUBPIXEL_SCALE, (((0.5 - ndc.y * 0.5) * viewport.1 as f32) * SUBPIXEL_SCALE).round() / SUBPIXEL_SCALE, ndc.z, ]"
+          ]
+        ],
+        "result": [
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "build",
+            "as_f32",
+            1,
+            "let legacy_skirt_depth = super::core::clipmap_camera_config(&params.camera_mode) .map(|config| config.ring_resolution as f32 * 0.001) .unwrap_or(0.0)"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "pick",
+            "as_f32",
+            1,
+            "let ray = crate::picking::Ray::new( [x as f32 + 0.5, y as f32 + 0.5, -1.0], [0.0, 0.0, 1.0], )"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "pick",
+            "as_f32",
+            2,
+            "let ray = crate::picking::Ray::new( [x as f32 + 0.5, y as f32 + 0.5, -1.0], [0.0, 0.0, 1.0], )"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "sample_clipmap_height",
+            "as_f32",
+            1,
+            "let coarse_step = [ coarse_texels / dims.0.saturating_sub(1).max(1) as f32, coarse_texels / dims.1.saturating_sub(1).max(1) as f32, ]"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "sample_clipmap_height",
+            "as_f32",
+            2,
+            "let coarse_step = [ coarse_texels / dims.0.saturating_sub(1).max(1) as f32, coarse_texels / dims.1.saturating_sub(1).max(1) as f32, ]"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "apply_height_curve",
+            "as_f32",
+            1,
+            "let index = (t * lut.len().saturating_sub(1) as f32).round() as usize"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "<module>",
+            "as_f32",
+            1,
+            "let sample = a * barycentric[0] as f32 + b * barycentric[1] as f32 + c * barycentric[2] as f32"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "<module>",
+            "as_f32",
+            2,
+            "let sample = a * barycentric[0] as f32 + b * barycentric[1] as f32 + c * barycentric[2] as f32"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "<module>",
+            "as_f32",
+            3,
+            "let sample = a * barycentric[0] as f32 + b * barycentric[1] as f32 + c * barycentric[2] as f32"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "<module>",
+            "as_f32",
+            4,
+            "*slot = [ (((ndc.x * 0.5 + 0.5) * viewport.0 as f32) * SUBPIXEL_SCALE).round() / SUBPIXEL_SCALE, (((0.5 - ndc.y * 0.5) * viewport.1 as f32) * SUBPIXEL_SCALE).round() / SUBPIXEL_SCALE, ndc.z, ]"
+          ],
+          [
+            "src/terrain/renderer/visibility_buffer.rs",
+            "<module>",
+            "as_f32",
+            5,
+            "*slot = [ (((ndc.x * 0.5 + 0.5) * viewport.0 as f32) * SUBPIXEL_SCALE).round() / SUBPIXEL_SCALE, (((0.5 - ndc.y * 0.5) * viewport.1 as f32) * SUBPIXEL_SCALE).round() / SUBPIXEL_SCALE, ndc.z, ]"
+          ]
+        ]
+      },
+      "src/viewer/terrain/scene/terrain_load.rs": {
+        "base": [
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "load_terrain",
+            "as_f32",
+            1,
+            "tiff::decoder::DecodingResult::F32(data) => data, tiff::decoder::DecodingResult::F64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I64(data) => data.iter().map(|&v| v as f32).collect(),"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "load_terrain",
+            "as_f32",
+            2,
+            "tiff::decoder::DecodingResult::F32(data) => data, tiff::decoder::DecodingResult::F64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I64(data) => data.iter().map(|&v| v as f32).collect(),"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "load_terrain",
+            "as_f32",
+            3,
+            "tiff::decoder::DecodingResult::F32(data) => data, tiff::decoder::DecodingResult::F64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I64(data) => data.iter().map(|&v| v as f32).collect(),"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "load_terrain",
+            "as_f32",
+            4,
+            "tiff::decoder::DecodingResult::F32(data) => data, tiff::decoder::DecodingResult::F64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I64(data) => data.iter().map(|&v| v as f32).collect(),"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "load_terrain",
+            "as_f32",
+            5,
+            "tiff::decoder::DecodingResult::F32(data) => data, tiff::decoder::DecodingResult::F64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I64(data) => data.iter().map(|&v| v as f32).collect(),"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "load_terrain",
+            "as_f32",
+            6,
+            "tiff::decoder::DecodingResult::F32(data) => data, tiff::decoder::DecodingResult::F64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I64(data) => data.iter().map(|&v| v as f32).collect(),"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "load_terrain",
+            "as_f32",
+            7,
+            "tiff::decoder::DecodingResult::F32(data) => data, tiff::decoder::DecodingResult::F64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I64(data) => data.iter().map(|&v| v as f32).collect(),"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "load_terrain",
+            "as_f32",
+            8,
+            "tiff::decoder::DecodingResult::F32(data) => data, tiff::decoder::DecodingResult::F64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I64(data) => data.iter().map(|&v| v as f32).collect(),"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "load_terrain",
+            "as_f32",
+            9,
+            "tiff::decoder::DecodingResult::F32(data) => data, tiff::decoder::DecodingResult::F64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U16(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U32(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I8(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::U64(data) => data.iter().map(|&v| v as f32).collect(), tiff::decoder::DecodingResult::I64(data) => data.iter().map(|&v| v as f32).collect(),"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "load_terrain",
+            "as_f32",
+            10,
+            "let terrain_width = width as f32"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "load_terrain",
+            "as_f32",
+            11,
+            "view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(), sun_dir: [0.5, 0.8, 0.3, 0.0], terrain_params: [min_h, max_h - min_h, terrain_width, 1.0], lighting: [1.0, 0.3, 0.5, -999999.0], background: [0.5, 0.7, 0.9, 0.0], water_color: [0.2, 0.4, 0.6, 0.0], render_origin_xz: [0.0, 0.0], render_span_xz: [width as f32, height as f32],"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "load_terrain",
+            "as_f32",
+            12,
+            "view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(), sun_dir: [0.5, 0.8, 0.3, 0.0], terrain_params: [min_h, max_h - min_h, terrain_width, 1.0], lighting: [1.0, 0.3, 0.5, -999999.0], background: [0.5, 0.7, 0.9, 0.0], water_color: [0.2, 0.4, 0.6, 0.0], render_origin_xz: [0.0, 0.0], render_span_xz: [width as f32, height as f32],"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "sample_lattice_uv",
+            "as_f32",
+            1,
+            "} ((node_uv * (samples - 1) as f32).round() + 0.5) / samples as f32"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "sample_lattice_uv",
+            "as_f32",
+            2,
+            "} ((node_uv * (samples - 1) as f32).round() + 0.5) / samples as f32"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "create_grid_mesh",
+            "as_f32",
+            1,
+            "let inv_u = 1.0 / (cols - 1) as f32"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "create_grid_mesh",
+            "as_f32",
+            2,
+            "let inv_v = 1.0 / (rows - 1) as f32"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "create_grid_mesh",
+            "as_f32",
+            3,
+            "let u = x as f32 * inv_u"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "create_grid_mesh",
+            "as_f32",
+            4,
+            "let v = y as f32 * inv_v"
+          ]
+        ],
+        "result": [
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "load_terrain",
+            "as_f32",
+            1,
+            "value as f32"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "load_terrain",
+            "as_f32",
+            2,
+            "Samples::F32(v) => decode!(v, marker.map(|m| m as f32)), Samples::F64(v) => decode!(v, marker), Samples::I8(v) => integers!(v, i8), Samples::I16(v) => integers!(v, i16), Samples::I32(v) => integers!(v, i32), Samples::I64(v) => integers!(v, i64), Samples::U8(v) => integers!(v, u8), Samples::U16(v) => integers!(v, u16), Samples::U32(v) => integers!(v, u32), Samples::U64(v) => integers!(v, u64),"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "load_terrain",
+            "as_f32",
+            3,
+            "let terrain_width = width as f32"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "load_terrain",
+            "as_f32",
+            4,
+            "view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(), sun_dir: [0.5, 0.8, 0.3, 0.0], terrain_params: [min_h, max_h - min_h, terrain_width, 1.0], lighting: [1.0, 0.3, 0.5, -999999.0], background: [0.5, 0.7, 0.9, 0.0], water_color: [0.2, 0.4, 0.6, 0.0], render_origin_xz: [0.0, 0.0], render_span_xz: [width as f32, height as f32],"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "load_terrain",
+            "as_f32",
+            5,
+            "view_proj: glam::Mat4::IDENTITY.to_cols_array_2d(), sun_dir: [0.5, 0.8, 0.3, 0.0], terrain_params: [min_h, max_h - min_h, terrain_width, 1.0], lighting: [1.0, 0.3, 0.5, -999999.0], background: [0.5, 0.7, 0.9, 0.0], water_color: [0.2, 0.4, 0.6, 0.0], render_origin_xz: [0.0, 0.0], render_span_xz: [width as f32, height as f32],"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "sample_lattice_uv",
+            "as_f32",
+            1,
+            "} ((node_uv * (samples - 1) as f32).round() + 0.5) / samples as f32"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "sample_lattice_uv",
+            "as_f32",
+            2,
+            "} ((node_uv * (samples - 1) as f32).round() + 0.5) / samples as f32"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "clip_missing_triangles",
+            "as_f32",
+            1,
+            "let x = ((v[2] * width as f32) as u32).min(width - 1)"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "clip_missing_triangles",
+            "as_f32",
+            2,
+            "let y = ((v[3] * height as f32) as u32).min(height - 1)"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "create_grid_mesh",
+            "as_f32",
+            1,
+            "let inv_u = 1.0 / (cols - 1) as f32"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "create_grid_mesh",
+            "as_f32",
+            2,
+            "let inv_v = 1.0 / (rows - 1) as f32"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "create_grid_mesh",
+            "as_f32",
+            3,
+            "let u = x as f32 * inv_u"
+          ],
+          [
+            "src/viewer/terrain/scene/terrain_load.rs",
+            "create_grid_mesh",
+            "as_f32",
+            4,
+            "let v = y as f32 * inv_v"
+          ]
+        ]
+      }
+    }
   }
 }

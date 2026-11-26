@@ -8,7 +8,8 @@ mod py {
     use pyo3::IntoPy;
 
     use crate::gis::error::GisError;
-    use crate::gis::raster_info;
+    use crate::gis::raster_info::{self, LoadedRaster as RasterSource};
+    use crate::gis::raster_read::decode_raster;
     use crate::gis::raster_write::{RasterArray, RasterData};
     use crate::gis::types::{RasterDType, RasterInfo, RasterWarning};
 
@@ -18,11 +19,6 @@ mod py {
     const SHAPE_MISMATCH: &str = "shape_mismatch";
     const UNSUPPORTED_DTYPE: &str = "unsupported_dtype";
     const UNSUPPORTED_OPTION: &str = "unsupported_option";
-
-    struct RasterSource {
-        array: RasterArray,
-        info: RasterInfo,
-    }
 
     struct Stats {
         valid: Vec<bool>,
@@ -57,7 +53,7 @@ mod py {
         let source = raster_source_from_py(source)?;
         let nodata = nodata_or_source(nodata, &source)?;
         let mask = valid_mask_from_py(valid_mask, &source.array)?;
-        let stats = stats(&source.array, &nodata, mask.as_deref(), clip)?;
+        let stats = stats(&source, &nodata, mask.as_deref(), clip)?;
 
         let mut out = Vec::with_capacity(stats.values.len());
         let span = stats.max - stats.min;
@@ -101,7 +97,7 @@ mod py {
         let source = raster_source_from_py(source)?;
         let nodata = nodata_or_source(nodata, &source)?;
         let mask = valid_mask_from_py(valid_mask, &source.array)?;
-        let stats = stats(&source.array, &nodata, mask.as_deref(), None)?;
+        let stats = stats(&source, &nodata, mask.as_deref(), None)?;
 
         let mut counts = vec![0usize; bins.len() + 2];
         let ids = stats
@@ -143,11 +139,7 @@ mod py {
 
     fn raster_source_from_py(value: &Bound<'_, PyAny>) -> PyResult<RasterSource> {
         if let Ok(path) = value.extract::<String>() {
-            let result = raster_info::read_raster(path, None, None, false)?;
-            return Ok(RasterSource {
-                array: result.array,
-                info: result.info,
-            });
+            return Ok(decode_raster(std::path::Path::new(&path), true)?);
         }
         if let Ok(info) = value.extract::<PyRef<'_, RasterInfo>>() {
             if info.path.is_empty() {
@@ -156,11 +148,7 @@ mod py {
                 ))
                 .into());
             }
-            let result = raster_info::read_raster(&info.path, None, None, false)?;
-            return Ok(RasterSource {
-                array: result.array,
-                info: result.info,
-            });
+            return Ok(decode_raster(std::path::Path::new(&info.path), true)?);
         }
         if let Ok(dict) = value.downcast::<PyDict>() {
             let Some(array_value) = dict.get_item("array")? else {
@@ -176,11 +164,12 @@ mod py {
                 synthetic_info(&array)
             };
             validate_info_shape(&info, &array)?;
-            return Ok(RasterSource { array, info });
+            let explicit_mask = valid_mask_from_py(dict.get_item("mask")?.as_ref(), &array)?;
+            return Ok(RasterSource { array, info, explicit_mask });
         }
         let array = extract_source_array(value)?;
         let info = synthetic_info(&array);
-        Ok(RasterSource { array, info })
+        Ok(RasterSource { array, info, explicit_mask: None })
     }
 
     fn extract_source_array(value: &Bound<'_, PyAny>) -> PyResult<RasterArray> {
@@ -410,25 +399,25 @@ mod py {
     }
 
     fn stats(
-        array: &RasterArray,
+        source: &RasterSource,
         nodata: &[Option<f64>],
         explicit_mask: Option<&[bool]>,
         clip: Option<(f64, f64)>,
     ) -> PyResult<Stats> {
+        let array = &source.array;
         let mut values = raster_info::raster_to_f64(array);
         let pixels = array.height * array.width;
         let mut valid = vec![false; values.len()];
         let mut observed = Vec::new();
         for band in 0..array.bands {
             let nodata = nodata.get(band).copied().flatten();
+            let covered = source.explicit_mask.as_deref()
+                .map(|mask| crate::gis::raster_values::mask_plane(mask, band, pixels));
             for pixel in 0..pixels {
                 let index = band * pixels + pixel;
-                let mask_valid = explicit_mask
-                    .and_then(|mask| mask.get(index))
-                    .copied()
-                    .unwrap_or(true);
-                let value = values[index];
-                let is_valid = mask_valid && value.is_finite() && !nodata_matches(value, nodata);
+                let is_valid = covered.is_none_or(|mask| mask[pixel])
+                    && explicit_mask.is_none_or(|mask| mask[index])
+                    && crate::gis::raster_values::sample_valid(values[index], nodata, array.dtype());
                 if is_valid {
                     if let Some((lo, hi)) = clip {
                         values[index] = values[index].clamp(lo, hi);
@@ -467,10 +456,6 @@ mod py {
             mean,
             std: variance.sqrt(),
         })
-    }
-
-    fn nodata_matches(value: f64, nodata: Option<f64>) -> bool {
-        nodata.is_some_and(|nodata| value == nodata || (value.is_nan() && nodata.is_nan()))
     }
 
     fn parse_bins(value: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f64>> {

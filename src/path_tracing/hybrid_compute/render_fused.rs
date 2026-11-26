@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use super::render_terrain::TerrainStatistics;
 use super::terrain_heightfield::{
-    build_minmax_mips, AlbedoSampling, EarthCurvatureUniforms, MinMaxPrecision,
+    build_traversal_bounds, AlbedoSampling, EarthCurvatureUniforms, MinMaxPrecision,
     TerrainAlbedoMap, TerrainPtScene,
 };
 use super::*;
@@ -458,7 +458,7 @@ pub fn load_fused_env(path: &str, rotate_deg: f32) -> Result<Arc<FusedEnvMap>, R
 /// the heightfield's min-max pyramid (at most `TERRAIN_TILE_GRID` per axis),
 /// in world space.
 fn terrain_tiles(terrain: &FusedTerrainDesc) -> Result<Vec<Aabb>, RenderError> {
-    let mips = build_minmax_mips(&terrain.heights, terrain.width, terrain.height)?;
+    let mips = build_traversal_bounds(&terrain.heights, terrain.width, terrain.height)?;
     let level = (0..mips.dims.len())
         .find(|&l| mips.dims[l].0 <= TERRAIN_TILE_GRID && mips.dims[l].1 <= TERRAIN_TILE_GRID)
         .unwrap_or(mips.dims.len() - 1);

@@ -75,7 +75,7 @@ fn get_density_volume_count() -> u32 { return u32(u.density_volume_count.x); }
 fn has_density_volumes() -> bool { return u.density_volume_count.y > 0.5; }
 
 // Helper to get terrain height at world pos (xz)
-fn get_terrain_height(world_pos: vec3<f32>) -> f32 {
+fn get_terrain_height(world_pos: vec3<f32>) -> vec2<f32> {
     let terrain_width = u.terrain_params.x;
     let min_h = u.terrain_params.y;
     let z_scale = u.terrain_params.z;
@@ -86,16 +86,16 @@ fn get_terrain_height(world_pos: vec3<f32>) -> f32 {
     
     // Check bounds
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
-        return -99999.0;
+        return vec2<f32>(0.0);
     }
     
     // Sample heightmap (R32Float) - use dimensions to convert UV to pixel coords
     let dims = vec2<f32>(textureDimensions(heightmap_tex));
-    let texel = vec2<i32>(uv * dims);
-    let h_raw = textureLoad(heightmap_tex, texel, 0).r;
+    let texel = min(vec2<i32>(uv * dims), vec2<i32>(dims)-1);
+    let sample = textureLoad(heightmap_tex, texel, 0).rg;
     
     // Convert to world height
-    return (h_raw - min_h) * z_scale; // Assuming world logic matches shader_pbr
+    return vec2<f32>((sample.x - min_h) * z_scale, select(1.0, 0.0, sample.y > 0.5)); // Assuming world logic matches shader_pbr
 }
 
 // Height-based fog density
@@ -186,8 +186,8 @@ fn estimate_light_shaft_shadow(world_pos: vec3<f32>, sun_dir: vec3<f32>) -> f32 
         
         // Check terrain occlusion
         let terrain_h = get_terrain_height(sample_pos);
-        if terrain_h > -90000.0 {
-            let height_margin = sample_pos.y - terrain_h;
+        if terrain_h.y > 0.0 {
+            let height_margin = sample_pos.y - terrain_h.x;
             
             if height_margin < 0.0 {
                 // Fully occluded by terrain - hard shadow

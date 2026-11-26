@@ -16,3 +16,12 @@ proof_status = "proven"
 inputs = ["value:gid:0:7", "uniform:uniforms.width:8:8", "uniform:uniforms.height:8:8", "buffer:terrain_reservoirs_prev:-65536:65536:dynamic", "buffer_field:terrain_reservoirs_prev[].m:0:5184", "buffer_field:terrain_reservoirs_prev[].w_sum:0:65536", "buffer_field:terrain_reservoirs_prev[].weight:0:4", "buffer_field:terrain_reservoirs_prev[].target_pdf:1:1"]
 outputs = ["terrain_reservoirs_prev:-65536:65536"]
 invariants = ["length_product:terrain_reservoirs_prev:uniforms.width:uniforms.height"]
+
+# On a leaf, both ray endpoints are clamped to the unit cell. The delta is
+# their difference. Each height tap is in the terrain proof profile's range.
+[[entry]]
+name = "terrain_patch_coeff"
+proof_status = "proven"
+inputs = ["value:taps:-65536:65536", "value:start:0:1", "value:delta:-1:1"]
+outputs = ["return:-786432:786432"]
+invariants = []

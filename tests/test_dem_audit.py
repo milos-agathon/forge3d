@@ -125,11 +125,14 @@ def test_original_file_mask_scale_nodata_and_loader_fill(tmp_path, monkeypatch):
     assert [step["newly_valid"] for step in layer.metadata["operations"][:2]] == [1, 1]
     default = load_dem(path)
     assert default.fill_record == dict(
-        requested=True, requested_method="nearest", method="nearest", cells_filled=1
+        requested=True, requested_method="nearest", method="nearest", cells_filled=2
     )
     assert default.data[1, 2] in (a[0, 2], a[2, 2], a[1, 1], a[1, 3])
     raw = load_dem(path, fill_nodata_values=False)
-    assert raw.data.tobytes() == a.tobytes() and raw.fill_record["cells_filled"] == 0
+    expected_raw = a.copy()
+    expected_raw[4, 5] = -9999
+    assert raw.data.tobytes() == expected_raw.tobytes()
+    assert raw.fill_record["cells_filled"] == 0
     original_import = builtins.__import__
 
     def without_scipy(name, *args, **kwargs):
@@ -141,7 +144,7 @@ def test_original_file_mask_scale_nodata_and_loader_fill(tmp_path, monkeypatch):
     fallback = load_dem(path)
     assert (
         fallback.fill_record["method"] == "mean"
-        and fallback.data[1, 2] == a[a != -9999].mean()
+        and fallback.data[1, 2] == expected_raw[expected_raw != -9999].mean()
     )
     assert path.read_bytes() == before
 
@@ -436,6 +439,7 @@ def test_undeclared_repairs_preserve_band_mask_precedence(tmp_path, shift):
         ds.write(values, 1)
         ds.write_mask(valid)
     np.save(tmp_path / "values.npy", values)
+    valid[2, 2] = False
     np.save(tmp_path / "valid.npy", valid)
     dem = PreparationSource(
         "dem", path, "elevation", grid=grid, units="m", vertical_reference="NAP"
@@ -443,7 +447,7 @@ def test_undeclared_repairs_preserve_band_mask_precedence(tmp_path, shift):
     cat = PreparationSource("classes", path, "categorical", grid=grid)
     recipe = PreparationRecipe(target, [dem, cat], "NAP")
     actual = prepare_scene(recipe)
-    # The existing recipe contract used GDAL's effective mask at the source.
+    # VACUUM intersects the independent mask with the file nodata marker.
     expected = prepare_scene(
         replace(
             recipe,
@@ -463,7 +467,7 @@ def test_undeclared_repairs_preserve_band_mask_precedence(tmp_path, shift):
         assert layer.data.tobytes() == reference.data.tobytes()
         assert layer.valid_mask.tobytes() == reference.valid_mask.tobytes()
         if not shift:
-            assert layer.valid_mask.sum() == 24 and layer.data[2, 2] == -9999
+            assert layer.valid_mask.sum() == 23 and not layer.valid_mask[2, 2]
     repaired = prepare_scene(
         replace(
             recipe,

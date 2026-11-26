@@ -135,12 +135,13 @@ impl TerrainSpike {
         if let Some(ref mut ov) = self.overlay_renderer {
             let height_view_opt = self.height_mosaic.as_ref().map(|m| &m.view);
             let pt_buf_opt = self.page_table.as_ref().map(|pt| pt.buffer.inner());
-            ov.recreate_bind_group(
+            ov.recreate_covered_bind_group(
                 &self.device,
                 Some(&mosaic.view),
                 height_view_opt,
                 pt_buf_opt,
                 None,
+                self.height_mosaic.as_ref().map(|m| &m.coverage_view),
             )?;
             // Enable overlay by default with alpha 1.0
             ov.set_enabled(true);

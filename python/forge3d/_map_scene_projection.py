@@ -132,6 +132,13 @@ class TerrainProjector:
         x0, y0 = int(x), int(y)
         x1, y1 = min(x0 + 1, self.heightmap.shape[1] - 1), min(y0 + 1, self.heightmap.shape[0] - 1)
         tx, ty = x - x0, y - y0
+        if self.nodata_height_below is not None:
+            taps = ((self.heightmap[y0, x0], (1-tx)*(1-ty)), (self.heightmap[y0, x1], tx*(1-ty)),
+                    (self.heightmap[y1, x0], (1-tx)*ty), (self.heightmap[y1, x1], tx*ty))
+            support = [(float(v), w) for v, w in taps if v >= self.nodata_height_below and w > 0]
+            if sum(w for _, w in support) < 0.5:
+                raise ValueError('world overlay anchor has no valid terrain height')
+            return sum(v*w for v, w in support) / sum(w for _, w in support)
         top = float(self.heightmap[y0, x0]) * (1.0 - tx) + float(self.heightmap[y0, x1]) * tx
         bottom = float(self.heightmap[y1, x0]) * (1.0 - tx) + float(self.heightmap[y1, x1]) * tx
         return top * (1.0 - ty) + bottom * ty

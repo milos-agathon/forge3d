@@ -46,7 +46,10 @@ def _single(source: Any) -> np.ndarray:
     if isinstance(source, (str, bytes)) or hasattr(source, "__fspath__"):
         source = gis.read_raster(source, masked=True)
     decoded = source if isinstance(source, Mapping) else {}
-    arr = np.asarray(decoded["array"] if decoded else source)
+    raw = decoded["array"] if decoded else source
+    if np.ma.isMaskedArray(raw):
+        raw = raw.astype(np.float64).filled(np.nan)
+    arr = np.asarray(raw)
     if arr.ndim == 3 and arr.shape[0] == 1:
         arr = arr[0]
     if arr.ndim != 2 or not arr.size:

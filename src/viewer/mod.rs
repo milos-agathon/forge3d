@@ -21,6 +21,7 @@ mod sky_lighting;
 mod state;
 mod temporal_history;
 mod terrain;
+pub(crate) use terrain::TERRAIN_SHADER;
 mod viewer_analysis;
 pub mod viewer_config;
 mod viewer_constants;

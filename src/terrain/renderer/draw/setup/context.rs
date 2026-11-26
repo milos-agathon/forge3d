@@ -167,22 +167,24 @@ impl TerrainScene {
             }
         }
 
-        let mut heightmap_data = Vec::with_capacity(width * height);
+        let heightmap_data: Vec<_> = heightmap_array.iter().map(|&v| {
+            if v.is_finite() && !params.nodata_height_below.is_some_and(|lo| v < lo) { v } else { f32::NAN }
+        }).collect();
+        if !heightmap_data.iter().any(|v| v.is_finite()) {
+            return Err(anyhow!("terrain has no finite heights above the nodata threshold"));
+        }
         let terrain_data_hash = if let Some(revision) = params.terrain_data_revision {
             // Caller-managed revisions let probe preparation skip per-sample hashing.
-            for value in heightmap_array.iter() {
-                heightmap_data.push(*value);
-            }
+
             let mut hasher = DefaultHasher::new();
             (width as u32, height as u32).hash(&mut hasher);
             revision.hash(&mut hasher);
+            if let Some(threshold) = params.nodata_height_below { threshold.to_bits().hash(&mut hasher); }
             hasher.finish()
         } else {
             let mut hasher = DefaultHasher::new();
             (width as u32, height as u32).hash(&mut hasher);
-            for value in heightmap_array.iter() {
-                let height = *value;
-                heightmap_data.push(height);
+            for height in &heightmap_data {
                 height.to_bits().hash(&mut hasher);
             }
             hasher.finish()
@@ -425,7 +427,16 @@ impl TerrainScene {
         let (width, height, pixels) = if let Some(path) = path {
             let image = material_map_image(path, snapshots)
                 .map_err(|err| anyhow!("Failed to load terrain material map '{}': {err}", path))?;
-            let rgba = image.to_rgba8();
+            let mut rgba = image.to_rgba8();
+            if label == "terrain.detail_normal" {
+                for p in rgba.pixels_mut() {
+                    p[3] = if p.0[..3] == [0,0,0] { 0 } else { 255 };
+                }
+            } else if label == "terrain.material_maps.albedo" {
+                for p in rgba.pixels_mut() {
+                    if p[3] == 0 { p.0 = [0;4]; }
+                }
+            }
             let (width, height) = rgba.dimensions();
             if width == 0 || height == 0 {
                 return Err(anyhow!(

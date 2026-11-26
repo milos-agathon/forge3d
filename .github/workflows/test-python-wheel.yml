@@ -173,7 +173,7 @@ jobs:
           import subprocess
           import sys
           subprocess.check_call([sys.executable, "scripts/install_compatible_wheel.py", "dist"])
-          subprocess.check_call([sys.executable, "-m", "pip", "install", "pytest", "pyyaml", "numpy", "pillow", "mypy", "pyproj", "rasterio"])
+          subprocess.check_call([sys.executable, "-m", "pip", "install", "pytest", "pyyaml", "numpy", "pillow", "mypy", "pyproj", "rasterio", "scipy"])
 
       - name: Install Windows timezone data
         if: inputs.test_mode == 'full' && runner.os == 'Windows'

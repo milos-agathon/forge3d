@@ -215,10 +215,18 @@ def _terrain_dtype(terrain: "TerrainSource") -> Any:
     return np.dtype(terrain.dtype or "float32")
 
 
-def _as_native_heightmap(data: Any, *, dtype: Any, source_label: str) -> Any:
+def _as_native_heightmap(data: Any, *, dtype: Any, source_label: str, nodata: Any = None) -> Any:
     import numpy as np
 
-    heightmap = np.asarray(data, dtype=dtype)
+    from .io import _valid_dem_mask
+
+    source = np.asanyarray(data)
+    valid = _valid_dem_mask(np.asarray(source), nodata)
+    if np.ma.isMaskedArray(source):
+        valid &= ~np.ma.getmaskarray(source)
+    heightmap = np.asarray(np.where(valid, source, 0) if not valid.all() else source, dtype=dtype)
+    if not valid.all():
+        heightmap = np.where(valid, heightmap.astype(np.float32), np.nan)
     if heightmap.ndim != 2:
         raise ValueError(f"MapScene native/offscreen terrain {source_label} input must be a 2D heightmap")
     return np.ascontiguousarray(heightmap.astype(np.float32, copy=False))
@@ -234,10 +242,16 @@ def _load_native_heightmap(terrain: "TerrainSource") -> Any | None:
 def _load_raw_heightmap(terrain: "TerrainSource") -> Any | None:
     if terrain.style is not None:
         from .raster_style import _single
-        return _single(_thematic_source(terrain.data, terrain.path))
+        values = _single(_thematic_source(terrain.data, terrain.path))
+        marker = _metadata_dict(terrain.metadata).get("nodata")
+        if marker is not None:
+            import numpy as np
+            from .io import _valid_dem_mask
+            values = np.where(_valid_dem_mask(values, marker), values, np.nan)
+        return values
     dtype = _terrain_dtype(terrain)
     if terrain.data is not None:
-        return _as_native_heightmap(terrain.data, dtype=dtype, source_label="array")
+        return _as_native_heightmap(terrain.data, dtype=dtype, source_label="array", nodata=_metadata_dict(terrain.metadata).get("nodata"))
     if not terrain.path:
         return None
     path = Path(str(terrain.path))
@@ -248,7 +262,7 @@ def _load_raw_heightmap(terrain: "TerrainSource") -> Any | None:
     import numpy as np
 
     if suffix == ".npy":
-        return _as_native_heightmap(np.load(path), dtype=dtype, source_label=".npy")
+        return _as_native_heightmap(np.load(path), dtype=dtype, source_label=".npy", nodata=_metadata_dict(terrain.metadata).get("nodata"))
 
     from . import io
 
@@ -258,7 +272,7 @@ def _load_raw_heightmap(terrain: "TerrainSource") -> Any | None:
         fill_nodata_values=nodata_policy != "preserve",
         dtype=dtype,
     )
-    return _as_native_heightmap(dem.data, dtype=dtype, source_label="GeoTIFF")
+    return _as_native_heightmap(dem.data, dtype=dtype, source_label="GeoTIFF", nodata=dem.nodata_value)
 
 
 def _is_geotiff_path(path: Path) -> bool:

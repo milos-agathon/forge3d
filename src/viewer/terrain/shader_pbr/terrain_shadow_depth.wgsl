@@ -23,6 +23,7 @@ var height_samp: sampler;
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
 }
 
 @vertex
@@ -70,9 +71,23 @@ fn vs_shadow(@builtin(vertex_index) vertex_id: u32) -> VertexOutput {
     let world_xz = u_shadow.render_origin_xz + uv * u_shadow.render_span_xz;
     let world_pos = vec3<f32>(world_xz.x, (h_raw - height_min) * z_scale, world_xz.y);
     out.clip_position = u_shadow.light_view_proj * vec4<f32>(world_pos, 1.0);
+    out.uv = uv;
     return out;
 }
 
+@vertex
+fn vs_shadow_masked(@location(0) pos: vec2<f32>, @location(1) height_uv: vec2<f32>) -> VertexOutput {
+    let dims = textureDimensions(height_tex);
+    let node = clamp(vec2<i32>(height_uv * vec2<f32>(dims)), vec2<i32>(0), vec2<i32>(dims) - 1);
+    let h = textureLoad(height_tex, node, 0).r;
+    let xz = u_shadow.render_origin_xz + pos * u_shadow.render_span_xz;
+    let world = vec3<f32>(xz.x, (h - u_shadow.terrain_params.x) * u_shadow.terrain_params.w, xz.y);
+    return VertexOutput(u_shadow.light_view_proj * vec4<f32>(world, 1.0), pos);
+}
+
 @fragment
-fn fs_shadow() {
+fn fs_shadow(in:VertexOutput) {
+    let dims=vec2<i32>(textureDimensions(height_tex));
+    let node=clamp(vec2<i32>(in.uv*vec2<f32>(dims)),vec2<i32>(0),dims-vec2<i32>(1));
+    if (textureLoad(height_tex,node,0).g > 0.5) { discard; }
 }

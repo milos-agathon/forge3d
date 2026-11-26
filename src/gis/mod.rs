@@ -9,6 +9,7 @@ pub mod osm;
 #[cfg(feature = "extension-module")]
 pub(crate) mod py_json;
 pub mod raster_info;
+pub(crate) mod raster_mask;
 pub(crate) mod raster_read;
 pub(crate) mod raster_tags;
 pub(crate) mod raster_values;
@@ -544,8 +545,10 @@ pub fn read_raster_mask_py(
 ) -> PyResult<PyObject> {
     use pyo3::IntoPy;
 
-    let loaded = raster_info::read_raster_data(path)?;
-    let mut mask = raster_info::valid_mask(&loaded.array, &loaded.info.nodata_per_band, None);
+    let loaded = raster_read::decode_raster(std::path::Path::new(&path), true)?;
+    let mut mask = raster_info::valid_mask(
+        &loaded.array, &loaded.info.nodata_per_band, loaded.explicit_mask.as_deref(),
+    );
     if let Some(band) = band {
         if band == 0 || band > loaded.array.bands {
             return Err(GisError::InvalidArgument(
@@ -562,17 +565,24 @@ pub fn read_raster_mask_py(
     } else {
         (loaded.array.bands, loaded.array.height, loaded.array.width)
     };
+    let mut flags = Vec::new();
+    if let Some(explicit) = &loaded.explicit_mask {
+        flags.push(if explicit.len() == loaded.array.width * loaded.array.height {
+            "per_dataset"
+        } else {
+            "per_band"
+        });
+    }
+    if loaded.info.nodata_per_band.iter().any(Option::is_some) {
+        flags.push("nodata");
+    }
+    if flags.is_empty() {
+        flags.push(if mask.iter().all(|&v| v) { "all_valid" } else { "nonfinite" });
+    }
     let dict = PyDict::new_bound(py);
     dict.set_item("mask", bool_array_to_py_shape(py, mask, shape)?)?;
     dict.set_item("mask_polarity", "true_valid")?;
-    dict.set_item(
-        "mask_flags",
-        if loaded.info.nodata_per_band.iter().any(Option::is_some) {
-            vec!["nodata"]
-        } else {
-            vec!["all_valid"]
-        },
-    )?;
+    dict.set_item("mask_flags", flags)?;
     dict.set_item("nodata_per_band", loaded.info.nodata_per_band)?;
     dict.set_item(
         "warnings",
@@ -597,7 +607,33 @@ pub fn resample_raster_py(
 ) -> PyResult<PyObject> {
     let target = extract_resample_target(shape_or_resolution)?;
     let method = warp::ResamplingMethod::parse(method)?;
-    let result = if let Ok(array) = extract_raster_array(source) {
+    let result = if source.hasattr("dtype")? {
+        let mut array = extract_raster_array(source)?;
+        if source.hasattr("mask")? {
+            let ma = source.py().import_bound("numpy.ma")?;
+            if ma.call_method1("isMaskedArray", (source,))?.is_truthy()? {
+                let missing = ma.call_method1("getmaskarray", (source,))?;
+                let (missing, _) = extract_typed_array::<bool>(&missing)?;
+                if missing.iter().any(|&invalid| invalid) {
+                    if let RasterData::F32(values) = &mut array.data {
+                        for (value, invalid) in values.iter_mut().zip(missing) {
+                            if invalid {
+                                *value = f32::NAN;
+                            }
+                        }
+                    } else {
+                        // Integer arrays need a floating representation for absent output.
+                        let mut values = raster_values::raster_to_f64(&array);
+                        for (value, invalid) in values.iter_mut().zip(missing) {
+                            if invalid {
+                                *value = f64::NAN;
+                            }
+                        }
+                        array.data = RasterData::F64(values);
+                    }
+                }
+            }
+        }
         resample_array(array, target, method)?
     } else {
         let source = extract_raster_source_arg(source)?;
@@ -1580,7 +1616,7 @@ fn read_raster_window_impl(
 ) -> PyResult<PyObject> {
     use pyo3::IntoPy;
 
-    let loaded = raster_info::read_raster_data(&path)?;
+    let loaded = raster_read::decode_raster(std::path::Path::new(&path), masked)?;
     let window = if let Ok(values) = bounds_or_window.extract::<(i64, i64, u32, u32)>() {
         PixelWindow {
             col_off: values.0,
@@ -1641,7 +1677,7 @@ fn read_raster_window_impl(
             "mask",
             bool_array_to_py(
                 py,
-                raster_info::valid_mask(&array, &info.nodata_per_band, None),
+                loaded.selected_validity(&array, &info.nodata_per_band, None, Some(window)),
                 &array,
             )?,
         )?;

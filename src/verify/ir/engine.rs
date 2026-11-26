@@ -7,12 +7,12 @@ use std::collections::HashMap;
 const FNV1A_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV1A_PRIME: u64 = 0x0000_0100_0000_01b3;
 pub(super) const PINNED_DETERMINISM_SOURCE_HASH: u64 = 0xd904_56ee_98b5_6d96;
-pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0x32c0_583b_cf1a_f865;
+pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0x67d5_2575_3748_0a4d;
 // Updated from the assembled terrain module whenever its source changes.
 // Combined NEPHELE directional transport with the approved 1.46 terrain
 // source (deferred VT provenance inert; full-tile screen UVs bounded [0,2]).
 // The per-axis DEM mesh source update was owner-approved on 2026-11-21.
-pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0x8409_8dac_d6d5_500a;
+pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0x96d5_624c_9fab_4637;
 
 #[derive(Clone, Copy)]
 pub(super) enum FunctionRef {

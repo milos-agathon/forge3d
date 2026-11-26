@@ -10,6 +10,7 @@ import warnings
 
 import numpy as np
 
+from ._raster_sampling import read_band_validity
 from .diagnostics import Diagnostic
 
 __all__ = [
@@ -427,11 +428,8 @@ def audit(
                 str(ds.crs) if ds.crs else None,
                 ds.units[band - 1],
             )
-            dem = ds.read(band, masked=True)
-            if ds.nodatavals[band - 1] is not None:
-                dem = np.ma.masked_where(
-                    dem.data == ds.nodatavals[band - 1], dem, copy=False
-                )
+            data, valid = read_band_validity(ds, band)
+            dem = np.ma.array(data, mask=~valid)
             scale, offset = ds.scales[band - 1], ds.offsets[band - 1]
     else:
         if band != 1:

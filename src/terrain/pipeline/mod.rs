@@ -44,7 +44,18 @@ impl TerrainPipeline {
             sample_count,
             depth_format,
             height_filterable,
+            true,
         )
+    }
+
+    /// TerrainSpike binds geometry, height, palette and tile resources.
+    pub(crate) fn create_spike(
+        device: &Device,
+        color: TextureFormat,
+        normal: TextureFormat,
+        filterable: bool,
+    ) -> Self {
+        creation::create_terrain_pipeline(device, color, normal, 1, None, filterable, false)
     }
 
     // ---------- Bind-group helpers (builders) ----------
@@ -73,7 +84,17 @@ impl TerrainPipeline {
 
     /// Bind group for height texture/sampler
     pub fn make_bg_height(&self, device: &Device, view: &TextureView, samp: &Sampler) -> BindGroup {
-        bind_groups::make_bg_height(self, device, view, samp)
+        self.make_bg_height_covered(device, view, samp, view)
+    }
+
+    pub(crate) fn make_bg_height_covered(
+        &self,
+        device: &Device,
+        view: &TextureView,
+        samp: &Sampler,
+        coverage: &TextureView,
+    ) -> BindGroup {
+        bind_groups::make_bg_height(self, device, view, samp, coverage)
     }
 
     pub fn make_bg_lut(&self, device: &Device, view: &TextureView, samp: &Sampler) -> BindGroup {

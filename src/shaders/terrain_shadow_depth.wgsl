@@ -30,6 +30,7 @@ var height_curve_lut_tex: texture_2d<f32>;
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
 }
 
 fn height_curve_lut_sample(t: f32) -> f32 {
@@ -43,7 +44,7 @@ fn height_curve_lut_sample(t: f32) -> f32 {
 // Keep the shadow caster on the same portable R32Float sampling path as the
 // visible terrain. R32Float is not filterable on every supported adapter, so
 // reconstruct bilinear filtering explicitly instead of relying on a sampler.
-fn sample_height_bilinear(uv: vec2<f32>) -> f32 {
+fn shadow_height_footprint(uv: vec2<f32>) -> vec3<f32> {
     let dimensions = textureDimensions(height_tex, 0);
     let max_x = max(i32(dimensions.x) - 1, 0);
     let max_y = max(i32(dimensions.y) - 1, 0);
@@ -59,11 +60,15 @@ fn sample_height_bilinear(uv: vec2<f32>) -> f32 {
         vec2<f32>(1.0),
     );
 
-    let h00 = textureLoad(height_tex, vec2<i32>(x0, y0), 0).r;
-    let h10 = textureLoad(height_tex, vec2<i32>(x1, y0), 0).r;
-    let h01 = textureLoad(height_tex, vec2<i32>(x0, y1), 0).r;
-    let h11 = textureLoad(height_tex, vec2<i32>(x1, y1), 0).r;
-    return det_mix(det_mix(h00, h10, blend.x), det_mix(h01, h11, blend.x), blend.y);
+    let h00 = textureLoad(height_tex, vec2<i32>(x0, y0), 0).rg;
+    let h10 = textureLoad(height_tex, vec2<i32>(x1, y0), 0).rg;
+    let h01 = textureLoad(height_tex, vec2<i32>(x0, y1), 0).rg;
+    let h11 = textureLoad(height_tex, vec2<i32>(x1, y1), 0).rg;
+    return height_footprint(h00, h10, h01, h11, blend);
+}
+
+fn sample_height_bilinear(uv: vec2<f32>) -> f32 {
+    return shadow_height_footprint(uv).x;
 }
 
 /// Apply height curve to normalized height value (matching main shader exactly)
@@ -167,12 +172,16 @@ fn vs_shadow(@builtin(vertex_index) vertex_id: u32) -> VertexOutput {
         vec4<f32>(world_pos, 1.0),
     );
     
+    out.uv = uv;
     return out;
 }
 
 /// Fragment shader for shadow depth pass
 /// No color output - depth is written automatically
 @fragment
-fn fs_shadow() {
-    // No-op: depth is written automatically by the rasterizer
+fn fs_shadow(in: VertexOutput) {
+    det_seed(in.clip_position.x);
+    if (textureNumLevels(height_tex) > 1u && shadow_height_footprint(in.uv).y < 0.5) {
+        discard;
+    }
 }

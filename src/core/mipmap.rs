@@ -173,6 +173,9 @@ fn downsample_box_filter(
                             src_data[src_idx + 3],
                         ];
 
+                        if !rgba.iter().all(|v| v.is_finite()) {
+                            continue;
+                        }
                         // Apply gamma correction if enabled
                         if config.gamma_aware {
                             // Convert sRGB to linear for RGB channels (leave alpha linear)
@@ -191,7 +194,10 @@ fn downsample_box_filter(
             }
 
             // Average the samples
-            if sample_count > 0 {
+            let child_count = (src_x_end - src_x_start) * (src_y_end - src_y_start);
+            if 2 * sample_count < child_count {
+                rgba_sum = [f32::NAN; 4];
+            } else if sample_count > 0 {
                 let inv_count = 1.0 / sample_count as f32;
                 rgba_sum[0] *= inv_count;
                 rgba_sum[1] *= inv_count;

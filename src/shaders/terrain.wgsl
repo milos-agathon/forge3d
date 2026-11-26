@@ -97,6 +97,17 @@ struct FsOut {
 };
 
 // Analytic fallback height that varies across the grid. Amplitude ≈ ±0.5 (matches Globals defaults).
+@group(1) @binding(2) var height_coverage : texture_2d<f32>;
+fn covered_height(uv: vec2<f32>) -> vec2<f32> {
+  let sample = textureSampleLevel(height_tex,height_samp,uv,0.0).rg;
+  var support = 1.0 - sample.g;
+  if ((MParams.tiles_y & 0x80000000u) != 0u) {
+    support = textureSampleLevel(height_coverage,height_samp,uv,0.0).r;
+  }
+  if (support >= 1.0) { return vec2<f32>(sample.r,1.0); }
+  return vec2<f32>(sample.r / max(0.5,support), support);
+}
+
 fn analytic_height(x: f32, z: f32) -> f32 {
   return sin(x * 1.3) * 0.25 + cos(z * 1.1) * 0.25;
 }
@@ -109,7 +120,7 @@ fn sample_height_with_fallback(
   use_fallback: bool
 ) -> f32 {
   let sample_uv = clamp(uv + uv_offset, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
-  let h_tex = textureSampleLevel(height_tex, height_samp, sample_uv, 0.0).r;
+  let h_tex = covered_height(sample_uv).x;
   if (!use_fallback) {
     return h_tex;
   }
@@ -228,7 +239,8 @@ fn vs_main(in: VsIn) -> VsOut {
   let tex_dims_u32 = textureDimensions(height_tex, 0);
   let use_fallback = tex_dims_u32.x <= 1u && tex_dims_u32.y <= 1u;
   // Sample height with a NonFiltering sampler; level 0 to avoid filtering.
-  var h_tex = textureSampleLevel(height_tex, height_samp, uv_tile, 0.0).r;
+  let fine = covered_height(uv_tile);
+  var h_tex = fine.x;
 
   // E2: Geomorphing – blend between a coarse (quantized) sample and fine sample
   let morph = clamp(globals._pad_tail.x, 0.0, 1.0);
@@ -240,8 +252,10 @@ fn vs_main(in: VsIn) -> VsOut {
     // Guard against zero step by clamping denominator above
     let uv_q = (floor(uv_tile / step) + 0.5) * step;
     let uv_qc = clamp(uv_q, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
-    let h_coarse = textureSampleLevel(height_tex, height_samp, uv_qc, 0.0).r;
-    h_tex = mix(h_coarse, h_tex, morph);
+    let coarse = covered_height(uv_qc);
+    if (coarse.y >= 0.5) {
+      h_tex = select(coarse.x, mix(coarse.x, h_tex, morph), fine.y >= 0.5);
+    }
   }
 
   var h_base = h_tex;
@@ -297,15 +311,29 @@ fn fs_main(in: VsOut) -> FsOut {
   let tex_dims = vec2<f32>(max(f32(tex_dims_u32.x), 1.0), max(f32(tex_dims_u32.y), 1.0));
   let texel = vec2<f32>(1.0) / tex_dims;
 
+  let center = covered_height(uv_tile);
+  if (center.y < 0.5) { discard; }
   let h_left = sample_height_with_fallback(uv_tile, vec2<f32>(-texel.x, 0.0), in.xz, spacing, use_fallback);
   let h_right = sample_height_with_fallback(uv_tile, vec2<f32>(texel.x, 0.0), in.xz, spacing, use_fallback);
   let h_down = sample_height_with_fallback(uv_tile, vec2<f32>(0.0, -texel.y), in.xz, spacing, use_fallback);
   let h_up = sample_height_with_fallback(uv_tile, vec2<f32>(0.0, texel.y), in.xz, spacing, use_fallback);
 
+  let left = covered_height(clamp(uv_tile-vec2<f32>(texel.x,0.0),vec2<f32>(0.0),vec2<f32>(1.0))).y;
+  let right = covered_height(clamp(uv_tile+vec2<f32>(texel.x,0.0),vec2<f32>(0.0),vec2<f32>(1.0))).y;
+  let down = covered_height(clamp(uv_tile-vec2<f32>(0.0,texel.y),vec2<f32>(0.0),vec2<f32>(1.0))).y;
+  let up = covered_height(clamp(uv_tile+vec2<f32>(0.0,texel.y),vec2<f32>(0.0),vec2<f32>(1.0))).y;
+  var dx = h_right - h_left;
+  var dz = h_up - h_down;
+  if (left < 0.5 || right < 0.5) {
+    dx = select(0.0, 2.0*(h_right-center.x), right >= 0.5) + select(0.0,2.0*(center.x-h_left),left >= 0.5);
+  }
+  if (down < 0.5 || up < 0.5) {
+    dz = select(0.0, 2.0*(h_up-center.x), up >= 0.5) + select(0.0,2.0*(center.x-h_down),down >= 0.5);
+  }
   let spacing_step_x = max(spacing * texel.x, 1e-5);
   let spacing_step_z = max(spacing * texel.y, 1e-5);
-  let grad_x = ((h_right - h_left) * exaggeration) / (2.0 * spacing_step_x);
-  let grad_z = ((h_up - h_down) * exaggeration) / (2.0 * spacing_step_z);
+  let grad_x = (dx * exaggeration) / (2.0 * spacing_step_x);
+  let grad_z = (dz * exaggeration) / (2.0 * spacing_step_z);
   let normal_ws = normalize(vec3<f32>(-grad_x, 1.0, -grad_z));
 
   let t = clamp(0.5 + in.height / (2.0 * h_range), 0.0, 1.0);

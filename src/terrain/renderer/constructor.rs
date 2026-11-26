@@ -447,7 +447,7 @@ impl TerrainScene {
             &material_layer_bind_group_layout,
             color_format,
             1,
-        );
+        )?;
         // The clipmap pipeline is created lazily on first clipmap render
         // (ensure_pipeline_sample_count) so grid-only renderers don't pay the
         // extra shader-module/pipeline compilation cost.
@@ -463,7 +463,7 @@ impl TerrainScene {
             &material_layer_bind_group_layout,
             color_format,
             1,
-        );
+        )?;
 
         let blit_pipeline =
             Self::create_blit_pipeline(device.as_ref(), &blit_bind_group_layout, color_format, 1);

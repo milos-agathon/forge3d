@@ -597,6 +597,11 @@ pub(crate) fn terrain_parts() -> &'static [SourcePart] {
             strip: false,
         },
         SourcePart {
+            path: "src/shaders/includes/masked_height.wgsl",
+            text: include_str!("shaders/includes/masked_height.wgsl"),
+            strip: false,
+        },
+        SourcePart {
             path: "src/shaders/terrain_pbr_pom.wgsl",
             text: include_str!("shaders/terrain_pbr_pom.wgsl"),
             strip: true,
@@ -634,6 +639,11 @@ pub(crate) fn terrain_shadow_depth_parts() -> &'static [SourcePart] {
         SourcePart {
             path: "src/shaders/includes/determinism.wgsl",
             text: include_str!("shaders/includes/determinism.wgsl"),
+            strip: false,
+        },
+        SourcePart {
+            path: "src/shaders/includes/masked_height.wgsl",
+            text: include_str!("shaders/includes/masked_height.wgsl"),
             strip: false,
         },
         SourcePart {
@@ -1292,7 +1302,9 @@ mod tests {
     fn terrain_height_sampling_is_portable_manual_bilinear() {
         let source = terrain();
         assert!(source.contains("fn sample_height_bilinear_level("));
-        assert_eq!(source.matches("textureLoad(height_tex").count(), 4);
+        assert_eq!(source.matches("textureLoad(height_tex").count(), 5);
+        assert_eq!(source.matches("textureLoad(height_tex, vec2<i32>(x").count(), 4);
+        assert!(source.contains("textureLoad(height_tex, clamp(node"));
         assert!(!source.contains("textureSample(height_tex"));
         assert!(!source.contains("textureSampleLevel(height_tex"));
 
@@ -1319,7 +1331,9 @@ mod tests {
         let resolve = terrain_visbuffer_resolve(false);
         assert!(!resolve.contains("textureSample(height_tex"));
         assert!(!resolve.contains("textureSampleLevel(height_tex"));
-        assert_eq!(resolve.matches("textureLoad(height_tex").count(), 4);
+        assert_eq!(resolve.matches("textureLoad(height_tex").count(), 5);
+        assert_eq!(resolve.matches("textureLoad(height_tex, vec2<i32>(x").count(), 4);
+        assert!(resolve.contains("textureLoad(height_tex, clamp(node"));
         assert!(resolve
             .contains("let h_fine = clipmap_sample_height_level(uv, fine_level, height_dims);"));
 

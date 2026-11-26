@@ -48,6 +48,35 @@ impl OverlayReader for FileOverlayReader {
             Ok(img) => {
                 let rgba = img.to_rgba8();
                 if rgba.width() != width || rgba.height() != height {
+                    if rgba.pixels().any(|p| p[3] == 0) {
+                        let valid =
+                            image::ImageBuffer::from_fn(rgba.width(), rgba.height(), |x, y| {
+                                image::Luma([f32::from(rgba.get_pixel(x, y)[3] > 0)])
+                            });
+                        let colors =
+                            image::ImageBuffer::from_fn(rgba.width(), rgba.height(), |x, y| {
+                                let pixel = rgba.get_pixel(x, y);
+                                image::Rgba(if pixel[3] == 0 {
+                                    [0.0; 4]
+                                } else {
+                                    pixel.0.map(|v| f32::from(v) / 255.0)
+                                })
+                            });
+                        let filter = image::imageops::FilterType::Triangle;
+                        let support = image::imageops::resize(&valid, width, height, filter);
+                        let total = image::imageops::resize(&colors, width, height, filter);
+                        return total
+                            .pixels()
+                            .zip(support.pixels())
+                            .flat_map(|(color, w)| {
+                                if w[0] < 0.5 {
+                                    [0; 4]
+                                } else {
+                                    color.0.map(|v| (255.0 * v / w[0]).round() as u8)
+                                }
+                            })
+                            .collect();
+                    }
                     let resized = image::imageops::resize(
                         &rgba,
                         width,
@@ -149,7 +178,20 @@ pub trait HeightReader: Send + Sync + 'static {
         height: u32,
     ) -> Result<HeightRead, String> {
         self.read_result(root_bounds, tile_size, tile_id, width, height)
-            .map(HeightRead::fully_covered)
+            .map(|mut heights| {
+                let coverage = heights
+                    .iter_mut()
+                    .map(|height| {
+                        if height.is_finite() {
+                            u8::MAX
+                        } else {
+                            *height = 0.0;
+                            0
+                        }
+                    })
+                    .collect();
+                HeightRead { heights, coverage }
+            })
     }
 }
 

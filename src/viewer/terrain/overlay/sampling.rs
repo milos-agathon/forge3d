@@ -40,6 +40,31 @@ pub(super) fn sample_bilinear(
         }
     };
 
+    let indices = [idx00, idx10, idx01, idx11];
+    if indices.iter().any(|&i| sample(i, 3) == 0.0) {
+        let weights = [
+            (1.0 - tx) * (1.0 - ty),
+            tx * (1.0 - ty),
+            (1.0 - tx) * ty,
+            tx * ty,
+        ];
+        let mut color = [0.0; 4];
+        let mut support = 0.0;
+        for (i, w) in indices.into_iter().zip(weights) {
+            if sample(i, 3) > 0.0 {
+                support += w;
+                for (ch, sum) in color.iter_mut().enumerate() {
+                    *sum += w * sample(i, ch);
+                }
+            }
+        }
+        if support < 0.5 {
+            return [0.0; 4];
+        }
+        color.iter_mut().for_each(|v| *v /= support);
+        color[3] *= opacity;
+        return color;
+    }
     let bilerp = |ch: usize| -> f32 {
         let c00 = sample(idx00, ch);
         let c10 = sample(idx10, ch);

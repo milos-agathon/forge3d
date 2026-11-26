@@ -191,6 +191,18 @@ impl OverlayRenderer {
                     },
                     count: None,
                 },
+                BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: TextureViewDimension::D2,
+                        sample_type: TextureSampleType::Float {
+                            filterable: height_filterable,
+                        },
+                    },
+                    count: None,
+                },
                 // M5: Depth sampler
                 BindGroupLayoutEntry {
                     binding: 7,
@@ -310,6 +322,10 @@ impl OverlayRenderer {
                 BindGroupEntry {
                     binding: 4,
                     resource: wgpu::BindingResource::Sampler(&height_sampler),
+                },
+                BindGroupEntry {
+                    binding: 8,
+                    resource: wgpu::BindingResource::TextureView(&dummy_view),
                 },
                 BindGroupEntry {
                     binding: 5,
@@ -475,6 +491,26 @@ impl OverlayRenderer {
         page_table: Option<&Buffer>,
         depth_view: Option<&TextureView>, // M5: Terrain depth texture for occlusion
     ) -> RenderResult<()> {
+        self.recreate_covered_bind_group(
+            device,
+            overlay_view,
+            height_view,
+            page_table,
+            depth_view,
+            None,
+        )
+    }
+
+    pub(crate) fn recreate_covered_bind_group(
+        &mut self,
+        device: &Device,
+        overlay_view: Option<&TextureView>,
+        height_view: Option<&TextureView>,
+        page_table: Option<&Buffer>,
+        depth_view: Option<&TextureView>, // M5: Terrain depth texture for occlusion
+        coverage_view: Option<&TextureView>,
+    ) -> RenderResult<()> {
+        self.uniforms.contour_params[3] = f32::from(coverage_view.is_some());
         // Use 1x1 fallback views when any overlay/height/depth view is missing.
         // Prefer provided view, then stored view, else fallback.
         let use_overlay_view = overlay_view.or(self.overlay_view.as_ref());
@@ -544,6 +580,12 @@ impl OverlayRenderer {
                 BindGroupEntry {
                     binding: 4,
                     resource: wgpu::BindingResource::Sampler(&self.height_sampler),
+                },
+                BindGroupEntry {
+                    binding: 8,
+                    resource: wgpu::BindingResource::TextureView(
+                        coverage_view.unwrap_or(height_view),
+                    ),
                 },
                 BindGroupEntry {
                     binding: 5,

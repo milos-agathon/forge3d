@@ -17,6 +17,7 @@ use crate::core::error::{RenderError, RenderResult};
 use crate::core::resource_tracker::{
     tracked_create_buffer, tracked_create_texture, TrackedBuffer, TrackedTexture,
 };
+use crate::terrain::masked_height::{sample_height_bilinear, MaskedPyramid};
 use bytemuck::{Pod, Zeroable};
 use std::sync::{Mutex, OnceLock};
 
@@ -35,6 +36,7 @@ pub(in crate::terrain::renderer) struct CpuVisibilityOracle {
     mesh: crate::accel::cpu_bvh::MeshCPU,
     bvh: crate::accel::cpu_bvh::BvhCPU,
     identities: Vec<(u32, u32)>,
+    coverage: Option<VisibilityCoverage>,
     lod_comparison: serde_json::Value,
 }
 
@@ -65,6 +67,7 @@ impl CpuVisibilityOracle {
             .iter()
             .map(|vertex| vertex.skirt_depth_or(legacy_skirt_depth))
             .fold(0.0_f32, f32::max);
+        let pyramid = MaskedPyramid::new(heightmap, height_dims);
         let vertices = clipmap
             .vertices
             .iter()
@@ -74,7 +77,16 @@ impl CpuVisibilityOracle {
                 // before applying the configured height curve. Building the
                 // BVH from fine samples alone moves triangle edges enough to
                 // change primitive identity at grazing clipmap cameras.
-                let height = sample_clipmap_height(heightmap, height_dims, vertex);
+                let height = if let Some(levels) = &pyramid {
+                    let h = levels.morph(vertex.uv, vertex.morph_data);
+                    if h.is_finite() {
+                        h
+                    } else {
+                        levels.floor
+                    }
+                } else {
+                    sample_clipmap_height(heightmap, height_dims, vertex)
+                };
                 let height = apply_height_curve(height, (h_min, h_max), params);
                 let skirt_offset = if vertex.is_skirt() { skirt } else { 0.0 };
                 [
@@ -165,8 +177,16 @@ impl CpuVisibilityOracle {
         // projecting an unclipped eye/near-plane crossing triangle creates a
         // bogus screen-spanning primitive and a world-space ray is ambiguous
         // on shared edges.
+        let mut coverage = pyramid.map(|_| VisibilityCoverage {
+            dims: height_dims,
+            heights: heightmap.to_vec(),
+            triangles: Vec::new(),
+        });
         let (mesh, identities) = build_clipped_raster_mesh(
             &vertices,
+            coverage
+                .as_mut()
+                .map(|mask| (clipmap.vertices.as_slice(), &mut mask.triangles)),
             &indices,
             &identities,
             view,
@@ -181,6 +201,7 @@ impl CpuVisibilityOracle {
             mesh,
             bvh,
             identities,
+            coverage,
             lod_comparison,
         })
     }
@@ -222,10 +243,16 @@ impl CpuVisibilityOracle {
                     // rule accepted, producing a false CPU background pick.
                     // Derive depth from the same snapped screen triangle that
                     // decides coverage.
-                    let Some(distance) = raster_distance_at_pixel(v0, v1, v2, pixel) else {
+                    let Some((distance, weights)) = raster_sample_at_pixel(v0, v1, v2, pixel)
+                    else {
                         continue;
                     };
-                    if distance < closest {
+                    if distance < closest
+                        && self
+                            .coverage
+                            .as_ref()
+                            .map_or(true, |mask| mask.covers(reordered as usize, weights))
+                    {
                         closest = distance;
                         identity = self.identities.get(reordered as usize).copied();
                     }
@@ -271,21 +298,6 @@ impl CpuVisibilityOracle {
         }
         identity
     }
-}
-
-fn sample_height_bilinear(data: &[f32], dims: (u32, u32), uv: [f32; 2]) -> f32 {
-    let fx = uv[0].clamp(0.0, 1.0) * dims.0.saturating_sub(1) as f32;
-    let fy = uv[1].clamp(0.0, 1.0) * dims.1.saturating_sub(1) as f32;
-    let x0 = fx.floor() as usize;
-    let y0 = fy.floor() as usize;
-    let x1 = (x0 + 1).min(dims.0.saturating_sub(1) as usize);
-    let y1 = (y0 + 1).min(dims.1.saturating_sub(1) as usize);
-    let tx = fx - x0 as f32;
-    let ty = fy - y0 as f32;
-    let width = dims.0 as usize;
-    let top = data[y0 * width + x0] * (1.0 - tx) + data[y0 * width + x1] * tx;
-    let bottom = data[y1 * width + x0] * (1.0 - tx) + data[y1 * width + x1] * tx;
-    top * (1.0 - ty) + bottom * ty
 }
 
 fn sample_clipmap_height(
@@ -356,8 +368,31 @@ pub(crate) fn apply_height_curve(
     height_range.0 + (t + (curved - t) * strength) * range
 }
 
+struct VisibilityCoverage {
+    dims: (u32, u32),
+    heights: Vec<f32>,
+    // (u/w, v/w, 1/w) per clipped vertex, in raster triangle order.
+    triangles: Vec<[glam::Vec3; 3]>,
+}
+
+impl VisibilityCoverage {
+    fn covers(&self, triangle: usize, barycentric: [f64; 3]) -> bool {
+        let [a, b, c] = self.triangles[triangle];
+        let sample =
+            a * barycentric[0] as f32 + b * barycentric[1] as f32 + c * barycentric[2] as f32;
+        let uv = sample.truncate() / sample.z;
+        sample_height_bilinear(&self.heights, self.dims, uv.to_array()).is_finite()
+    }
+}
+
+type CoverageVaryings<'a> = (
+    &'a [crate::terrain::clipmap::ClipmapVertex],
+    &'a mut Vec<[glam::Vec3; 3]>,
+);
+
 fn build_clipped_raster_mesh(
     world_vertices: &[[f32; 3]],
+    mut coverage: Option<CoverageVaryings<'_>>,
     source_indices: &[[u32; 3]],
     source_identities: &[(u32, u32)],
     view: glam::Mat4,
@@ -381,16 +416,19 @@ fn build_clipped_raster_mesh(
             // grazing-edge vertices across the rasterizer's subpixel grid.
             let view_position =
                 deterministic_mat4_mul_vec4(view, glam::Vec3::from_array(*position).extend(1.0));
-            clip.push(deterministic_mat4_mul_vec4(proj, view_position));
+            let uv = coverage.as_ref().map_or(glam::Vec2::ZERO, |(source, _)| {
+                glam::Vec2::from(source[index as usize].uv).clamp(glam::Vec2::ZERO, glam::Vec2::ONE)
+            });
+            clip.push((deterministic_mat4_mul_vec4(proj, view_position), uv));
         }
         let polygon = clip_webgpu_polygon(clip);
         for fan in 1..polygon.len().saturating_sub(1) {
             let clip_triangle = [polygon[0], polygon[fan], polygon[fan + 1]];
-            if clip_triangle.iter().any(|vertex| vertex.w <= 0.0) {
+            if clip_triangle.iter().any(|(vertex, _)| vertex.w <= 0.0) {
                 continue;
             }
             let mut raster = [[0.0; 3]; 3];
-            for (slot, vertex) in raster.iter_mut().zip(clip_triangle) {
+            for (slot, (vertex, _)) in raster.iter_mut().zip(clip_triangle) {
                 let ndc = vertex.truncate() / vertex.w;
                 *slot = [
                     (((ndc.x * 0.5 + 0.5) * viewport.0 as f32) * SUBPIXEL_SCALE).round()
@@ -406,6 +444,9 @@ fn build_clipped_raster_mesh(
                 continue;
             }
             let base = vertices.len() as u32;
+            if let Some((_, triangles)) = coverage.as_mut() {
+                triangles.push(clip_triangle.map(|(vertex, uv)| uv.extend(1.0) / vertex.w));
+            }
             vertices.extend(raster);
             indices.push([base, base + 1, base + 2]);
             // Clipping may split one source primitive into several raster
@@ -435,7 +476,9 @@ fn deterministic_mat4_mul_vec4(matrix: glam::Mat4, vector: glam::Vec4) -> glam::
     s012 + c3
 }
 
-fn clip_webgpu_polygon(mut polygon: Vec<glam::Vec4>) -> Vec<glam::Vec4> {
+type ClipVertex = (glam::Vec4, glam::Vec2);
+
+fn clip_webgpu_polygon(mut polygon: Vec<ClipVertex>) -> Vec<ClipVertex> {
     // WebGPU clip volume: -w <= x,y <= w and 0 <= z <= w.
     let planes: [fn(glam::Vec4) -> f32; 6] = [
         |v: glam::Vec4| v.x + v.w,
@@ -455,25 +498,28 @@ fn clip_webgpu_polygon(mut polygon: Vec<glam::Vec4>) -> Vec<glam::Vec4> {
 }
 
 fn clip_polygon_against_plane(
-    polygon: &[glam::Vec4],
+    polygon: &[ClipVertex],
     distance: fn(glam::Vec4) -> f32,
-) -> Vec<glam::Vec4> {
+) -> Vec<ClipVertex> {
     let Some(&last) = polygon.last() else {
         return Vec::new();
     };
     let mut output = Vec::with_capacity(polygon.len() + 1);
     let mut previous = last;
-    let mut previous_distance = distance(previous);
+    let mut previous_distance = distance(previous.0);
     let mut previous_inside = previous_distance >= 0.0;
 
     for &current in polygon {
-        let current_distance = distance(current);
+        let current_distance = distance(current.0);
         let current_inside = current_distance >= 0.0;
         if current_inside != previous_inside {
             let denominator = previous_distance - current_distance;
             if denominator != 0.0 {
                 let t = (previous_distance / denominator).clamp(0.0, 1.0);
-                output.push(previous + (current - previous) * t);
+                output.push((
+                    previous.0 + (current.0 - previous.0) * t,
+                    previous.1 + (current.1 - previous.1) * t,
+                ));
             }
         }
         if current_inside {
@@ -572,12 +618,22 @@ fn raster_top_left_covers(
 /// Return WebGPU raster depth as the synthetic ray distance used by the CPU
 /// BVH. Coverage and interpolation both use the already subpixel-snapped
 /// screen vertices emitted by `build_clipped_raster_mesh`.
+#[cfg(test)]
 fn raster_distance_at_pixel(
     v0: [f32; 3],
     v1: [f32; 3],
     v2: [f32; 3],
     pixel: (u32, u32),
 ) -> Option<f64> {
+    raster_sample_at_pixel(v0, v1, v2, pixel).map(|(depth, _)| depth)
+}
+
+fn raster_sample_at_pixel(
+    v0: [f32; 3],
+    v1: [f32; 3],
+    v2: [f32; 3],
+    pixel: (u32, u32),
+) -> Option<(f64, [f64; 3])> {
     if !raster_top_left_covers(v0, v1, v2, pixel) {
         return None;
     }
@@ -600,7 +656,9 @@ fn raster_distance_at_pixel(
         + w1 * (f64::from(v1[2]) - f64::from(v2[2]));
     // The visibility pass clears depth to 1 and uses CompareFunction::Less.
     // A clipped triangle at exactly the far plane therefore writes no ID.
-    (0.0..1.0).contains(&depth).then_some(1.0 + depth)
+    (0.0..1.0)
+        .contains(&depth)
+        .then_some((1.0 + depth, [w0, w1, 1.0 - w0 - w1]))
 }
 
 #[cfg(test)]
@@ -629,6 +687,7 @@ mod tests {
             mesh,
             bvh,
             identities: (0..6).map(|triangle| (triangle, 0)).collect(),
+            coverage: None,
             lod_comparison: serde_json::Value::Null,
         };
 
@@ -656,12 +715,40 @@ mod tests {
             mesh,
             bvh,
             identities: vec![(7, 9)],
+            coverage: None,
             lod_comparison: serde_json::Value::Null,
         };
         let ray = crate::picking::Ray::new([0.25, 0.25, 0.0], [0.0, 0.0, -1.0]);
 
         assert_eq!(oracle.intersect(&ray, 1.0), None);
         assert_eq!(oracle.intersect(&ray, 3.0), Some((7, 9)));
+    }
+
+    #[test]
+    fn vacuum_visibility_pick_looks_through_an_unsupported_front_fragment() {
+        let vertices = [0.25, 0.75]
+            .into_iter()
+            .flat_map(|z| [[0.0, 0.0, z], [4.0, 0.0, z], [0.0, 4.0, z]])
+            .collect();
+        let mesh = crate::accel::cpu_bvh::MeshCPU::new(vertices, vec![[0, 1, 2], [3, 4, 5]]);
+        let bvh = crate::accel::cpu_bvh::build_bvh_cpu(&mesh, &Default::default()).unwrap();
+        let mut oracle = CpuVisibilityOracle {
+            mesh,
+            bvh,
+            identities: vec![(1, 7), (2, 9)],
+            coverage: None,
+            lod_comparison: serde_json::Value::Null,
+        };
+        assert_eq!(oracle.pick(&[(0, 0)]), vec![Some((1, 7))]);
+        oracle.coverage = Some(VisibilityCoverage {
+            dims: (2, 2),
+            heights: vec![f32::NAN, 0.0, 0.0, 0.0],
+            triangles: vec![
+                [glam::vec3(0.0, 0.0, 1.0); 3],
+                [glam::vec3(1.0, 1.0, 1.0); 3],
+            ],
+        });
+        assert_eq!(oracle.pick(&[(0, 0)]), vec![Some((2, 9))]);
     }
 
     #[test]
@@ -723,14 +810,18 @@ mod tests {
 
     #[test]
     fn homogeneous_clipping_bounds_a_near_plane_crossing_triangle() {
-        let polygon = clip_webgpu_polygon(vec![
-            glam::vec4(-0.5, -0.5, -0.5, 1.0),
-            glam::vec4(0.5, -0.5, 0.5, 1.0),
-            glam::vec4(0.0, 0.5, 0.5, 1.0),
-        ]);
+        let polygon = clip_webgpu_polygon(
+            [
+                glam::vec4(-0.5, -0.5, -0.5, 1.0),
+                glam::vec4(0.5, -0.5, 0.5, 1.0),
+                glam::vec4(0.0, 0.5, 0.5, 1.0),
+            ]
+            .map(|position| (position, glam::Vec2::ZERO))
+            .into(),
+        );
 
         assert_eq!(polygon.len(), 4);
-        for vertex in polygon {
+        for (vertex, _) in polygon {
             assert!(vertex.x >= -vertex.w && vertex.x <= vertex.w);
             assert!(vertex.y >= -vertex.w && vertex.y <= vertex.w);
             assert!(vertex.z >= 0.0 && vertex.z <= vertex.w);
@@ -741,6 +832,7 @@ mod tests {
     fn clipped_raster_mesh_preserves_source_primitive_identity() {
         let (mesh, identities) = build_clipped_raster_mesh(
             &[[-0.5, -0.5, -0.5], [0.5, -0.5, 0.5], [0.0, 0.5, 0.5]],
+            None,
             &[[0, 1, 2]],
             &[(7, 11)],
             glam::Mat4::IDENTITY,

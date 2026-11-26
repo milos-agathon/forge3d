@@ -12,6 +12,7 @@ mod post_process;
 mod render;
 mod scene;
 mod shader;
+pub(crate) use shader::TERRAIN_SHADER;
 mod shader_pbr;
 pub mod vector_overlay;
 mod volume_density;

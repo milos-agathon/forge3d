@@ -22,3 +22,14 @@ def test_integer_normalization_keeps_fractions(tmp_path):
     result = load_dem(path, dtype="int16", normalize=True)
     assert result.data.dtype == np.float64
     np.testing.assert_array_equal(result.data, [[0., 0.5, 1.]])
+
+
+def test_normalized_valid_minimum_can_equal_source_marker(tmp_path):
+    path = tmp_path / "zero-marker.tif"
+    with rasterio.open(path, "w", driver="GTiff", width=2, height=2, count=1,
+                       dtype="float32", nodata=0, transform=from_origin(0, 2, 1, 1)) as ds:
+        ds.write(np.array([[1, 2], [0, 3]], np.float32), 1)
+    dem = load_dem(path, fill_nodata_values=False, normalize=True)
+    assert dem.stats["count"] == 3
+    assert dem.data[0, 0] == 0
+    assert np.isnan(dem.data[1, 0])

@@ -32,6 +32,17 @@ struct VsIn { @location(0) pos_xy: vec2<f32>, @location(1) uv: vec2<f32> };
 struct VsOut { @builtin(position) clip_pos: vec4<f32>, @location(0) uv: vec2<f32>, @location(1) height: f32, @location(2) xz: vec2<f32> };
 struct FsOut { @location(0) color: vec4<f32>, @location(1) normal_depth: vec4<f32> };
 
+@group(1) @binding(2) var height_coverage : texture_2d<f32>;
+fn covered_height(uv: vec2<f32>) -> vec2<f32> {
+  let sample = textureSampleLevel(height_tex,height_samp,uv,0.0).rg;
+  var support = 1.0 - sample.g;
+  if ((MParams.tiles_y & 0x80000000u) != 0u) {
+    support = textureSampleLevel(height_coverage,height_samp,uv,0.0).r;
+  }
+  if (support >= 1.0) { return vec2<f32>(sample.r,1.0); }
+  return vec2<f32>(sample.r / max(0.5,support), support);
+}
+
 fn analytic_height(x: f32, z: f32) -> f32 { return sin(x * 1.3) * 0.25 + cos(z * 1.1) * 0.25; }
 
 @vertex
@@ -45,7 +56,8 @@ fn vs_main(in: VsIn) -> VsOut {
   let sy = f32(TileSlotU.slot / tiles_x);
   let base = vec2<f32>(sx, sy) * inv;
   let uv_tile = clamp(in.uv * inv + base, vec2<f32>(0.0), vec2<f32>(1.0));
-  var h_tex = textureSampleLevel(height_tex, height_samp, uv_tile, 0.0).r;
+  let fine = covered_height(uv_tile);
+  var h_tex = fine.x;
   let morph = clamp(globals._pad_tail.x, 0.0, 1.0);
   let coarse_factor = max(globals._pad_tail.y, 1.0);
   if (morph < 1.0) {
@@ -53,8 +65,10 @@ fn vs_main(in: VsIn) -> VsOut {
     let step = vec2<f32>(coarse_factor) / max(tex_dims, vec2<f32>(1.0));
     let uv_q = (floor(uv_tile / step) + 0.5) * step;
     let uv_qc = clamp(uv_q, vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
-    let h_coarse = textureSampleLevel(height_tex, height_samp, uv_qc, 0.0).r;
-    h_tex = mix(h_coarse, h_tex, morph);
+    let coarse = covered_height(uv_qc);
+    if (coarse.y >= 0.5) {
+      h_tex = select(coarse.x, mix(coarse.x, h_tex, morph), fine.y >= 0.5);
+    }
   }
   let h_ana = analytic_height(in.pos_xy.x, in.pos_xy.y);
   var h = h_tex + h_ana;
@@ -86,14 +100,28 @@ fn fs_main(in: VsOut) -> FsOut {
   let uv_tile = clamp(in.uv * inv + base, vec2<f32>(0.0), vec2<f32>(1.0));
   let tex_dims = vec2<f32>(textureDimensions(height_tex, 0));
   let texel = vec2<f32>(1.0) / tex_dims;
-  let h_left = textureSampleLevel(height_tex, height_samp, clamp(uv_tile + vec2<f32>(-texel.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
-  let h_right = textureSampleLevel(height_tex, height_samp, clamp(uv_tile + vec2<f32>(texel.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
-  let h_down = textureSampleLevel(height_tex, height_samp, clamp(uv_tile + vec2<f32>(0.0, -texel.y), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
-  let h_up = textureSampleLevel(height_tex, height_samp, clamp(uv_tile + vec2<f32>(0.0, texel.y), vec2<f32>(0.0), vec2<f32>(1.0)), 0.0).r;
+  let center = covered_height(uv_tile);
+  if (center.y < 0.5) { discard; }
+  let h_left = covered_height(clamp(uv_tile + vec2<f32>(-texel.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0))).x;
+  let h_right = covered_height(clamp(uv_tile + vec2<f32>(texel.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0))).x;
+  let h_down = covered_height(clamp(uv_tile + vec2<f32>(0.0, -texel.y), vec2<f32>(0.0), vec2<f32>(1.0))).x;
+  let h_up = covered_height(clamp(uv_tile + vec2<f32>(0.0, texel.y), vec2<f32>(0.0), vec2<f32>(1.0))).x;
+  let left = covered_height(clamp(uv_tile-vec2<f32>(texel.x,0.0),vec2<f32>(0.0),vec2<f32>(1.0))).y;
+  let right = covered_height(clamp(uv_tile+vec2<f32>(texel.x,0.0),vec2<f32>(0.0),vec2<f32>(1.0))).y;
+  let down = covered_height(clamp(uv_tile-vec2<f32>(0.0,texel.y),vec2<f32>(0.0),vec2<f32>(1.0))).y;
+  let up = covered_height(clamp(uv_tile+vec2<f32>(0.0,texel.y),vec2<f32>(0.0),vec2<f32>(1.0))).y;
+  var dx = h_right - h_left;
+  var dz = h_up - h_down;
+  if (left < 0.5 || right < 0.5) {
+    dx = select(0.0, 2.0*(h_right-center.x), right >= 0.5) + select(0.0,2.0*(center.x-h_left),left >= 0.5);
+  }
+  if (down < 0.5 || up < 0.5) {
+    dz = select(0.0, 2.0*(h_up-center.x), up >= 0.5) + select(0.0,2.0*(center.x-h_down),down >= 0.5);
+  }
   let spacing_step_x = max(spacing * texel.x, 1e-5);
   let spacing_step_z = max(spacing * texel.y, 1e-5);
-  let grad_x = ((h_right - h_left) * globals.spacing_h_exag_pad.z) / (2.0 * spacing_step_x);
-  let grad_z = ((h_up - h_down) * globals.spacing_h_exag_pad.z) / (2.0 * spacing_step_z);
+  let grad_x = (dx * globals.spacing_h_exag_pad.z) / (2.0 * spacing_step_x);
+  let grad_z = (dz * globals.spacing_h_exag_pad.z) / (2.0 * spacing_step_z);
   let normal_ws = normalize(vec3<f32>(-grad_x, 1.0, -grad_z));
   let palette_index = globals.spacing_h_exag_pad.w;
   let v_coord = (palette_index + 0.5) / vec2<f32>(textureDimensions(lut_tex, 0)).y;
