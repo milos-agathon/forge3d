@@ -588,9 +588,24 @@ def _current_production_inventory():
     return [site for site in _complete_conversion_inventory() if site not in SANCTIONED_DD_SPLITS]
 
 
-def _scanned_with_autochiron():
+def _undo_littera_delivery(sites):
+    transition = _ledger_data()["littera_delivery"]
+    base = transition["base_rows_by_affected_path"]
+    files = {
+        path: {"base": base[path], "result": result}
+        for path, result in transition["result_rows_by_affected_path"].items()
+    }
+    return _restore_file_inventories(sites, files, "LITTERA")
+
+
+def _undo_registratio_transition(sites):
     transition = _ledger_data()["registratio"]
-    return _restore_file_inventories(_current_production_inventory(), transition["files"], "REGISTRATIO")
+    return _restore_file_inventories(sites, transition["files"], "REGISTRATIO")
+
+
+def _scanned_with_autochiron():
+    sites = _undo_littera_delivery(_current_production_inventory())
+    return _undo_registratio_transition(sites)
 
 
 def _undo_autochiron_transition(sites):
@@ -2047,11 +2062,24 @@ def test_registratio_inventory_transition_is_exact():
     assert (transition["base_count"], transition["base_digest"]) == (
         previous["result_count"], previous["result_digest"],
     )
-    sites = _current_production_inventory()
+    sites = _undo_littera_delivery(_current_production_inventory())
     assert (len(sites), _inventory_digest(sites)) == (
         transition["result_count"], transition["result_digest"],
     )
-    restored = _restore_file_inventories(sites, transition["files"], "REGISTRATIO")
+    restored = _undo_registratio_transition(sites)
     assert (len(restored), _inventory_digest(restored)) == (
         transition["base_count"], transition["base_digest"],
+    )
+
+
+def test_littera_delivery_transition_is_exact():
+    transition = _ledger_data()["littera_delivery"]
+    sites = _undo_registratio_transition(_current_production_inventory())
+    sites = _undo_autochiron_transition(sites)
+    assert (len(sites), _inventory_digest(sites)) == (
+        transition["raw_candidate_count"], transition["raw_candidate_digest"],
+    )
+    restored = _undo_littera_delivery(sites)
+    assert (len(restored), _inventory_digest(restored)) == (
+        transition["raw_base_count"], transition["raw_base_digest"],
     )

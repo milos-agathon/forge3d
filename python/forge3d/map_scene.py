@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 import time
+import warnings
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -30,6 +31,7 @@ from ._map_scene_common import (
     _stable_hash,
 )
 from ._map_scene_compiler import _FrozenLabelPlans, _SceneCompiler
+from ._material_preparation import material_preparation_context, scoped_material_preparation
 from ._map_scene_labels import (
     _atlas_glyph_set,
     _diagnostic_for_layer,
@@ -597,16 +599,33 @@ def _mapscene_thematic_surface(recipe: "SceneRecipe", shape: Sequence[int]) -> A
     from ._map_scene_rasters import raster_route_blocks
     if blocks := raster_route_blocks(recipe):
         raise MapSceneNativeUnavailable(blocks)
+    from ._map_scene_materials import material_surface_stack, drape_physical_vectors
+    from .geospatial_materials import MaterialRasterStyle
+    if any(isinstance(layer.style, MaterialRasterStyle) for layer in styled):
+        result = material_surface_stack(recipe, shape)
+        return drape_physical_vectors(recipe, shape, result)
     if styled:
         grid = _terrain_alignment_grid(recipe.terrain, fallback_shape=shape)
         result = _styled_raster_result(styled[0], terrain_grid=grid, target_registration="area")
+        from .terrain_materials import TerrainMaterialStyle
+        if isinstance(recipe.terrain.style, TerrainMaterialStyle):
+            from .raster_style import RasterStyleResult, CategoricalRasterStyle
+            if not isinstance(styled[0].style, CategoricalRasterStyle):
+                raise ValueError("combined terrain material requires an aligned categorical raster")
+            ground = recipe.terrain.style.apply(_load_raw_heightmap(recipe.terrain))
+            if result.rgba.shape != ground.rgba.shape:
+                raise ValueError("shape_mismatch: categorical raster must match the terrain material grid")
+            rgba = ground.rgba.copy()
+            valid = result.valid_mask & ground.valid_mask
+            rgba[valid] = result.rgba[valid]
+            result = RasterStyleResult(rgba, ground.valid_mask, result.legend, heights=ground.heights)
     elif recipe.terrain.style is not None:
         result = recipe.terrain.style.apply(_load_raw_heightmap(recipe.terrain))
     else:
-        return None
+        return drape_physical_vectors(recipe, shape, None)
     if tuple(result.valid_mask.shape) != tuple(shape):
         raise ValueError("shape_mismatch: thematic raster must match the terrain grid; align sources before styling")
-    return result
+    return drape_physical_vectors(recipe, shape, result)
 
 
 def _load_python_raster_overlays(
@@ -694,6 +713,7 @@ class _MapSceneNativeRenderResult:
     rgba: Any
     aov_frame: Any | None = None
     hdr_frame: Any | None = None
+    hdr_overlay_mask: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     # VERITAS: per-pixel source-id map + contributing-tile records captured
     # at composite time (populated only when provenance emission is on).
@@ -1095,7 +1115,7 @@ def _mapscene_material_settings(recipe: "SceneRecipe") -> Any | None:
     if not isinstance(material_data, Mapping):
         return None
 
-    kwargs: dict[str, str] = {}
+    kwargs: dict[str, Any] = {}
     for field_name, alias in (
         ("normal_path", "normal"),
         ("roughness_path", "roughness"),
@@ -1107,6 +1127,10 @@ def _mapscene_material_settings(recipe: "SceneRecipe") -> Any | None:
         if value is not None:
             kwargs[field_name] = str(value)
 
+    if "physical_normals" in material_data:
+        if not isinstance(material_data["physical_normals"], bool):
+            raise ValueError("material physical_normals must be a bool")
+        kwargs["physical_normals"] = material_data["physical_normals"]
     return MaterialLayerSettings(**kwargs) if kwargs else None
 
 
@@ -1725,6 +1749,10 @@ def _build_mapscene_terrain_params(
             blend_mode="Alpha",
             domain=domain,
         )
+        from ._map_scene_projection import material_style
+        authored_style = material_style(recipe)
+        if authored_style is not None:
+            authored_style.validate_scene(recipe)
         if resident_raster is not None:
             thematic = resident_raster[1]
             overlay = resident_raster[0]
@@ -1761,6 +1789,27 @@ def _build_mapscene_terrain_params(
     grid = _terrain_alignment_grid(recipe.terrain, fallback_shape=heightmap.shape)
     if grid is not None and grid["registered_raster"]:
         camera_mode += ":registered-raster"
+    cli_params = settings.get("cli_params") if isinstance(settings.get("cli_params"), Mapping) else {}
+    ignored_sampling = [name for name in ("msaa_samples", "render_scale") if name in cli_params]
+    if ignored_sampling:
+        # Rendering and projection can reach this helper through different
+        # internal stacks. Attribute the warning to the external caller.
+        stacklevel = 2
+        caller = sys._getframe(1)
+        while caller is not None and (
+            caller.f_globals.get("__name__") == "forge3d"
+            or caller.f_globals.get("__name__", "").startswith("forge3d.")
+        ):
+            stacklevel += 1
+            caller = caller.f_back
+        del caller
+        warnings.warn(
+            "MapScene ignores recipe cli_params " + ", ".join(ignored_sampling)
+            + "; rendering uses msaa_samples=1 and render_scale=1.0. "
+            "Use TerrainRenderParams directly for sampling controls.",
+            UserWarning,
+            stacklevel=stacklevel,
+        )
     config = make_terrain_params_config(
         size_px=render_size,
         render_scale=1.0,
@@ -1815,6 +1864,13 @@ def _build_mapscene_terrain_params(
         pom=_mapscene_pom_settings(settings),
         vt=_mapscene_vt_settings(recipe),
     )
+    from ._map_scene_projection import needs_frame_visibility
+    if needs_frame_visibility(recipe):
+        config.aov.enabled = True
+        config.debug_mode = 0
+    from ._map_scene_projection import needs_building_identity
+    if needs_building_identity(recipe):
+        config.aov.building_id = True
     if albedo_path is not None:
         config.materials.albedo_path = albedo_path
     if emit_source_id:
@@ -1854,6 +1910,7 @@ _MAPSCENE_LIGHTING_EXTRAS = {
     "volumetrics": "VolumetricsSettings",
     "tonemap": "TonemapSettings",
     "bloom": "BloomSettings",
+    "triplanar": "TriplanarSettings",
 }
 
 
@@ -2046,7 +2103,8 @@ def _shared_terrain_render_context() -> Any:
     previous = getattr(_ACTIVE_TERRAIN_RESOURCES, "holder", None)
     _ACTIVE_TERRAIN_RESOURCES.holder = holder
     try:
-        yield
+        with material_preparation_context():
+            yield
     finally:
         _ACTIVE_TERRAIN_RESOURCES.holder = previous
 
@@ -2095,11 +2153,11 @@ def _render_terrain_renderer_result(
     native_point_batches: Sequence[Mapping[str, Any]] | None = None,
     resident_raster: tuple[Any, dict[str, Any], str] | None = None,
 ) -> _MapSceneNativeRenderResult | None:
-    from ._map_scene_rasters import terrain_raster_drape
+    from ._map_scene_rasters import terrain_raster_drape, material_surface_maps
 
-    with terrain_raster_drape(recipe, heightmap) as (albedo_path, layer_count):
+    with material_surface_maps(recipe) as surface_recipe, terrain_raster_drape(recipe, heightmap) as (albedo_path, layer_count):
         result = _render_terrain_renderer_result_impl(
-            recipe, heightmap, emit_provenance=emit_provenance,
+            surface_recipe, heightmap, emit_provenance=emit_provenance,
             nodata_height_below=nodata_height_below,
             chronos_frame_json=chronos_frame_json, albedo_path=albedo_path,
             native_label_batches=native_label_batches,
@@ -2108,6 +2166,9 @@ def _render_terrain_renderer_result(
             **({"resident_raster": resident_raster} if resident_raster is not None else {}),
         )
         if result is not None:
+            from ._map_scene_materials import physical_vector
+            if any(isinstance(layer, VectorOverlay) and physical_vector(layer) for layer in recipe.layers):
+                result.metadata["physical_vector_backend"] = "native_terrain_uv_albedo"
             if resident_raster is not None:
                 result.metadata["raster_overlay_backend"] = "native_terrain_rgba_cells"
                 result.metadata["raster_overlay_layer_count"] = 1
@@ -2197,13 +2258,16 @@ def _render_terrain_renderer_result_impl(
         water_mask = _mapscene_water_mask(recipe, heightmap)
         building_scatter = (
             _terrain_scatter_building_batches_for_recipe(recipe, heightmap, shared_frame=bool(requested_effects))
-            if not needs_offline and hasattr(renderer, "set_scatter_batches")
+            if hasattr(renderer, "set_scatter_batches")
             else None
         )
         # Label occlusion is already frozen by compile_plan()'s serialized
         # camera/terrain sampler. Never retain a live GPU depth AOV merely
         # because labels request terrain occlusion; render must be a pure
         # consumer of that compiled plan.
+        from ._map_scene_projection import needs_building_identity, needs_frame_visibility
+        from .offline import _visibility_reference_params
+        visibility_required = needs_frame_visibility(recipe)
         unlit_albedo = _mapscene_unlit_albedo(recipe)
         if unlit_albedo:
             mode = _mapscene_effective_camera_mode(recipe)
@@ -2212,12 +2276,26 @@ def _render_terrain_renderer_result_impl(
             if mode == "mesh:zup:north" and recipe.terrain.style is None:
                 from ._map_scene_projection import flat_ground_footprint_uv
                 flat_ground_footprint_uv(recipe, heightmap, params)
-        needs_aov = bool(output.aovs) or emit_provenance or unlit_albedo
+        needs_aov = bool(output.aovs) or emit_provenance or unlit_albedo or visibility_required
         if requested_effects and int(output.bit_depth)!=8:
             _mapscene_pipeline_block(requested_effects,"interactive output uses RGBA8; the requested bit depth has no matching GPU output transform")
-        if requested_effects and (needs_offline or needs_aov):
-            _mapscene_pipeline_block(requested_effects,
-                "shared interactive HDR effects require one-shot output; the offline/AOV export graph has no matching post-effect attachments")
+        if requested_effects:
+            if sample_count > 1 or _mapscene_denoise_enabled(output) or output.aovs or emit_provenance:
+                _mapscene_pipeline_block(requested_effects,
+                    "shared interactive effects support one-shot beauty, scene-linear HDR and terrain visibility; accumulation, denoise, public AOVs and provenance are unavailable")
+            if visibility_required and (needs_building_identity(recipe) or native_label_batches or
+                    native_vector_batches or native_point_batches or any(
+                        isinstance(layer, VectorOverlay) and (layer.metadata or {}).get("material_presentation") == "protected feature paint"
+                        for layer in recipe.layers)):
+                _mapscene_pipeline_block(requested_effects,
+                    "protected paint with shared effects requires terrain/raster ownership without protected buildings or native labels, vectors or point overlays")
+            if needs_hdr or visibility_required:
+                if "taa" in requested_effects:
+                    _mapscene_pipeline_block(requested_effects, "HDR and protected paint require an unjittered one-shot frame; disable TAA")
+                if not callable(getattr(getattr(f3d, "Frame", None), "_take_interactive_exports", None)):
+                    _mapscene_pipeline_block(requested_effects, "native post-effect HDR and visibility outputs are unavailable; rebuild the bindings")
+                if visibility_required and not callable(getattr(getattr(f3d, "AovFrame", None), "_interactive_surface_kind", None)):
+                    _mapscene_pipeline_block(requested_effects, "native surface ownership output is unavailable; rebuild the bindings")
         if emit_provenance and needs_offline:
             raise RuntimeError(
                 "MapScene provenance emission requires the one-shot render path: "
@@ -2248,9 +2326,23 @@ def _render_terrain_renderer_result_impl(
             # Shared renderer: drop batches left over from a previous render's
             # recipe so they cannot leak into this frame.
             renderer.set_scatter_batches([])
-        if needs_offline:
-            from .offline import render_offline
+        if needs_offline and not requested_effects:
+            from .offline import render_offline, _scatter_terrain_reference
 
+            reference_aov = None
+            denoise_terrain_mask = None
+            if building_scatter is not None and scatter_batches and (
+                _mapscene_denoise_enabled(output) or visibility_required
+            ):
+                # Accumulation's guides describe terrain only. Native scene
+                # depth identifies where those guides belong to the visible
+                # surface; preserve accumulated scatter instead of filtering
+                # it using the albedo/normal of the ground underneath.
+                # Exact paint uses this same unjittered output-centre reference
+                # with denoising both on and off at fixed MapScene sampling.
+                denoise_terrain_mask, reference_aov = _scatter_terrain_reference(
+                    renderer, material_set, env_maps, params, heightmap, water_mask,
+                )
             t0 = time.perf_counter()
             offline_result = render_offline(
                 renderer,
@@ -2261,6 +2353,10 @@ def _render_terrain_renderer_result_impl(
                 settings=_mapscene_offline_settings(output),
                 progress_callback=None,
                 water_mask=water_mask,
+                # Every native building batch needs terrain-only guide coverage,
+                # including the legacy palette and protected presentation.
+                **({"_denoise_terrain_mask": denoise_terrain_mask}
+                   if denoise_terrain_mask is not None else {}),
             )
             metadata["offline_accumulation_ms"] = (time.perf_counter() - t0) * 1000.0
             metadata["timing_source"] = "python_perf_counter"
@@ -2268,16 +2364,34 @@ def _render_terrain_renderer_result_impl(
             hdr_frame = offline_result.hdr_frame
             aov_frame = offline_result.aov_frame
             metadata.update(dict(offline_result.metadata or {}))
+            if visibility_required:
+                # Accumulated colour has jittered subpixel samples. Exact paint
+                # uses the pixel-centre visibility of this identical camera,
+                # geometry and material state, after tonemap and denoise.
+                if reference_aov is None:
+                    _, reference_aov = renderer.render_with_aov(
+                        material_set=material_set, env_maps=env_maps,
+                        params=_visibility_reference_params(params),
+                        heightmap=heightmap, water_mask=water_mask,
+                    )
+                aov_frame = reference_aov
+                metadata["visibility_sampling"] = "unjittered same-camera reference; exact paint after offline resolve"
         elif requested_effects:
             t0 = time.perf_counter()
+            exports = {"_export_hdr": needs_hdr, "_export_visibility": visibility_required} if needs_hdr or visibility_required else {}
             try:
                 frame = renderer.render_interactive(
                     material_set=material_set, env_maps=env_maps, params=params,
                     heightmap=heightmap, water_mask=water_mask,
                     clouds=_mapscene_cloud_settings(recipe), label_batches=native_label_batches,
-                    vector_batches=native_vector_batches, furniture_batches=native_furniture_batches,
-                    point_batches=native_point_batches,
+                    vector_batches=native_vector_batches,
+                    furniture_batches=None if visibility_required else native_furniture_batches,
+                    point_batches=native_point_batches, **exports,
                 )
+                if exports:
+                    hdr_frame, aov_frame = frame._take_interactive_exports()
+                    if (needs_hdr and hdr_frame is None) or (visibility_required and aov_frame is None):
+                        raise RuntimeError("native effects renderer omitted a requested HDR or visibility output")
             except RuntimeError as error:
                 _mapscene_pipeline_block(requested_effects, str(error))
             metadata["terrain_main_pass_ms"] = (time.perf_counter() - t0) * 1000.0
@@ -2428,6 +2542,8 @@ def _vector_layer_requires_precise_raster(layer: "VectorOverlay") -> bool:
     native OIT vector bridge. SUTURA permits the existing precise Python
     compositor when its backend is identified explicitly in render metadata.
     """
+    if (layer.metadata or {}).get("material_presentation") == "protected feature paint":
+        return True
     line_paint = _render_paint(layer, "line")
     line_layout = _render_layout(layer, "line")
     dash_array = getattr(layer, "dash_array", None) or line_paint.get("line-dasharray")
@@ -2793,7 +2909,8 @@ def _composite_python_precise_vector_layers(
 
 
 def _composite_native_vector_layers(base: Any, recipe: "SceneRecipe") -> tuple[Any, bool]:
-    vector_layers = [layer for layer in recipe.layers if isinstance(layer, VectorOverlay)]
+    from ._map_scene_materials import physical_vector
+    vector_layers = [layer for layer in recipe.layers if isinstance(layer, VectorOverlay) and not physical_vector(layer)]
     if not vector_layers:
         return base, False
 
@@ -3489,6 +3606,50 @@ def _native_glyph_box(
     return x, y, float(glyph["w"]) * scale, float(glyph["h"]) * scale
 
 
+def _label_atlas_paths(layer: "LabelLayer") -> tuple[Path, Path, bool]:
+    from .text_atlas import default_latin_atlas_paths
+
+    atlas = _metadata_dict(layer.glyph_atlas)
+    image_path = atlas.get("image_path")
+    metrics_path = atlas.get("metrics_path") or atlas.get("source_path")
+    if image_path and metrics_path and Path(str(image_path)).exists() and Path(str(metrics_path)).exists():
+        return Path(str(image_path)), Path(str(metrics_path)), True
+    return (*default_latin_atlas_paths(), False)
+
+
+def _compiled_label_render_style(accepted, layer_id, width, height, default_size):
+    typography = accepted.typography or {}
+    fill = _render_color(typography.get("color") or typography.get("text_color"), (255, 255, 255, 255))
+    halo = _render_color(
+        typography.get("halo_color") or typography.get("text_halo_color"), (0, 0, 0, 190),
+    )
+    alpha = _render_number(typography.get("chronos_alpha"), 1.0)
+    alpha = min(max(alpha if math.isfinite(alpha) else 1.0, 0.0), 1.0)
+    halo_width = _render_number(
+        typography.get("halo_width_px", typography.get("halo_width", typography.get("text_halo_width"))),
+        1.0,
+    )
+    size = _render_number(
+        typography.get("font_size", typography.get("size", typography.get("text_size"))),
+        default_size,
+    )
+    positioned = tuple(accepted.positioned_glyphs or ())
+    reason = None
+    if not math.isfinite(size) or size <= 0.0:
+        reason = "invalid_text_size"
+    elif not math.isfinite(halo_width) or halo_width < 0.0:
+        reason = "invalid_halo_width"
+    elif not positioned:
+        reason = "missing_positioned_glyphs"
+    if reason:
+        raise MapSceneTextLayoutError({
+            "status": "diagnostic_block", "reason": reason,
+            "layer": layer_id, "object_id": accepted.label_id,
+        })
+    origin = _label_pen_origin(accepted, positioned, size, width, height)
+    return positioned, origin, size, fill, halo, halo_width, alpha
+
+
 def _mapscene_native_label_batches(
     recipe: "SceneRecipe", plans: Mapping[str, Any], width: int, height: int, *,
     atlas_sources: Mapping[str, tuple[Path, Path, bool]] | None = None,
@@ -3499,8 +3660,8 @@ def _mapscene_native_label_batches(
     This authoring step never renders, reads back a texture, or changes a plan.
     The ordinary compositor and the unified frame share this exact glyph stream.
     """
-    from ._png import load_png_rgba
-    from .text_atlas import default_latin_atlas_paths, load_atlas_metrics
+    from numpy import float32
+    from .text_atlas import _load_atlas_image, load_atlas_metrics
 
     batches: list[dict[str, Any]] = []
     for layer in (item for item in recipe.layers if isinstance(item, LabelLayer)):
@@ -3509,26 +3670,21 @@ def _mapscene_native_label_batches(
         if plan is None or not plan.accepted:
             continue
 
-        if atlas_sources is not None:
-            atlas_png, atlas_json, custom_atlas_bound = atlas_sources[layer_id]
-        else:
-            atlas_png, atlas_json = default_latin_atlas_paths()
-            atlas_payload = _metadata_dict(layer.glyph_atlas)
-            image_path = atlas_payload.get("image_path")
-            metrics_path = atlas_payload.get("metrics_path") or atlas_payload.get("source_path")
-            custom_atlas_bound = bool(
-                image_path
-                and metrics_path
-                and Path(str(image_path)).exists()
-                and Path(str(metrics_path)).exists()
-            )
-            if custom_atlas_bound:
-                atlas_png, atlas_json = Path(str(image_path)), Path(str(metrics_path))
+        atlas_png, atlas_json, custom_atlas_bound = (
+            atlas_sources[layer_id] if atlas_sources is not None else _label_atlas_paths(layer)
+        )
 
-        if atlas_data is None:
-            atlas, metrics = load_png_rgba(atlas_png), load_atlas_metrics(atlas_json)
-        else:
-            atlas, metrics = atlas_data[layer_id]
+        try:
+            if atlas_data is None:
+                metrics = load_atlas_metrics(atlas_json)
+                atlas = _load_atlas_image(atlas_png, metrics)
+            else:
+                atlas, metrics = atlas_data[layer_id]
+        except (OSError, ValueError) as error:
+            raise MapSceneTextLayoutError({
+                "status": "diagnostic_block", "reason": "invalid_text_atlas",
+                "layer": layer_id, "object_id": None, "message": str(error),
+            }) from error
         glyphs_by_id = metrics.get("glyphs_by_id")
         if not isinstance(glyphs_by_id, Mapping) or not glyphs_by_id:
             raise MapSceneTextLayoutError({
@@ -3558,7 +3714,7 @@ def _mapscene_native_label_batches(
             })
 
         # (chronos_alpha, rect) in plan order; rects carry full-opacity colors.
-        pending_text_rects: list[tuple[float, tuple[float, ...]]] = []
+        pending_text_rects: list[tuple[float, str, tuple[float, ...]]] = []
         for accepted in plan.accepted:
             typography = dict(getattr(accepted, "typography", None) or {})
             shaped_hashes = tuple(
@@ -3573,57 +3729,30 @@ def _mapscene_native_label_batches(
                     "expected_sha256": list(shaped_hashes),
                     "atlas_sha256": list(atlas_hashes),
                 })
-            text_color = _rgba01(
-                _render_color(typography.get("color") or typography.get("text_color"), (255, 255, 255, 255))
-            )
-            halo_color = _rgba01(
-                _render_color(
-                    typography.get("halo_color") or typography.get("text_halo_color"),
-                    (0, 0, 0, 190),
+            positioned, (anchor_x, anchor_y), render_size, fill, halo, halo_width, chronos_alpha = (
+                _compiled_label_render_style(
+                    accepted, layer_id, width, height, atlas_font_size if custom_atlas_bound else 12.0,
                 )
             )
-            try:
-                chronos_alpha = float(typography.get("chronos_alpha", 1.0))
-            except (TypeError, ValueError):
-                chronos_alpha = 1.0
-            if not math.isfinite(chronos_alpha):
-                chronos_alpha = 1.0
-            chronos_alpha = min(max(chronos_alpha, 0.0), 1.0)
-            halo_width = _render_number(
-                typography.get("halo_width_px")
-                if "halo_width_px" in typography
-                else typography.get("halo_width", typography.get("text_halo_width")),
-                1.0,
-            )
-            # The packaged atlas bake resolution is an implementation detail,
-            # not the public default label size. Keep MapScene's default at
-            # 12 px there. An explicitly bound custom atlas retains its own
-            # declared size unless typography overrides it.
-            render_size = _render_number(
-                typography.get("font_size", typography.get("size", typography.get("text_size"))),
-                atlas_font_size if custom_atlas_bound else 12.0,
-            )
-            if not math.isfinite(render_size) or render_size <= 0.0:
-                raise MapSceneTextLayoutError({
-                    "status": "diagnostic_block",
-                    "reason": "invalid_text_size",
-                    "layer": layer_id,
-                    "object_id": accepted.label_id,
-                    "font_size": render_size,
-                })
+            if metrics["channels"] == 4:
+                # The signed field encodes half the declared range on either
+                # side of the outline. Coverage needs the halo and a pixel's
+                # half diagonal, expressed on the same f32 bake scale.
+                radius = halo_width if halo[3] else 0.0
+                required_range = float(float32(2.0 * (radius + math.sqrt(0.5)) * atlas_font_size / render_size))
+                if float(metrics["px_range"]) < required_range:
+                    raise MapSceneTextLayoutError({
+                        "status": "diagnostic_block",
+                        "reason": "insufficient_atlas_range",
+                        "layer": layer_id,
+                        "object_id": accepted.label_id,
+                        "px_range": metrics["px_range"],
+                        "required_px_range": required_range,
+                        "font_size": render_size,
+                        "halo_width_px": radius,
+                    })
+            text_color, halo_color = _rgba01(fill), _rgba01(halo)
             atlas_scale = render_size / atlas_font_size
-            positioned = tuple(getattr(accepted, "positioned_glyphs", ()) or ())
-            anchor_x, anchor_y = _label_pen_origin(
-                accepted, positioned, render_size, int(width), int(height)
-            )
-            if not positioned:
-                raise MapSceneTextLayoutError({
-                    "status": "diagnostic_block",
-                    "reason": "missing_positioned_glyphs",
-                    "layer": layer_id,
-                    "object_id": accepted.label_id,
-                    "required_mapping": "font_index:glyph_id",
-                })
             for positioned_glyph in positioned:
                 font_index = int(positioned_glyph["font_index"])
                 glyph_id = int(positioned_glyph["glyph_id"])
@@ -3709,7 +3838,7 @@ def _mapscene_native_label_batches(
                         "object_id": accepted.label_id,
                         "identity": identity,
                     })
-                pending_text_rects.append((chronos_alpha, rect))
+                pending_text_rects.append((chronos_alpha, accepted.label_id, rect))
 
         if not pending_text_rects:
             raise MapSceneTextLayoutError({
@@ -3719,12 +3848,20 @@ def _mapscene_native_label_batches(
                 "object_id": None,
             })
         for alpha, run in itertools.groupby(pending_text_rects, key=lambda item: item[0]):
-            rects = [rect for _, rect in run]
+            rects = []
+            label_starts = []
+            previous_label = None
+            for _, label_id, rect in run:
+                if label_id != previous_label:
+                    label_starts.append(len(rects))
+                    previous_label = label_id
+                rects.append(rect)
             if alpha > 0.0:
                 batches.append({
                     "layer": layer_id, "atlas": atlas,
                     "channels": int(metrics.get("channels", 1)),
-                    "alpha": alpha, "rects": rects,
+                    "alpha": alpha, "rects": rects, "label_starts": label_starts,
+                    "px_range": float(metrics.get("px_range", 8.0)),
                 })
     return batches
 
@@ -3756,9 +3893,14 @@ def _composite_native_label_layers(
         if hasattr(native_scene, "disable_terrain"):
             native_scene.disable_terrain()
         native_scene.set_raster_overlay(composited, 1.0, None, None)
-        native_scene.set_native_text_atlas(batch["atlas"], batch["channels"], 1.0)
+        native_scene.set_native_text_atlas(
+            batch["atlas"], batch["channels"], 1.0, px_range=batch["px_range"],
+        )
         native_scene.enable_native_text()
-        for rect in batch["rects"]:
+        label_starts = set(batch["label_starts"])
+        for index, rect in enumerate(batch["rects"]):
+            if index in label_starts and hasattr(native_scene, "begin_native_text_label"):
+                native_scene.begin_native_text_label()
             native_scene.add_native_text_rect_uv_halo(*rect)
         rgba = np.asarray(native_scene.render_rgba())
         if rgba.ndim != 3 or rgba.shape[2] != 4:
@@ -3770,7 +3912,9 @@ def _composite_native_label_layers(
 
 
 def _needs_native_vector_composite(recipe: "SceneRecipe") -> bool:
-    return any(isinstance(layer, VectorOverlay) and bool(layer.features or layer.path) for layer in recipe.layers)
+    from ._map_scene_materials import physical_vector
+    return any(isinstance(layer, VectorOverlay) and not physical_vector(layer) and
+               bool(layer.features or layer.path) for layer in recipe.layers)
 
 
 def _needs_native_label_composite(recipe: "SceneRecipe", plans: Mapping[str, Any]) -> bool:
@@ -3900,6 +4044,10 @@ def _append_roof_geometry(
 
 def _native_building_mesh_batches_for_layers(
     layers: Sequence["BuildingLayer"],
+    *,
+    point_to_scene: Any = None,
+    material_point_to_scene: Any = None,
+    wall_height_scale: float | None = None,
 ) -> list[dict[str, Any]] | None:
     bounds = _building_scene_bounds(layers)
     if bounds is None:
@@ -3921,7 +4069,14 @@ def _native_building_mesh_batches_for_layers(
                 properties = feature["properties"]  # type: ignore[assignment]
             fill = _render_building_fill_color(properties)
             color = (fill[0] / 255.0, fill[1] / 255.0, fill[2] / 255.0, fill[3] / 255.0)
-            wall_height = max(0.08, min(1.4, _render_building_height(properties) / 45.0))
+            if isinstance(properties.get("forge3d:material"), Mapping):
+                from .terrain_materials import _linear
+                # C01 declares palette/albedo colours as sRGB bytes. Native
+                # lighting multiplies linear surface factors; legacy palettes
+                # retain their established interpretation.
+                color = (*tuple(float(value) for value in _linear(np.asarray(fill[:3]) / 255.0)), fill[3] / 255.0)
+            wall_height = (max(0.08, min(1.4, _render_building_height(properties) / 45.0))
+                           if wall_height_scale is None else _render_building_height(properties) * wall_height_scale)
             roof_type = _render_building_roof_type(properties)
             feature_id = str(
                 feature.get("id")
@@ -3935,7 +4090,10 @@ def _native_building_mesh_batches_for_layers(
             for ring in _render_building_rings(geometry):
                 if len(ring) < 3:
                     continue
-                footprint = [_building_point_to_scene(point, bounds) for point in ring]
+                projector = (material_point_to_scene if material_point_to_scene is not None and
+                             isinstance(properties.get("forge3d:material"), Mapping) else point_to_scene)
+                footprint = [(projector(point) if projector is not None else _building_point_to_scene(point, bounds))
+                             for point in ring]
                 if len(footprint) >= 2 and footprint[0] == footprint[-1]:
                     footprint = footprint[:-1]
                 if len(footprint) < 3:
@@ -3963,6 +4121,10 @@ def _native_building_mesh_batches_for_layers(
                         "indices": np.ascontiguousarray(all_indices, dtype=np.uint32),
                         "normals": np.ascontiguousarray(all_normals, dtype=np.float32),
                         "color": color,
+                        "physical_color": isinstance(properties.get("forge3d:material"), Mapping),
+                        "protected_rgba": (properties["forge3d:material"]["rgba"]
+                            if isinstance(properties.get("forge3d:material"), Mapping) and
+                            properties["forge3d:material"].get("presentation") == "protected" else None),
                     }
                 )
 
@@ -3976,10 +4138,6 @@ def _terrain_scatter_building_batches_for_recipe(
     building_layers = [layer for layer in recipe.layers if isinstance(layer, BuildingLayer)]
     if not building_layers:
         return None
-    batches = _native_building_mesh_batches_for_layers(building_layers)
-    if not batches:
-        return None
-
     try:
         import numpy as np
         from .geometry import MeshBuffers
@@ -4002,8 +4160,47 @@ def _terrain_scatter_building_batches_for_recipe(
     z_scale = float(settings.get("exaggeration") or 1.0)
     source = TerrainScatterSource(arr, z_scale=z_scale, terrain_width=terrain_width)
     scene_to_contract = terrain_width / 1.7
+    # CRS-tagged buildings share the terrain sample-centre frame. The legacy
+    # screen compositor's independent building-bounds normalization would make
+    # a single footprint fill the entire map and scale its height with the DEM.
+    coordinate_space = "legacy_building_bounds"
+    point_to_scene = None
+    material_point_to_scene = None
+    height_scale = None
+    crs = recipe.target_crs or recipe.terrain.crs
+    declared = [_metadata_dict(layer.metadata).get("crs") for layer in building_layers]
+    if any(declared):
+        from ._map_scene_common import _same_crs
+        if not all(value and _same_crs(value, crs) for value in declared):
+            raise ValueError("georeferenced buildings must all declare the terrain CRS")
+        grid = _terrain_alignment_grid(recipe.terrain, target_crs=crs, fallback_shape=arr.shape)
+        if grid is not None:
+            from .alignment import _affine_from_metadata
+            inverse = ~_affine_from_metadata(grid["transform"])
+            def point_to_scene(point):
+                col, row = inverse * (float(point[0]), float(point[1]))
+                return ((col - .5) / max(arr.shape[1]-1, 1) * 1.7 - .85,
+                        (row - .5) / max(arr.shape[0]-1, 1) * 1.7 - .85)
+            def material_point_to_scene(point):
+                col, row = inverse * (float(point[0]), float(point[1]))
+                return (col / arr.shape[1] * 1.7 - .85,
+                        row / arr.shape[0] * 1.7 - .85)
+        else:
+            bounds = _metadata_dict(recipe.terrain.metadata).get("bounds")
+            if bounds is None:
+                raise ValueError("georeferenced buildings require the prepared terrain grid or bounds")
+            def point_to_scene(point):
+                return _building_point_to_scene(point, bounds)
+        height_scale = z_scale / scene_to_contract
+        coordinate_space = "terrain_crs"
+    batches = _native_building_mesh_batches_for_layers(building_layers,
+        point_to_scene=point_to_scene, material_point_to_scene=material_point_to_scene,
+        wall_height_scale=height_scale)
+    if not batches:
+        return None
     scatter_batches: list[dict[str, Any]] = []
     batch_ids: dict[str, int] = {}
+    protected_swatches: dict[str, list[int]] = {}
     roof_types: dict[str, str] = {}
     contact_distance = max(0.25, terrain_width * 0.015)
 
@@ -4027,7 +4224,24 @@ def _terrain_scatter_building_batches_for_recipe(
             # Retain the shared frame's winding under that axis reflection.
             indices = indices[:, [0, 2, 1]]
         row, col = source.contract_to_pixel(center_x, center_z)
+        if batch.get("physical_color"):
+            # Match the native height texture's pixel-area/GL bilinear sample.
+            row = center_z / terrain_width * arr.shape[0] - .5
+            col = center_x / terrain_width * arr.shape[1] - .5
         base_y = source.sample_scaled_height(row, col)
+        if batch.get("physical_color"):
+            # The native scatter packer maps the translation from its Y-up
+            # placement contract, but local mesh axes are already world Z-up.
+            # Its uniform scale handles XY; authored heights are metres and
+            # must not receive that scale again. Keep legacy batches intact.
+            scale_xy = max(1.0, _terrain_scene_diagonal(recipe.terrain)) / terrain_width
+            local = local[:, [0, 2, 1]]
+            local[:, 2] /= scale_xy
+            normals = normals[:, [0, 2, 1]].copy()
+            normals[:, 2] *= scale_xy
+            lengths = np.linalg.norm(normals, axis=1, keepdims=True)
+            np.divide(normals, lengths, out=normals, where=lengths > 0)
+            indices = indices[:, [0, 2, 1]]
         mesh = MeshBuffers(
             positions=np.ascontiguousarray(local, dtype=np.float32),
             normals=np.ascontiguousarray(normals, dtype=np.float32),
@@ -4052,8 +4266,14 @@ def _terrain_scatter_building_batches_for_recipe(
         )
         feature_id = str(batch["feature_id"])
         batch_ids[feature_id] = len(scatter_batches)
+        if batch.get("protected_rgba") is not None:
+            protected_swatches[str(len(scatter_batches) + 1)] = list(batch["protected_rgba"])
         roof_types[feature_id] = str(batch["roof_type"])
-        scatter_batches.append(scatter.to_native_dict())
+        native_batch = scatter.to_native_dict()
+        native_batch["surface_depth"] = True
+        if batch.get("physical_color"):
+            native_batch["physical_color"] = True
+        scatter_batches.append(native_batch)
 
     if not scatter_batches:
         return None
@@ -4063,6 +4283,8 @@ def _terrain_scatter_building_batches_for_recipe(
         "building_batch_ids": batch_ids,
         "building_roof_types": roof_types,
         "building_shadow_model": "terrain_csm_mesh_cast_receive",
+        "building_coordinate_space": coordinate_space,
+        **({"building_protected_swatches": protected_swatches} if protected_swatches else {}),
     }
 
 
@@ -4480,6 +4702,27 @@ def _native_composite_blocks(
     return blocks
 
 
+def _mapscene_paint_protected_surface(base, recipe, visibility, metadata, paint_mask):
+    from ._map_scene_projection import composite_protected_material, material_style
+
+    base = composite_protected_material(base, recipe, visibility, paint_mask=paint_mask)
+    metadata["surface_visibility"] = "native_same_frame_depth32"
+    metadata["class_boundary_rule"] = "pixel-centre cell; no blending; terrain wins exact depth ties"
+    style = material_style(recipe)
+    if style is not None and style.recipe.relief_strength:
+        metadata["material_shading"] = "physical lighting plus declared cartographic relief"
+    return base
+
+
+def _mapscene_exact_hdr_mask(rgba, paint, coverage, metadata, hdr_frame):
+    import numpy as np
+
+    mask = coverage & np.all(rgba == paint, axis=-1)
+    if hdr_frame is not None and np.any(mask):
+        metadata["hdr_overlay_encoding"] = "linear sRGB of unchanged exact display swatches, applied after denoise/tonemap; physical pixels retain scene radiance; later overlays retain scene radiance"
+    return mask
+
+
 def _render_native_offscreen_result(
     recipe: "SceneRecipe",
     compiled: "CompiledScenePlan",
@@ -4497,7 +4740,7 @@ def _render_native_offscreen_result(
     plans = _chronos_label_plans(frame) if frame is not None else compiled.label_plans
     chronos_frame_json = frame.to_json() if frame is not None else None
     from ._map_scene_rasters import raster_content_hashes
-    from ._map_scene_projection import project_vector_recipe
+    from ._map_scene_projection import frame_visibility, needs_frame_visibility, project_vector_recipe
 
     heightmap = _load_native_heightmap(recipe.terrain)
     if heightmap is None or recipe.output is None:
@@ -4580,6 +4823,18 @@ def _render_native_offscreen_result(
         if any(isinstance(layer, BuildingLayer) and not is_cartographic_landmark(layer) for layer in recipe.layers) and result.metadata.get("building_backend") != "terrain_scatter_instanced_mesh":
             _mapscene_pipeline_block(requested_effects, "building geometry did not join the shared native GBuffer")
         result.metadata.update(landmark_metadata)
+        if result.aov_frame is not None:
+            protected = np.zeros(result.rgba.shape[:2], dtype=bool)
+            visibility = frame_visibility(recipe, result.aov_frame)
+            base = _mapscene_paint_protected_surface(result.rgba.copy(), recipe, visibility, result.metadata, protected)
+            result.metadata["surface_visibility"] = "native_same_frame_depth32_and_gbuffer_ownership"
+            result.metadata["class_boundary_rule"] = "pixel-centre cell; no blending; shared G-buffer surface ownership"
+            paint = base.copy()
+            _compose_furniture(base, recipe)
+            result.hdr_overlay_mask = _mapscene_exact_hdr_mask(base, paint, protected, result.metadata, result.hdr_frame)
+            result.rgba = base
+        elif result.hdr_frame is not None:
+            result.hdr_overlay_mask = np.zeros(result.rgba.shape[:2], dtype=bool)
         return result
     rgba = result.rgba
     if rgba.ndim != 3 or rgba.shape[2] != 4:
@@ -4587,17 +4842,33 @@ def _render_native_offscreen_result(
     if rgba.dtype != np.uint8:
         rgba = rgba.astype(np.uint8)
     base = np.ascontiguousarray(rgba.copy())
+    visibility = frame_visibility(recipe, result.aov_frame) if needs_frame_visibility(recipe) else None
+    protected_mask = np.zeros(base.shape[:2], dtype=bool)
+    if visibility is not None:
+        base = _mapscene_paint_protected_surface(base, recipe, visibility, result.metadata, protected_mask)
+    # Remember declared paint before any later display compositing can cover it.
+    paint_rgba = base.copy()
     native_buildings = result.metadata.get("building_backend") == "terrain_scatter_instanced_mesh"
     building_metadata: dict[str, Any] = {}
     if not native_buildings:
         base, native_buildings, building_metadata = _composite_native_building_layers(base, recipe)
     base, textured_landmarks, textured_metadata = _composite_textured_landmark_layers(base, recipe)
+    from ._map_scene_projection import composite_protected_buildings
+    building_paint_mask = np.zeros_like(protected_mask)
+    base = composite_protected_buildings(base, result.aov_frame, result.metadata,
+                                        paint_mask=building_paint_mask)
+    paint_rgba[building_paint_mask] = base[building_paint_mask]
+    protected_mask |= building_paint_mask
     base, native_labels = _composite_native_label_layers(base, recipe, plans)
     if vector_recipe is recipe:
         base, native_vectors = _composite_native_vector_layers(base, vector_recipe)
     else:
         from ._map_scene_projection import composite_projected_vectors
-        base, native_vectors = composite_projected_vectors(base, vector_recipe, recipe)
+        vector_paint_mask = np.zeros_like(protected_mask)
+        base, native_vectors = composite_projected_vectors(base, vector_recipe, recipe, visibility=visibility,
+                                                          paint_mask=vector_paint_mask)
+        paint_rgba[vector_paint_mask] = base[vector_paint_mask]
+        protected_mask |= vector_paint_mask
     base, native_point_clouds, point_tile_metadata = _composite_native_point_cloud_layers(base, recipe)
     blocks = _native_composite_blocks(
         recipe,
@@ -4621,6 +4892,11 @@ def _render_native_offscreen_result(
         metadata.update(textured_metadata)
     if native_point_clouds:
         metadata.update(point_tile_metadata)
+    # Only declared exact paint has a display-swatch encoding. All other
+    # pixels retain the native HDR radiance, including screen effects.
+    # Labels, ordinary vectors, point clouds and furniture can cover paint.
+    # Encode a swatch only when the final RGBA still equals that saved paint.
+    hdr_overlay_mask = _mapscene_exact_hdr_mask(composited, paint_rgba, protected_mask, metadata, result.hdr_frame)
     vector_layers = [layer for layer in vector_recipe.layers if isinstance(layer, VectorOverlay)]
     if vector_layers and any(
         _vector_layer_requires_precise_raster(layer) for layer in vector_layers
@@ -4632,6 +4908,7 @@ def _render_native_offscreen_result(
         rgba=composited,
         aov_frame=result.aov_frame,
         hdr_frame=result.hdr_frame,
+        hdr_overlay_mask=hdr_overlay_mask,
         metadata=metadata,
         source_map=result.source_map,
         contributing_tiles=result.contributing_tiles,
@@ -4660,8 +4937,9 @@ class TerrainSource:
             raise ValueError("TerrainSource nodata_policy must be 'fill' or 'preserve'")
         if self.style is not None:
             from .raster_style import RasterHeightSurfaceStyle, _single
-            if not isinstance(self.style, RasterHeightSurfaceStyle):
-                raise TypeError("TerrainSource.style must be RasterHeightSurfaceStyle")
+            from .terrain_materials import TerrainMaterialStyle
+            if not isinstance(self.style, (RasterHeightSurfaceStyle, TerrainMaterialStyle)):
+                raise TypeError("TerrainSource.style must be RasterHeightSurfaceStyle or TerrainMaterialStyle")
             if self.data is not None:
                 self.data = _single(self.data)
 
@@ -4712,8 +4990,10 @@ class RasterOverlay:
 
     def __post_init__(self) -> None:
         from .raster_style import CategoricalRasterStyle, BivariateRasterStyle
-        if self.style is not None and not isinstance(self.style, (CategoricalRasterStyle, BivariateRasterStyle)):
-            raise TypeError("RasterOverlay.style must be CategoricalRasterStyle or BivariateRasterStyle")
+        from .terrain_materials import TerrainMaterialStyle
+        from .geospatial_materials import MaterialRasterStyle
+        if self.style is not None and not isinstance(self.style, (CategoricalRasterStyle, BivariateRasterStyle, TerrainMaterialStyle, MaterialRasterStyle)):
+            raise TypeError("RasterOverlay.style must be categorical, bivariate or terrain material")
         if self.style is not None and (not math.isfinite(self.opacity) or not 0 <= self.opacity <= 1):
             raise ValueError("invalid_argument: thematic opacity must be finite and in [0, 1]")
         if self.style is None and any(v is not None for v in (self.data, self.secondary_path, self.secondary_data)):
@@ -6191,6 +6471,12 @@ class MapScene:
         furniture_data = data.get("map_furniture")
         reproducibility_data = data.get("reproducibility_profile")
         passes, inputs = decode_passes(data.get("render_passes") or {}, pass_inputs)
+        terrain_values = terrain_data.get("values")
+        material_geometry = (terrain_data.get("metadata") or {}).get("forge3d_material_geometry")
+        if terrain_values is None and material_geometry is not None:
+            if not isinstance(material_geometry, Mapping) or type(material_geometry.get("schema_version")) is not int or material_geometry["schema_version"] != 1:
+                raise ValueError("unsupported material geometry snapshot schema")
+            terrain_values = material_geometry["values"]
         terrain = TerrainSource(
             path=terrain_data.get("path"),
             crs=terrain_data.get("crs"),
@@ -6199,7 +6485,7 @@ class MapScene:
             dtype=str(terrain_data.get("dtype", "float32")),
             nodata_policy=str(terrain_data.get("nodata_policy", "fill")),
             style=raster_style_from_dict(terrain_data.get("style")),
-            data=raster_values_from_dict(terrain_data.get("values")),
+            data=raster_values_from_dict(terrain_values),
         )
         if terrain.data is None and terrain_data.get("data") is not None:
             terrain._serialized_data_summary = _metadata(terrain_data["data"])
@@ -6353,6 +6639,17 @@ class MapScene:
         """
         return self._compiler.compile(self.recipe)
 
+    def label_svg(self, *, precision: int = 6) -> str:
+        """Export the current compiled labels as positioned SVG outlines.
+
+        The viewBox matches the render viewport. Reuses accepted labels and
+        visibility decisions from the current plan and verifies font content
+        before extracting outlines. No fonts are required to display the SVG.
+        """
+        from .export import _mapscene_label_svg
+
+        return _mapscene_label_svg(self.recipe, self._compiled_plan_for_current_recipe(), precision)
+
     def _rehydrate_compiled_plan(self, manifest: Any) -> CompiledScenePlan:
         """Restore persisted decisions without running fresh label planning."""
         return self._compiler.restore(self.recipe, manifest)
@@ -6361,14 +6658,17 @@ class MapScene:
         return self._compiler.current(self.recipe)
 
     def _report_with_feature(self, report: ValidationReport, feature: str, support_level: str) -> ValidationReport:
-        payload = report.to_dict()
-        supported = dict(payload.get("supported_features") or {})
+        from dataclasses import replace
+        # Keep the previous independent snapshot, without repeatedly encoding
+        # and decoding every material/class array in already validated details.
+        snapshot = copy.deepcopy(report)
+        supported = dict(snapshot.supported_features or {})
         supported[feature] = support_level
-        payload["supported_features"] = supported
-        updated = ValidationReport.from_dict(payload)
+        updated = replace(snapshot, supported_features=supported)
         self.last_validation_report = updated
         return updated
 
+    @scoped_material_preparation
     def render(
         self,
         path: str | None = None,
@@ -6486,7 +6786,7 @@ class MapScene:
                 **({"raster_recipe": raster_recipe} if raster_recipe is not None else {}),
             )
         if certificate:
-            sha = _certificate.emit_render_certificate(certificate)
+            sha = _certificate._emit_current_render_certificate(certificate)
             if sha is not None:
                 self.last_render_metadata["certificate_payload_sha256"] = sha
         if cache is not None:
@@ -6649,9 +6949,19 @@ class MapScene:
             render_to_geotiff({"rgba": rgba, "grid": output_grid}, target_path, overwrite=True)
             self.last_render_path = str(target_path)
         elif output_format == "exr" or bool(output.hdr if output is not None else False):
+            import numpy as np
             hdr_path = target_path if output_format == "exr" else target_path.with_suffix(".exr")
             if hdr_frame is not None:
-                hdr_frame.save(str(hdr_path))
+                if native_result.hdr_overlay_mask is not None and np.any(native_result.hdr_overlay_mask):
+                    from .terrain_materials import _linear
+                    linear = np.asarray(hdr_frame.to_numpy_f32(), dtype=np.float32).copy()
+                    linear = _resize_nearest_array(linear, rgba.shape[:2])
+                    mask = native_result.hdr_overlay_mask
+                    linear[mask, :3] = _linear(rgba[mask, :3].astype(np.float32) / 255.0)
+                    linear[mask, 3] = rgba[mask, 3].astype(np.float32) / 255.0
+                    _write_exr_array(hdr_path, linear, channel_prefix="beauty")
+                else:
+                    hdr_frame.save(str(hdr_path))
             else:
                 _write_exr_array(hdr_path, rgba.astype(np.float32) / 255.0, channel_prefix="beauty")
             if output_format != "exr":
@@ -6719,8 +7029,11 @@ class MapScene:
         for key in (
             "native_pipeline",
             "building_backend",
+            "building_coordinate_space",
             "building_batch_count",
             "building_batch_ids",
+            "building_protected_swatches",
+            "physical_vector_backend",
             "building_roof_types",
             "building_shadow_model",
             "building_scatter_stats",
@@ -6750,6 +7063,12 @@ class MapScene:
             "frame_color_source",
             "thematic_legend",
             "raster_recipe_identity",
+            "surface_visibility",
+            "visibility_sampling",
+            "denoiser_guide_coverage",
+            "hdr_overlay_encoding",
+            "class_boundary_rule",
+            "material_shading",
             "vector_backend",
             "point_cloud_backend",
             "point_cloud_edl_backend",

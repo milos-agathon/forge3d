@@ -64,6 +64,7 @@ class TerrainProjector:
         if recipe.output is None:
             raise ValueError('world projection requires an output viewport')
         self.recipe = recipe
+        self._three_dimensional = ms._is_3d_camera_mode(ms._mapscene_effective_camera_mode(recipe))
         self.layer_id = str(layer_id)
         target_crs = recipe.target_crs or recipe.terrain.crs
         if crs is not None and not _same_crs(crs, target_crs):
@@ -84,6 +85,14 @@ class TerrainProjector:
         self.grid = ms._terrain_alignment_grid(recipe.terrain, target_crs=target_crs,
                                               fallback_shape=self.heightmap.shape)
         self.bounds = _metadata_dict(recipe.terrain.metadata).get('bounds')
+        # An explicitly registered raster projects between terrain samples.
+        self._pixel_area_grid = (
+            (self.grid is None or not self.grid["registered_raster"])
+            and (material_style(recipe) is not None or any(
+                (getattr(layer, 'metadata', None) or {}).get('material_recipe')
+                for layer in recipe.layers
+            ))
+        )
         self._inverse = None
         if self.grid is not None:
             from .alignment import _affine_from_metadata
@@ -97,7 +106,10 @@ class TerrainProjector:
             col, row = self._inverse * (east, north)
             from .raster_registration import corner_to_node_uv
 
-            u, v = corner_to_node_uv(col, row, self.heightmap.shape[1], self.heightmap.shape[0])
+            if self._pixel_area_grid:
+                u, v = col / self.heightmap.shape[1], row / self.heightmap.shape[0]
+            else:
+                u, v = corner_to_node_uv(col, row, self.heightmap.shape[1], self.heightmap.shape[0])
         elif self.bounds is not None:
             west, south, east_edge, north_edge = map(float, self.bounds)
             if not east_edge > west or not north_edge > south:
@@ -107,12 +119,16 @@ class TerrainProjector:
             u, v = east / self.span + 0.5, 0.5 - north / self.span
         if not all(math.isfinite(value) for value in (u, v)):
             raise ValueError('world overlay coordinates must be finite')
-        if not allow_outside and not (0.0 <= u <= 1.0 and 0.0 <= v <= 1.0):
+        if not allow_outside and (self._three_dimensional or not self._pixel_area_grid) and not (0.0 <= u <= 1.0 and 0.0 <= v <= 1.0):
             raise ValueError('world overlay anchor is outside the terrain footprint')
         return u, v
 
     def height(self, uv):
-        x, y = uv[0] * (self.heightmap.shape[1] - 1), uv[1] * (self.heightmap.shape[0] - 1)
+        if self._pixel_area_grid:
+            x = np.clip(uv[0] * self.heightmap.shape[1] - .5, 0, self.heightmap.shape[1]-1)
+            y = np.clip(uv[1] * self.heightmap.shape[0] - .5, 0, self.heightmap.shape[0]-1)
+        else:
+            x, y = uv[0] * (self.heightmap.shape[1] - 1), uv[1] * (self.heightmap.shape[0] - 1)
         x0, y0 = int(x), int(y)
         x1, y1 = min(x0 + 1, self.heightmap.shape[1] - 1), min(y0 + 1, self.heightmap.shape[0] - 1)
         tx, ty = x - x0, y - y0
@@ -129,6 +145,9 @@ class TerrainProjector:
 
     def project(self, point, *, viewport=None, allow_outside=False):
         uv = self.uv(point, allow_outside=allow_outside)
+        if not self._three_dimensional and self._pixel_area_grid:
+            return TerrainPixel((uv[0]*self.recipe.output.width,
+                                 uv[1]*self.recipe.output.height, 0.0))
         inside = 0.0 <= uv[0] <= 1.0 and 0.0 <= uv[1] <= 1.0
         if not inside and len(point) < 3:
             raise ValueError('points outside the terrain footprint require absolute elevation')
@@ -147,6 +166,8 @@ class TerrainProjector:
         return TerrainPixel((value[0] * sx, value[1] * sy, value[2]))
 
     def world_path(self, points):
+        if not self._three_dimensional and self._pixel_area_grid:
+            return [list(point) for point in points]
         result = []
         for start, end in zip(points, points[1:]):
             uv_a, uv_b = self.uv(start), self.uv(end)
@@ -221,6 +242,11 @@ class TerrainProjector:
 
 
 
+def _world_space_vector(layer):
+    metadata = layer.metadata or {}
+    return metadata.get("coordinate_space") == "world" or bool(metadata.get("preparation_grid"))
+
+
 def project_vector_recipe(recipe, *, projector=None):
     from . import map_scene as ms
     def ground(coordinates):
@@ -228,17 +254,26 @@ def project_vector_recipe(recipe, *, projector=None):
             return all(ground(part) for part in coordinates)
         return len(coordinates) == 2
     screen_grid = ms._registered_screen_grid(recipe)
-    if screen_grid is None and not ms._is_3d_camera_mode(ms._mapscene_effective_camera_mode(recipe)):
+    three_dimensional = ms._is_3d_camera_mode(ms._mapscene_effective_camera_mode(recipe))
+    if screen_grid is None and not three_dimensional and not any(
+        isinstance(layer, ms.VectorOverlay)
+        and (layer.metadata or {}).get('material_presentation') == 'protected feature paint'
+        for layer in recipe.layers
+    ):
         return recipe
     projected = copy.copy(recipe)
     layers = []
     for layer in recipe.layers:
+        from ._map_scene_materials import physical_vector
+        if isinstance(layer, ms.VectorOverlay) and physical_vector(layer):
+            continue
         if not isinstance(layer, ms.VectorOverlay):
             layers.append(layer)
             continue
         metadata = layer.metadata or {}
-        if screen_grid is not None and (metadata.get("coordinate_space") != "world"
-                                        and not metadata.get("preparation_grid")):
+        protected = metadata.get('material_presentation') == 'protected feature paint'
+        registered_world = screen_grid is not None and _world_space_vector(layer)
+        if not (three_dimensional or protected or registered_world):
             layers.append(layer)
             continue
         try:
@@ -346,7 +381,146 @@ def project_vector_recipe(recipe, *, projector=None):
     return projected
 
 
-def composite_projected_vectors(base, projected_recipe, recipe):
+def material_style(recipe):
+    from .terrain_materials import TerrainMaterialStyle
+    from .geospatial_materials import MaterialRasterStyle
+    from .map_scene import RasterOverlay
+    return (recipe.terrain.style if isinstance(recipe.terrain.style, TerrainMaterialStyle) else
+            next((layer.style for layer in recipe.layers if isinstance(layer, RasterOverlay)
+                  and isinstance(layer.style, (TerrainMaterialStyle, MaterialRasterStyle))), None))
+
+
+def needs_frame_visibility(recipe):
+    from . import map_scene as ms
+    style = material_style(recipe)
+    return bool((style is not None and style.recipe.presentation == 'protected') or
+                any(hasattr(getattr(layer, 'style', None), 'recipe') and
+                    layer.style.recipe.presentation == 'protected' for layer in recipe.layers) or
+                any(isinstance(layer, ms.BuildingLayer) and
+                    (layer.metadata or {}).get('material_presentation') == 'protected building swatches'
+                    for layer in recipe.layers) or
+                any(isinstance(layer, ms.VectorOverlay) and
+                    (layer.metadata or {}).get('material_presentation') == 'protected feature paint'
+                    for layer in recipe.layers) or
+                (not ms._mapscene_native_effects(recipe) and
+                 ms._is_3d_camera_mode(ms._mapscene_effective_camera_mode(recipe)) and
+                 any(isinstance(layer, ms.VectorOverlay) for layer in recipe.layers)))
+
+
+def needs_building_identity(recipe):
+    from . import map_scene as ms
+    buildings = [layer for layer in recipe.layers if isinstance(layer, ms.BuildingLayer)]
+    return any((layer.metadata or {}).get('material_presentation') == 'protected building swatches'
+               for layer in buildings) or bool(buildings and needs_frame_visibility(recipe) and
+               not ms._is_3d_camera_mode(ms._mapscene_effective_camera_mode(recipe)))
+
+
+def composite_protected_buildings(base, aov_frame, metadata, *, paint_mask):
+    """Integer batch IDs are co-written by the winning beauty fragments."""
+    swatches = metadata.get('building_protected_swatches')
+    if not swatches:
+        return base
+    ids = np.asarray(aov_frame._building_ids())
+    if ids.dtype != np.uint32 or ids.ndim != 2 or np.any(ids > metadata['building_batch_count']):
+        raise RuntimeError('native building identities violate the scatter batch contract')
+    if ids.shape != base.shape[:2]:
+        from .map_scene import _resize_nearest_array
+        ids = _resize_nearest_array(ids, base.shape[:2])
+    for identity, rgba in swatches.items():
+        visible = ids == int(identity)
+        base[visible] = rgba
+        paint_mask[visible] = True
+    return base
+
+
+def frame_visibility(recipe, aov_frame):
+    """Identify terrain from identical 32-bit depths in the actual beauty draw.
+
+    The ordinary 3D path uses strict Less, so terrain wins exact depth ties.
+    Shared frames use the G-buffer's winning surface. Sky clears to one.
+    Unprojection recovers the native raster's pixel-centre UV.
+    """
+    if aov_frame is None or not callable(getattr(aov_frame, '_visibility_depth', None)):
+        raise RuntimeError('same-frame native visibility is unavailable; rebuild the bindings')
+    terrain_depth, scene_depth = aov_frame._visibility_depth()
+    expected = (recipe.output.height, recipe.output.width)
+    if terrain_depth.ndim != 2 or terrain_depth.shape != scene_depth.shape:
+        raise ValueError('native terrain and scene visibility must share one 2D viewport')
+    if not (np.isfinite(terrain_depth).all() and np.isfinite(scene_depth).all() and
+            np.all((scene_depth >= 0) & (scene_depth <= terrain_depth) & (terrain_depth <= 1))):
+        raise RuntimeError('native visibility depths violate the scene depth contract')
+    terrain = (terrain_depth < 1) & (scene_depth == terrain_depth)
+    surface_kind = getattr(aov_frame, '_interactive_surface_kind', lambda: None)()
+    if surface_kind is not None:
+        # The shared scatter pass can take ownership at equal device depth.
+        if surface_kind.dtype != np.uint8 or surface_kind.shape != terrain.shape:
+            raise RuntimeError('native surface ownership must share the beauty depth viewport')
+        terrain &= surface_kind == 1
+    from . import map_scene as ms
+    if needs_building_identity(recipe):
+        identities = np.asarray(aov_frame._building_ids())
+        if identities.dtype != np.uint32 or identities.shape != terrain.shape:
+            raise RuntimeError('native building identity must share the beauty depth viewport')
+        terrain &= identities == 0
+    if ms._is_3d_camera_mode(ms._mapscene_effective_camera_mode(recipe)):
+        uv = TerrainProjector(recipe).params.unproject_terrain_depth(terrain_depth)
+    else:
+        # Native fullscreen raster cells reconstruct row-zero-north UVs from
+        # their fixed XY quad. Perspective depth unprojection is inapplicable.
+        yy, xx = np.mgrid[:terrain.shape[0], :terrain.shape[1]]
+        uv = np.stack(((xx+.5)/terrain.shape[1], (yy+.5)/terrain.shape[0]), axis=-1).astype(np.float32)
+    # Match the terrain texture's ClampToEdge address mode at its outer edge;
+    # inversion of float32 raster depth can place an edge infinitesimally outside.
+    uv[terrain] = np.clip(uv[terrain], 0, 1)
+    uv[~terrain] = np.nan
+    if terrain_depth.shape != expected:
+        # The native parameter contract requires at least 64x64. MapScene's
+        # existing nearest resize also owns the retained visibility samples.
+        from .map_scene import _resize_nearest_array
+        scene_depth = _resize_nearest_array(scene_depth, expected)
+        uv = _resize_nearest_array(uv, expected)
+        terrain = _resize_nearest_array(terrain, expected)
+    return scene_depth, uv, terrain
+
+
+def composite_protected_material(base, recipe, visibility, *, paint_mask=None):
+    """Exact categorical paint; class membership is the pixel-centre cell, never blended."""
+    style = material_style(recipe)
+    protected_rasters = [layer for layer in recipe.layers if
+        hasattr(getattr(layer, 'style', None), 'recipe') and
+        layer.style.recipe.presentation == 'protected' and hasattr(layer, 'layer_id')]
+    protected_ids = {id(layer) for layer in protected_rasters}
+    if (style is None or style.recipe.presentation != 'protected') and not protected_rasters:
+        return base
+    from . import map_scene as ms
+    from .raster_style import CategoricalRasterStyle
+    palettes = []
+    if style is not None and style is recipe.terrain.style and style.recipe.presentation == 'protected' and style.recipe.categorical is not None:
+        from .terrain_materials import _material_classes
+        palettes.append(style.recipe.categorical.apply(_material_classes(np.asarray(style.classes), style.recipe.categorical)))
+    palettes.extend(ms._styled_raster_result(layer) for layer in recipe.layers
+                    if isinstance(layer, ms.RasterOverlay) and
+                    (id(layer) in protected_ids or
+                     (style is not None and style.recipe.presentation == 'protected' and
+                      isinstance(layer.style, CategoricalRasterStyle))))
+    uv, terrain = visibility[1:]
+    # Invalid UVs are excluded before indexing; floor defines the boundary rule.
+    yy, xx = np.nonzero(terrain & np.isfinite(uv).all(axis=-1) &
+                        (uv[..., 0] >= 0) & (uv[..., 0] <= 1) &
+                        (uv[..., 1] >= 0) & (uv[..., 1] <= 1))
+    for palette in palettes:
+        height, width = palette.valid_mask.shape
+        thematic = ms._mapscene_thematic_surface(recipe, palette.valid_mask.shape)
+        col = np.minimum((uv[yy, xx, 0] * width).astype(np.intp), width - 1)
+        row = np.minimum((uv[yy, xx, 1] * height).astype(np.intp), height - 1)
+        valid = palette.valid_mask[row, col] & thematic.valid_mask[row, col]
+        base[yy[valid], xx[valid]] = palette.rgba[row[valid], col[valid]]
+        if paint_mask is not None:
+            paint_mask[yy[valid], xx[valid]] = True
+    return base
+
+
+def composite_projected_vectors(base, projected_recipe, recipe, *, visibility, paint_mask=None):
     """Depth-test both vector compositors before any changed pixel is retained.
 
     Strokes interpolate their projected device depth. Polygon fills use the
@@ -358,34 +532,74 @@ def composite_projected_vectors(base, projected_recipe, recipe):
     layers = [layer for layer in projected_recipe.layers if isinstance(layer, ms.VectorOverlay)]
     if not layers:
         return base, False
-    projector = TerrainProjector(recipe)
+    three_dimensional = ms._is_3d_camera_mode(ms._mapscene_effective_camera_mode(recipe))
+    registered_screen = ms._registered_screen_grid(recipe) is not None
     height, width = base.shape[:2]
     # Depth and UV remain covered by the ledger for the compositor's lifetime.
     reservation = get_native_module()._reserve_label_depth_host_allocation(
         width * height * (4 + 8), 'mapscene.vector_visibility')
     try:
-        depth = projector.depth_image()
-        surface_uv = None
+        registered_projector = registered_depth = registered_uv = None
         composited = False
         for layer in layers:
+            exact = (layer.metadata or {}).get('material_presentation') == 'protected feature paint'
+            registered_world = registered_screen and _world_space_vector(layer)
+            if not (exact or three_dimensional or registered_world):
+                one_recipe = copy.copy(projected_recipe)
+                one_recipe.layers = (layer,)
+                base, drawn = ms._composite_native_vector_layers(base, one_recipe)
+                composited |= drawn
+                continue
+            if registered_world and not exact:
+                # Registered orthographic overlays keep the terrain projection
+                # depth used by ordinary vectors on this route.
+                if registered_projector is None:
+                    registered_projector = TerrainProjector(recipe)
+                    registered_depth = registered_projector.depth_image()
+                depth, surface_uv = registered_depth, registered_uv
+            else:
+                depth, surface_uv, terrain = visibility
             for feature in layer.features or ():
+                geometry = feature['geometry']
+                kind, coords = geometry['type'], geometry['coordinates']
+                if exact and kind in ('Polygon', 'MultiPolygon') and (
+                        feature.get('_terrain_fill_only') or
+                        not (layer.metadata or {}).get('material_polygon_outline', True)):
+                    # A categorical footprint owns visible terrain UV centres;
+                    # it needs neither screen-space triangulation nor AA paint.
+                    yy, xx = np.nonzero(terrain & np.isfinite(surface_uv).all(axis=-1))
+                    uv = surface_uv[yy, xx]
+                    polygons = (feature.get('_terrain_polygons_uv') if kind == 'MultiPolygon'
+                                else [feature['_terrain_rings_uv']])
+                    visible = np.zeros(len(xx), bool)
+                    for rings in polygons:
+                        inside = _ring_contains(rings[0], uv[:, 0], uv[:, 1])
+                        for ring in rings[1:]:
+                            inside &= ~_ring_contains(ring, uv[:, 0], uv[:, 1])
+                        visible |= inside
+                    base[yy[visible], xx[visible]] = feature['properties']['forge3d:material']['rgba']
+                    if paint_mask is not None:
+                        paint_mask[yy[visible], xx[visible]] = True
+                    composited = True
+                    continue
                 one_layer = copy.copy(layer)
                 one_layer.features = (feature,)
                 one_recipe = copy.copy(projected_recipe)
                 one_recipe.layers = (one_layer,)
-                painted, drawn = ms._composite_native_vector_layers(base, one_recipe)
+                painted, drawn = ms._composite_native_vector_layers(np.zeros_like(base) if exact else base, one_recipe)
                 if not drawn:
                     return base, False
                 composited = True
-                yy, xx = np.nonzero(np.any(painted != base, axis=2))
+                yy, xx = np.nonzero(painted[..., 3] >= 128 if exact else np.any(painted != base, axis=2))
                 if not len(xx):
                     continue
-                geometry = feature['geometry']
-                kind, coords = geometry['type'], geometry['coordinates']
                 visible = np.zeros(len(xx), dtype=bool)
                 if kind in ('Polygon', 'MultiPolygon'):
                     if surface_uv is None:
-                        surface_uv = projector.params.unproject_terrain_depth(depth, shared_frame=projector.shared_frame)
+                        registered_uv = registered_projector.params.unproject_terrain_depth(
+                            depth, shared_frame=registered_projector.shared_frame,
+                        )
+                        surface_uv = registered_uv
                     uv = surface_uv[yy, xx]
                     polygons = (feature.get('_terrain_polygons_uv') if kind == 'MultiPolygon'
                                 else [feature['_terrain_rings_uv']])
@@ -423,8 +637,15 @@ def composite_projected_vectors(base, projected_recipe, recipe):
                         visible |= stroke_visible & (distance <= (line_width * 0.5)**2)
                 else:
                     visible = stroke_visible
-                painted[yy[~visible], xx[~visible]] = base[yy[~visible], xx[~visible]]
-                base = painted
+                if exact and not three_dimensional:
+                    visible &= terrain[yy, xx]
+                if exact:
+                    base[yy[visible], xx[visible]] = feature['properties']['forge3d:material']['rgba']
+                    if paint_mask is not None:
+                        paint_mask[yy[visible], xx[visible]] = True
+                else:
+                    painted[yy[~visible], xx[~visible]] = base[yy[~visible], xx[~visible]]
+                    base = painted
         return base, composited
     finally:
         reservation.close()

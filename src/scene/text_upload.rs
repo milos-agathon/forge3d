@@ -10,7 +10,13 @@ pub(super) fn upload_atlas(
     atlas: &pyo3::types::PyAny,
     channels: Option<u32>,
     smoothing: Option<f32>,
+    px_range: f32,
 ) -> PyResult<()> {
+    if !px_range.is_finite() || px_range <= 0.0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "atlas px_range must be finite and positive",
+        ));
+    }
     let _allocation_scope = allocation_owner.activate();
     let (h, w, c, data) = if let Ok(arr) = atlas.extract::<PyReadonlyArray3<u8>>() {
         let shape = arr.shape();
@@ -33,6 +39,11 @@ pub(super) fn upload_atlas(
             "Expected numpy uint8 array HxWxC",
         ));
     };
+    if channels == Some(4) && c != 4 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "channels=4 requires RGBA MSDF data with the scalar SDF in alpha",
+        ));
+    }
     let g = crate::core::gpu::try_ctx()?;
     // Convert to RGBA8
     let mut rgba: Vec<u8> = Vec::with_capacity((h * w * 4) as usize);
@@ -105,6 +116,7 @@ pub(super) fn upload_atlas(
     // Update text overlay renderer state
     if let Some(tr) = renderer {
         tr.set_atlas(tex, view);
+        tr.set_distance_range(px_range);
         tr.recreate_bind_group(&g.device, None)?;
         if let Some(ch) = channels {
             tr.set_channels(ch);

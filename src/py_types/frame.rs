@@ -4,6 +4,7 @@ use super::super::*;
 #[pyclass(module = "forge3d._forge3d", name = "Frame")]
 pub struct Frame {
     readback_counter: Option<Arc<std::sync::atomic::AtomicUsize>>,
+    interactive_exports: Option<Box<(Option<crate::HdrFrame>, Option<crate::AovFrame>)>>,
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
     texture: Arc<crate::core::resource_tracker::TrackedTexture>,
@@ -23,6 +24,7 @@ impl Frame {
     ) -> Self {
         Self {
             readback_counter: None,
+            interactive_exports: None,
             device,
             queue,
             texture: texture.into(),
@@ -37,6 +39,17 @@ impl Frame {
         counter: Arc<std::sync::atomic::AtomicUsize>,
     ) -> Self {
         self.readback_counter = Some(counter);
+        self
+    }
+
+    pub(crate) fn with_interactive_exports(
+        mut self,
+        hdr: Option<crate::HdrFrame>,
+        visibility: Option<crate::AovFrame>,
+    ) -> Self {
+        if hdr.is_some() || visibility.is_some() {
+            self.interactive_exports = Some(Box::new((hdr, visibility)));
+        }
         self
     }
 
@@ -133,6 +146,10 @@ impl Frame {
         Err(PyRuntimeError::new_err(
             "Frame objects are constructed internally by forge3d",
         ))
+    }
+
+    fn _take_interactive_exports(&mut self) -> (Option<crate::HdrFrame>, Option<crate::AovFrame>) {
+        self.interactive_exports.take().map(|exports| *exports).unwrap_or_default()
     }
 
     #[getter]

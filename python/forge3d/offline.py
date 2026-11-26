@@ -87,6 +87,7 @@ def render_offline(
     water_mask: Optional[np.ndarray] = None,
     certificate: "bool | str | Any" = False,
     cache: "str | Any | None" = None,
+    _denoise_terrain_mask: Optional[np.ndarray] = None,
 ) -> OfflineResult:
     """Render terrain through the TV12 offline accumulation pipeline.
 
@@ -123,9 +124,10 @@ def render_offline(
             settings=settings,
             progress_callback=progress_callback,
             water_mask=water_mask,
+            _denoise_terrain_mask=_denoise_terrain_mask,
         )
     if certificate:
-        sha = _certificate.emit_render_certificate(certificate)
+        sha = _certificate._emit_current_render_certificate(certificate)
         if sha is not None:
             result.metadata["certificate_payload_sha256"] = sha
     return result
@@ -148,10 +150,12 @@ class _OfflineRenderSession:
         heightmap: np.ndarray,
         settings: OfflineQualitySettings,
         water_mask: Optional[np.ndarray],
+        denoise_terrain_mask: Optional[np.ndarray] = None,
     ) -> None:
         self.renderer = renderer
         self.params = params
         self.settings = settings
+        self.denoise_terrain_mask = denoise_terrain_mask
         self.target_samples = max(
             int(settings.max_samples if settings.adaptive else params.aa_samples), 1
         )
@@ -269,6 +273,15 @@ class _OfflineRenderSession:
                     np.asarray(aov_frame.normal(), dtype=np.float32),
                     beauty_hdr.shape,
                 )
+                passthrough = None
+                if self.denoise_terrain_mask is not None:
+                    valid = np.asarray(self.denoise_terrain_mask)
+                    if valid.dtype != np.bool_ or valid.shape != beauty_hdr.shape[:2]:
+                        raise ValueError("denoise terrain guidance must be an aligned boolean pixel mask")
+                    passthrough = ~valid
+                    original_unguided = beauty_hdr[passthrough].copy()
+                    normal_np = normal_np.copy()
+                    normal_np[passthrough] = 0
 
                 if method == "oidn":
                     if oidn_available():
@@ -299,6 +312,8 @@ class _OfflineRenderSession:
                     denoiser_used = "atrous"
 
                 if denoiser_used != "none":
+                    if passthrough is not None:
+                        beauty_hdr[passthrough] = original_unguided
                     hdr_frame = renderer.upload_hdr_frame(beauty_hdr, hdr_frame.size)
 
         frame = renderer.tonemap_offline_hdr(hdr_frame)
@@ -311,12 +326,65 @@ class _OfflineRenderSession:
             "target_samples": target_samples,
             "adaptive": bool(settings.adaptive),
         }
+        if self.denoise_terrain_mask is not None:
+            # Native scatter denoising uses jittered single-sample passes.
+            metadata["offline_requested_msaa_samples"] = getattr(_params_python_object(params), "msaa_samples", 1)
+            metadata["offline_effective_msaa_samples"] = 1
+            metadata["denoiser_guide_coverage"] = 'terrain normals; accumulated scatter, sky and their sample-footprint terrain margins pass through without filtering'
         return OfflineResult(
             frame=frame,
             hdr_frame=hdr_frame,
             aov_frame=aov_frame,
             metadata=metadata,
         )
+
+
+def _visibility_reference_params(params):
+    """Keep visibility at unjittered output pixel centres, independent of beauty sampling."""
+    from dataclasses import replace
+    from . import TerrainRenderParams
+
+    config = _params_python_object(params)
+    return TerrainRenderParams(replace(
+        config, msaa_samples=1, render_scale=1.0,
+        aov=replace(config.aov, enabled=True, building_id=True),
+    ))
+
+
+def _scatter_terrain_reference(renderer, material_set, env_maps, params, heightmap, water_mask):
+    """Terrain guide coverage, excluding every actually drawn scatter fragment.
+
+    3D scatter owns scene depth. Fullscreen scatter deliberately uses Always
+    without depth writes; its existing native identity attachment owns coverage.
+    """
+    config = _params_python_object(params)
+    reference_params = _visibility_reference_params(params)
+    _, reference = renderer.render_with_aov(
+        material_set=material_set, env_maps=env_maps, params=reference_params,
+        heightmap=heightmap, water_mask=water_mask,
+    )
+    terrain_depth, scene_depth = reference._visibility_depth()
+    terrain = (terrain_depth < 1) & (terrain_depth == scene_depth)
+    identities = np.asarray(reference._building_ids())
+    if identities.dtype != np.uint32 or identities.shape != terrain.shape:
+        raise RuntimeError("native scatter identity must share the denoise guide viewport")
+    terrain &= identities == 0
+    # Native jitter reaches half an internal pixel; a linear frame resolve
+    # adds one internal pixel of support. At scale .5 the measured footprint
+    # is three output pixels. Scale 1 bypasses that resolve and needs one.
+    # Frame blits clamp at edges; material texture addressing remains separate.
+    # Undefined sky guides share the same conservative exclusion.
+    from math import ceil
+    scale = float(config.render_scale)
+    radius = 1 if scale == 1.0 else max(1, ceil(1.5 / scale))
+    excluded = ~terrain
+    height, width = terrain.shape
+    for _ in range(radius):
+        padded = np.pad(excluded, 1, mode="constant", constant_values=False)
+        excluded = np.logical_or.reduce([
+            padded[y:y+height, x:x+width] for y in range(3) for x in range(3)
+        ])
+    return ~excluded, reference
 
 
 def _render_offline_impl(
@@ -329,12 +397,23 @@ def _render_offline_impl(
     settings: OfflineQualitySettings,
     progress_callback: Optional[Callable[[OfflineProgress], None]] = None,
     water_mask: Optional[np.ndarray] = None,
+    _denoise_terrain_mask: Optional[np.ndarray] = None,
 ) -> OfflineResult:
     if not settings.enabled:
         raise ValueError("render_offline requires OfflineQualitySettings(enabled=True)")
 
+    denoise = getattr(_params_python_object(params), "denoise", None)
+    scatter_report = getattr(renderer, "get_scatter_memory_report", None)
+    if (_denoise_terrain_mask is None and denoise is not None and denoise.enabled
+            and str(denoise.method).lower() != "none" and callable(scatter_report)
+            and scatter_report()["batch_count"] > 0):
+        _denoise_terrain_mask, _ = _scatter_terrain_reference(
+            renderer, material_set, env_maps, params, heightmap, water_mask,
+        )
+
     with _OfflineRenderSession(
-        renderer, material_set, env_maps, params, heightmap, settings, water_mask
+        renderer, material_set, env_maps, params, heightmap, settings, water_mask,
+        _denoise_terrain_mask,
     ) as session:
         return session.run(progress_callback)
 

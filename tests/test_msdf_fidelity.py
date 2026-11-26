@@ -10,6 +10,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 import forge3d
 from tests._ssim import ssim
+from tests._littera_coverage import hausdorff as _iso_hausdorff, union_render
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,17 +21,20 @@ PACKAGED_ATLAS = ROOT / "python" / "forge3d" / "data" / "fonts"
 def _bake(
     size: int, character: str = "A"
 ) -> tuple[dict, np.ndarray, np.ndarray, np.ndarray]:
+    bake_size = 96 if size == 12 else size
+    px_range = 32.0 if size == 12 else 4.0
     baked = forge3d.text.bake_msdf_atlas(
-        [str(FONT)], character, size, px_range=4.0, padding=2
+        [str(FONT)], character, bake_size, px_range=px_range, padding=2, channels=4
     )
+    scale = size / bake_size
     image = baked["image"]
     glyph = baked["metrics"]["glyphs"][str(ord(character))]
     shaped = forge3d.text.shape(character, [str(FONT)], float(size))
     analytic = forge3d.text.rasterize_shaped_run(
         shaped,
-        int(glyph["w"]),
-        int(glyph["h"]),
-        origin=(-float(glyph["ox"]), -float(glyph["oy"])),
+        int(np.ceil(glyph["w"] * scale)),
+        int(np.ceil(glyph["h"] * scale)),
+        origin=(-float(glyph["ox"]) * scale, -float(glyph["oy"]) * scale),
     )
     cell = image[
         int(glyph["y"]) : int(glyph["y"] + glyph["h"]),
@@ -48,8 +52,13 @@ def _smoothstep(low: np.ndarray, high: np.ndarray, value: np.ndarray) -> np.ndar
     return t * t * (3.0 - 2.0 * t)
 
 
-def _renderer_coverage(field: np.ndarray, *, channels: int) -> np.ndarray:
-    """Mirror text_overlay.wgsl using 2x2 fragment-quad derivatives."""
+def _renderer_coverage(field: np.ndarray, *, channels: int, bake_to_render: float = 1.0, px_range: float = 8.0) -> np.ndarray:
+    """Mirror the shader's atlas-local MSDF and legacy scalar coverage."""
+    if channels == 4:
+        height, width = field.shape[:2]
+        rect = (0, 0, width/bake_to_render, height/bake_to_render, 0, 0, 1, 1,
+                1, 1, 1, 1, 0, 0, 0, 0, 0, 0)
+        return union_render(field, [rect], int(np.ceil(width/bake_to_render)), int(np.ceil(height/bake_to_render)), px_range=px_range)[0]
     normalized = field.astype(np.float32) / 255.0
     encoded = np.median(normalized, axis=2) if channels == 3 else normalized
     signed = encoded - 0.5
@@ -76,7 +85,7 @@ def _renderer_coverage(field: np.ndarray, *, channels: int) -> np.ndarray:
 
 
 def _distance_coverage(field: np.ndarray, px_range: float) -> np.ndarray:
-    encoded = np.median(field.astype(np.float32) / 255.0, axis=2)
+    encoded = np.median(field[..., :3].astype(np.float32) / 255.0, axis=2)
     return np.clip((encoded - 0.5) * px_range + 0.5, 0.0, 1.0)
 
 
@@ -152,26 +161,13 @@ def _render_upscaled_fields() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return sampled_msdf, sampled_sdf, analytic
 
 
-def _boundary(mask: np.ndarray) -> np.ndarray:
-    binary = mask >= 0.5
-    edge = np.zeros_like(binary)
-    edge[1:] |= binary[1:] != binary[:-1]
-    edge[:-1] |= binary[:-1] != binary[1:]
-    edge[:, 1:] |= binary[:, 1:] != binary[:, :-1]
-    edge[:, :-1] |= binary[:, :-1] != binary[:, 1:]
-    return np.argwhere(edge)
-
-
 def _hausdorff(left: np.ndarray, right: np.ndarray) -> float:
-    a = _boundary(left)
-    b = _boundary(right)
-    distances = np.sqrt(((a[:, None, :] - b[None, :, :]) ** 2).sum(axis=2))
-    return float(max(distances.min(axis=1).max(), distances.min(axis=0).max()))
+    return _iso_hausdorff(left, right)
 
 
 def test_true_rgb_msdf_meets_12px_analytic_fidelity():
     baked, cell, _, analytic = _bake(12)
-    decoded = _renderer_coverage(cell, channels=3)
+    decoded = _renderer_coverage(cell, channels=4, bake_to_render=8.0, px_range=baked["metrics"]["px_range"])
     intersection = np.count_nonzero((decoded >= 0.5) & (analytic >= 0.5))
     union = np.count_nonzero((decoded >= 0.5) | (analytic >= 0.5))
     iou = intersection / union
@@ -185,7 +181,7 @@ def test_true_rgb_msdf_meets_12px_analytic_fidelity():
     assert iou >= 0.995
     assert hausdorff <= 0.5
     assert mean_error <= 0.02
-    assert baked["image"].shape[2] == 3
+    assert baked["image"].shape[2] == 4
     assert np.any(baked["image"][..., 0] != baked["image"][..., 1])
     assert np.any(baked["image"][..., 1] != baked["image"][..., 2])
 
@@ -277,28 +273,6 @@ def test_text_overlay_shader_keeps_msdf_decode_and_derivative_smoothing():
     assert "smoothstep(-edge_width, edge_width, sdf)" in shader
 
 
-def test_single_channel_ablation_loses_the_sharp_corner():
-    msdf_cell, sdf_cell, analytic = _render_upscaled_fields()
-    msdf_coverage = _renderer_coverage(msdf_cell, channels=3)
-    sdf_coverage = _renderer_coverage(sdf_cell, channels=1)
-    msdf_distance = _hausdorff(msdf_coverage, analytic)
-    sdf_distance = _hausdorff(sdf_coverage, analytic)
-    msdf_similarity = ssim(msdf_coverage, analytic, data_range=1.0)
-    sdf_similarity = ssim(sdf_coverage, analytic, data_range=1.0)
-    msdf_error = float(np.mean(np.abs(msdf_coverage - analytic)))
-    sdf_error = float(np.mean(np.abs(sdf_coverage - analytic)))
-
-    print(
-        f"MSDF Hausdorff={msdf_distance:.6f}px "
-        f"independent SDF Hausdorff={sdf_distance:.6f}px "
-        f"SSIM={msdf_similarity:.6f}/{sdf_similarity:.6f}"
-    )
-    assert msdf_distance <= sdf_distance
-    assert sdf_distance > 0.5
-    assert msdf_similarity > sdf_similarity + 0.005
-    assert msdf_error < sdf_error
-
-
 def test_bake_metadata_is_typed_deterministic_and_measured():
     first, _, first_sdf, _ = _bake(12)
     second, _, second_sdf, _ = _bake(12)
@@ -307,7 +281,8 @@ def test_bake_metadata_is_typed_deterministic_and_measured():
     assert first["image"].tobytes() == second["image"].tobytes()
     assert first_sdf.dtype == np.uint8
     assert first_sdf.tobytes() == second_sdf.tobytes()
-    assert first["metrics"]["channels"] == 3
+    assert first["metrics"]["channels"] == 4
+    np.testing.assert_array_equal(first["image"][...,3],first_sdf)
     assert first["metrics"]["kind"] == "msdf_font_atlas"
     assert first["metrics"]["byte_count"] == first["image"].nbytes
     assert first["metrics"]["sdf_byte_count"] == first["sdf_image"].nbytes
@@ -392,3 +367,94 @@ def test_live_gpu_shader_readback_matches_independent_quad_oracle():
     assert np.mean(np.abs(gpu - expected)) <= 0.015
     assert np.max(np.abs(gpu - expected)) <= 0.50
     assert _hausdorff(gpu, expected) <= 0.5
+
+
+def test_msdf_range_is_independent_of_glyph_identity_and_batch():
+    for characters in ("A", "V", "AV"):
+        baked = forge3d.text.bake_msdf_atlas([str(FONT)], characters, 96, px_range=4.0, padding=2)
+        assert baked["metrics"]["px_range"] == 4.0
+
+
+def _physical_coverage(baked, field, size, character="A"):
+    np.testing.assert_array_equal(baked["image"][...,3],baked["sdf_image"])
+    glyph = baked["metrics"]["glyphs"][str(ord(character))]
+    scale = size / baked["metrics"]["font_size"]
+    w,h = glyph["w"]*scale,glyph["h"]*scale
+    width,height = int(np.ceil(w)),int(np.ceil(h))
+    scene = forge3d.Scene(width+24,height+24)
+    scene.disable_terrain()
+    background = np.zeros((height+24,width+24,4),dtype=np.uint8)
+    background[...,3] = 255
+    scene.set_raster_overlay(background,1.0,None,None)
+    scene.set_native_text_atlas(field,4,1.0,px_range=baked["metrics"]["px_range"])
+    scene.enable_native_text()
+    scene.begin_native_text_label()
+    ah,aw = field.shape[:2]
+    scene.add_native_text_rect_uv(12,12,w,h,glyph["x"]/aw,glyph["y"]/ah,
+        (glyph["x"]+glyph["w"])/aw,(glyph["y"]+glyph["h"])/ah,1,0,0,1)
+    pixels = np.asarray(scene.render_rgba())[12:12+height,12:12+width,0].astype(np.float32)/255.0
+    assert not [d for d in forge3d._forge3d.native_degradations()
+                if d["kind"] in {"uncaptured_gpu_error", "validation_error"}]
+    probe = forge3d._forge3d.device_probe(None)
+    assert probe["status"] == "ok" and not probe["software_fallback"]
+    assert probe["device_type"] in {"DiscreteGpu", "IntegratedGpu"}
+    return pixels,probe
+
+
+@pytest.mark.parametrize("size", [12,96])
+def test_physical_gpu_msdf_outline_fidelity(size):
+    baked,_,_,analytic = _bake(size)
+    gpu,probe = _physical_coverage(baked,baked["image"],size)
+    if size == 12:
+        a,b=gpu>=0.5,analytic>=0.5
+        iou=np.count_nonzero(a&b)/np.count_nonzero(a|b)
+        distance=_hausdorff(gpu,analytic)
+        print(f"physical 12px (96px bake range32) IoU={iou:.9f} iso-Hausdorff={distance:.9f}px adapter={probe}")
+        assert iou >= 0.995 and distance <= 0.5
+    else:
+        similarity=ssim(gpu,analytic,data_range=1.0)
+        print(f"physical 96px SSIM={similarity:.9f} adapter={probe}")
+        assert similarity >= 0.999
+
+
+def _magnified_bake(character):
+    baked, cell, sdf_cell, _ = _bake(24, character)
+    glyph = baked["metrics"]["glyphs"][str(ord(character))]
+    shaped = forge3d.text.shape(character, [str(FONT)], 96.0)
+    analytic = forge3d.text.rasterize_shaped_run(
+        shaped, int(glyph["w"] * 4), int(glyph["h"] * 4),
+        origin=(-float(glyph["ox"]) * 4, -float(glyph["oy"]) * 4),
+    )
+    scalar = cell.copy()
+    scalar[..., :3] = sdf_cell[..., None]
+    return baked, cell, scalar, analytic
+
+
+@pytest.mark.parametrize("character", ["V", "A"])
+def test_single_channel_ablation_loses_the_sharp_corner(character):
+    # Owner round-3 decision: ablate at 24px bake / 96px display. Deliberate
+    # departure from the spec's same-setup wording; 12px fidelity is separate.
+    baked, cell, scalar, analytic = _magnified_bake(character)
+    errors = [_iso_hausdorff(
+        _renderer_coverage(field, channels=4, bake_to_render=0.25,
+                           px_range=baked["metrics"]["px_range"]), analytic)
+        for field in (cell, scalar)]
+    print(f"CPU 24px bake/96px display {character}: MSDF={errors[0]:.9f}px SDF={errors[1]:.9f}px")
+    assert errors[0] < errors[1]
+    if character == "V":
+        assert errors[0] <= 0.5 < errors[1]
+
+
+@pytest.mark.parametrize("character", ["V", "A"])
+def test_physical_magnified_msdf_sharp_corner_ablation(character):
+    baked, _, _, analytic = _magnified_bake(character)
+    fields = [baked["image"], baked["image"].copy()]
+    fields[1][..., :3] = baked["sdf_image"][..., None]
+    errors = []
+    for field in fields:
+        coverage, probe = _physical_coverage(baked, field, 96, character)
+        errors.append(_iso_hausdorff(coverage, analytic))
+    print(f"physical 24px bake/96px display {character}: MSDF={errors[0]:.9f}px SDF={errors[1]:.9f}px adapter={probe}")
+    assert errors[0] < errors[1]
+    if character == "V":
+        assert errors[0] <= 0.5 < errors[1]

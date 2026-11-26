@@ -12,7 +12,7 @@ pub(super) const PINNED_HYBRID_KERNEL_SOURCE_HASH: u64 = 0x67d5_2575_3748_0a4d;
 // Combined NEPHELE directional transport with the approved 1.46 terrain
 // source (deferred VT provenance inert; full-tile screen UVs bounded [0,2]).
 // The per-axis DEM mesh source update was owner-approved on 2026-11-21.
-pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0x54d1_1557_d836_10e5;
+pub(super) const PINNED_TERRAIN_SOURCE_HASH: u64 = 0x96d5_624c_9fab_4637;
 
 #[derive(Clone, Copy)]
 pub(super) enum FunctionRef {

@@ -645,6 +645,14 @@ def _building_roof_type(properties: Mapping[str, Any]) -> str:
 
 
 def _building_fill_color(properties: Mapping[str, Any]) -> tuple[int, int, int, int]:
+    authored = properties.get("forge3d:material")
+    if isinstance(authored, Mapping):
+        rgba = authored.get("rgba")
+        if not isinstance(rgba, Sequence) or len(rgba) != 4 or any(isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 255 for v in rgba):
+            raise ValueError("building material needs four declared uint8 sRGB albedo channels")
+        if authored.get("presentation") not in {"physical", "protected"}:
+            raise ValueError("building material presentation must be physical or protected")
+        return tuple(rgba)
     material = str(properties.get("building:material", properties.get("material", "concrete"))).lower()
     palette = {
         "brick": (166, 82, 58, 235),
@@ -1271,7 +1279,55 @@ def _draw_title(image: Any, title: str) -> None:
 
 
 def _draw_simple_legend(image: Any, options: Mapping[str, Any]) -> None:
-    items = options.get("entries") or options.get("items") or options.get("labels")
+    entries = options.get("entries")
+    if entries and (options.get("origin_px") is not None or
+                    any(isinstance(entry, Mapping) and entry.get("binding") for entry in entries)):
+        # Recipe palettes are authoritative. Never infer colours from labels or
+        # from shaded pixels. Keep the legacy string legend behavior below.
+        height, width = image.shape[:2]
+        bindings = {entry["binding"] for entry in entries if entry.get("binding")}
+        labels = [(str(entry["binding"]) + ": " if len(bindings) > 1 and entry.get("binding") else "")
+                  + str(entry["label"]) + (" (lit albedo)" if str(entry.get("interpretation", "")).startswith("Surface albedo")
+                  else " (exact swatch)" if entry.get("interpretation") else "") for entry in entries]
+        interpretation = str(options.get("interpretation") or "")
+        row_height = 18
+        # Preserve every binding's caption within the existing viewport. The
+        # 8px advance and margins are the established legend layout metrics.
+        import textwrap
+        chars_per_line = (width - 24 - 32) // 8
+        if chars_per_line <= 0:
+            raise ValueError("output is too small for the categorical legend; increase output size")
+        lines = [textwrap.wrap(label, chars_per_line, break_on_hyphens=False) or [""] for label in labels]
+        heading = textwrap.wrap(interpretation, chars_per_line, break_on_hyphens=False) if interpretation else []
+        panel_w = max(len(line) * 8 + 32 for line in [*(line for row in lines for line in row), *heading])
+        panel_h = (sum(map(len, lines)) + len(heading)) * row_height + 16
+        if panel_w + 24 > width or panel_h + 24 > height:
+            raise ValueError("output is too small for the categorical legend; increase output size")
+        x0, y0 = width - panel_w - 12, height - panel_h - 12
+        if options.get("origin_px") is not None:
+            from numbers import Real
+            from math import isfinite
+            origin = options["origin_px"]
+            if (not isinstance(origin, Sequence) or isinstance(origin, (str, bytes)) or len(origin) != 2
+                    or any(isinstance(v, bool) or not isinstance(v, Real) or not isfinite(v) for v in origin)):
+                raise ValueError("legend origin_px requires two finite pixel coordinates")
+            x0, y0 = (int(round(v)) for v in origin)
+            if x0 < 0 or y0 < 0 or x0 + panel_w > width or y0 + panel_h > height:
+                raise ValueError("legend origin_px places its captions outside the output viewport")
+        _blend_rect(image, x0, y0, x0 + panel_w, y0 + panel_h, (255, 255, 255, 255))
+        y = y0 + 8
+        for entry, row in zip(entries, lines):
+            rgba = tuple(int(v) for v in entry["rgba"])
+            _blend_rect(image, x0 + 6, y, x0 + 16, y + 10, rgba)
+            for line in row:
+                _draw_text(image, line, (x0 + 24, y), color=(20, 20, 20, 255), halo=(255, 255, 255, 255))
+                y += row_height
+        for line in heading:
+            _draw_text(image, line, (x0 + 6, y),
+                       color=(45, 45, 45, 255), halo=(255, 255, 255, 255))
+            y += row_height
+        return
+    items = entries or options.get("items") or options.get("labels")
     if not isinstance(items, Sequence) or isinstance(items, (str, bytes)) or not items:
         return
     height, width = image.shape[:2]

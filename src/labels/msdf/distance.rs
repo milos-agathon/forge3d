@@ -27,7 +27,13 @@ pub fn edge_distance(point: Point, edge: Edge) -> EdgeDistance {
     let direction = Point::new(vector.x / length, vector.y / length);
     let projection = relative.x * direction.x + relative.y * direction.y;
     let t = (projection / length).clamp(0.0, 1.0);
-    let nearest = Point::new(edge.from.x + vector.x * t, edge.from.y + vector.y * t);
+    let nearest = if t == 0.0 {
+        edge.from
+    } else if t == 1.0 {
+        edge.to
+    } else {
+        Point::new(edge.from.x + vector.x * t, edge.from.y + vector.y * t)
+    };
     let true_distance = (point.x - nearest.x).hypot(point.y - nearest.y);
     let perpendicular = cross(direction, relative);
     let directional_sign = (perpendicular * edge.winding).signum();
@@ -191,9 +197,200 @@ pub fn collision_mask(
     mask
 }
 
+fn roots(quadratic: f64, linear: f64, constant: f64) -> Vec<f64> {
+    if quadratic == 0.0 {
+        return if linear == 0.0 {
+            Vec::new()
+        } else {
+            vec![-constant / linear]
+        };
+    }
+    let discriminant = linear * linear - 4.0 * quadratic * constant;
+    if discriminant < 0.0 {
+        return Vec::new();
+    }
+    let q = -0.5 * (linear + discriminant.sqrt().copysign(linear));
+    if q == 0.0 {
+        vec![-linear / (2.0 * quadratic)]
+    } else {
+        vec![q / quadratic, constant / q]
+    }
+}
+
+fn interpolation_artifact(
+    a: [f32; 3],
+    b: [f32; 3],
+    c: [f32; 3],
+    d: [f32; 3],
+    diagonal: bool,
+    protected: bool,
+) -> bool {
+    let am = f64::from(median(a));
+    let dm = f64::from(median(d));
+    if am.abs() < dm.abs() {
+        return false;
+    }
+    let a = a.map(f64::from);
+    let d = d.map(f64::from);
+    let linear: [f64; 3] = std::array::from_fn(|i| {
+        if diagonal {
+            f64::from(b[i]) + f64::from(c[i]) - 2.0 * a[i]
+        } else {
+            d[i] - a[i]
+        }
+    });
+    let quadratic: [f64; 3] = std::array::from_fn(|i| {
+        if diagonal {
+            a[i] + d[i] - f64::from(b[i]) - f64::from(c[i])
+        } else {
+            0.0
+        }
+    });
+    let value = |t: f64| {
+        let p: [f64; 3] = std::array::from_fn(|i| a[i] + t * (linear[i] + t * quadratic[i]));
+        p[0].max(p[1].min(p[2])).min(p[1].max(p[2]))
+    };
+    let span = if diagonal { 2.0_f64.sqrt() } else { 1.0 };
+    let invalid_range = |low: f64, high: f64, t: f64, m: f64| {
+        let lm = value(low);
+        let hm = value(high);
+        let inversion = (lm > 0.0 && hm > 0.0 && m <= 0.0) || (lm < 0.0 && hm < 0.0 && m >= 0.0);
+        let excursion = m < lm.min(hm) || m > lm.max(hm);
+        // The median may legitimately bend at a protected corner. Correct
+        // only false inversions there; elsewhere detect extrema outside the
+        // endpoint range and the unit-distance cones from both endpoints.
+        (inversion || (!protected && excursion))
+            && ((m - lm).abs() > (t - low) * span || (m - hm).abs() > (high - t) * span)
+    };
+    for (i, j) in [(0, 1), (1, 2), (2, 0)] {
+        for t in roots(
+            quadratic[i] - quadratic[j],
+            linear[i] - linear[j],
+            a[i] - a[j],
+        ) {
+            if t <= 0.0 || t >= 1.0 || !t.is_finite() {
+                continue;
+            }
+            let m = value(t);
+            if invalid_range(0.0, 1.0, t, m) {
+                return true;
+            }
+            // A diagonal bilinear restriction is quadratic. Its channel
+            // extrema partition the range and can expose a hidden clash.
+            for channel in [i, j] {
+                if quadratic[channel] != 0.0 {
+                    let extreme = -linear[channel] / (2.0 * quadratic[channel]);
+                    if extreme > 0.0 && extreme < 1.0 {
+                        let (low, high) = if extreme < t {
+                            (extreme, 1.0)
+                        } else {
+                            (0.0, extreme)
+                        };
+                        if invalid_range(low, high, t, m) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Detect channel-exchange extrema at their analytic locations, with corner
+/// protection as in msdfgen's artifact stencil. No fixed sampling grid or
+/// blanket per-channel Lipschitz cleanup participates. Correction preserves
+/// each texel's median; it only removes erroneous interpolation separation.
+pub fn correct_interpolation_artifacts(
+    fields: &mut [[f32; 3]],
+    edges: &[Edge],
+    width: usize,
+    height: usize,
+    origin: Point,
+) {
+    if width < 2 || height < 2 || fields.len() != width * height {
+        return;
+    }
+    let mut protected = vec![false; fields.len()];
+    for edge in edges {
+        if let Some(previous) = edges.iter().find(|previous| previous.to == edge.from) {
+            if (previous.color & edge.color).count_ones() <= 1 {
+                let x = (edge.from.x - origin.x - 0.5).floor() as isize;
+                let y = (edge.from.y - origin.y - 0.5).floor() as isize;
+                for yy in [y, y + 1] {
+                    for xx in [x, x + 1] {
+                        if xx >= 0 && yy >= 0 && (xx as usize) < width && (yy as usize) < height {
+                            protected[yy as usize * width + xx as usize] = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let directions = [
+        (1_isize, 0_isize),
+        (-1, 0),
+        (0, 1),
+        (0, -1),
+        (1, 1),
+        (1, -1),
+        (-1, 1),
+        (-1, -1),
+    ];
+    let mut errors = vec![false; fields.len()];
+    for y in 0..height {
+        for x in 0..width {
+            let index = y * width + x;
+            for (dx, dy) in directions {
+                let nx = x as isize + dx;
+                let ny = y as isize + dy;
+                if nx < 0 || ny < 0 || nx as usize >= width || ny as usize >= height {
+                    continue;
+                }
+                let nx = nx as usize;
+                let ny = ny as usize;
+                if interpolation_artifact(
+                    fields[index],
+                    fields[y * width + nx],
+                    fields[ny * width + x],
+                    fields[ny * width + nx],
+                    dx != 0 && dy != 0,
+                    protected[index],
+                ) {
+                    errors[index] = true;
+                    break;
+                }
+            }
+        }
+    }
+    for (pixel, error) in fields.iter_mut().zip(errors) {
+        if error {
+            *pixel = [median(*pixel); 3];
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channel_exchange_extrema_are_corrected_without_moving_texel_medians() {
+        let a = [-3.0, -1.0, 3.0];
+        let b = [3.0, -1.0, -3.0];
+        assert!(interpolation_artifact(a, a, b, b, false, true));
+        let mut fields = vec![a, b, a, b];
+        correct_interpolation_artifacts(&mut fields, &[], 2, 2, Point::new(0.0, 0.0));
+        assert_eq!(fields, vec![[-1.0; 3]; 4]);
+    }
+
+    #[test]
+    fn corner_protection_preserves_legitimate_channel_separation() {
+        let a = [1.0, 1.5, 6.0];
+        let b = [6.0, 1.5, 1.0];
+        assert!(interpolation_artifact(a, a, b, b, false, false));
+        assert!(!interpolation_artifact(a, a, b, b, false, true));
+    }
 
     #[test]
     fn pseudo_distance_is_signed_by_edge_side() {

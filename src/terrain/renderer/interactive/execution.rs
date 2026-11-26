@@ -1,8 +1,14 @@
 use super::*;
 
+#[derive(Clone, Copy)]
+struct InteractiveExports {
+    hdr: bool,
+    visibility: bool,
+}
+
 impl TerrainScene {
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn render_interactive_internal(
+    fn render_interactive_internal(
         &mut self,
         material_set: &crate::render::material_set::MaterialSet,
         env_maps: &crate::lighting::ibl_wrapper::IBL,
@@ -15,6 +21,7 @@ impl TerrainScene {
         vector_batches: Option<&Bound<'_, PyAny>>,
         furniture_batches: Option<&Bound<'_, PyAny>>,
         point_batches: Option<&Bound<'_, PyAny>>,
+        exports: InteractiveExports,
     ) -> Result<crate::Frame> {
         // Reuse the real terrain grid under an orthographic camera. Hardware
         // raster depth then occludes buildings without a fragment-depth write.
@@ -48,12 +55,15 @@ impl TerrainScene {
         if self.orbis_capture_request.is_some() {
             return Err(anyhow!("CONCORDIA shared MRT outputs cannot include the queued ORBIS coverage attachment; use the dedicated capture entry"));
         }
+        let decoded = params.decoded();
+        if (exports.hdr || exports.visibility) && decoded.screen_space.taa_enabled {
+            return Err(anyhow!("CONCORDIA HDR and visibility export require an unjittered one-shot frame; disable TAA"));
+        }
         let image_transfers = crate::core::texture_readback::ImageTransferScope::begin();
         let (capture, _allocation_scope) =
             self.begin_certificate_capture("terrain.render_interactive");
         let mut timing = self.take_render_timing();
         let mut stages = ExecutedStages::default();
-        let decoded = params.decoded();
         if decoded.height_ao.enabled
             && params.height_curve_strength > 0.0
             && matches!(
@@ -346,6 +356,7 @@ impl TerrainScene {
             .cartography_depth = cartography;
         super::cartographic_depth::clear_shared_geometry(&mut encoder, &targets)?;
         let mut staged_selection = None;
+        let mut terrain_depth = None;
         self.encode_forward_pass(
             &mut encoder,
             params,
@@ -366,7 +377,11 @@ impl TerrainScene {
             time_seconds,
             &mut timing,
             &mut staged_selection,
+            exports.visibility.then_some(&mut terrain_depth),
         )?;
+        let visibility_depth = terrain_depth
+            .map(|depth| Ok::<_, anyhow::Error>([depth, self.capture_visibility_depth(&mut encoder, &targets)?]))
+            .transpose()?;
         stages.end(&mut timing, &mut encoder, geometry_scope, 1);
         let mut state = targets
             .concordia
@@ -506,6 +521,37 @@ impl TerrainScene {
         }
 
         let (width, height) = params.size_px;
+        let visibility = visibility_depth
+            .map(|depth| {
+                let kind = copy_export_attachment(
+                    &self.device, &mut encoder, &state._surface_kind, "concordia.export.surface_kind",
+                )?;
+                Ok::<_, anyhow::Error>(crate::AovFrame::new(
+                    self.device.clone(), self.queue.clone(), None, None, None,
+                    None, None, None, None, None, None, width, height,
+                )
+                .with_visibility_depth(Some(depth))
+                .with_interactive_surface_kind(kind))
+            })
+            .transpose()?;
+        // Snapshot the exact pre-tonemap source while it still belongs to this
+        // submission. The scratch textures can be overwritten by the next frame.
+        let hdr = if exports.hdr {
+            let texture = if state.composition_encoded {
+                &*state.scratch[state.current_scratch]
+            } else {
+                &**targets.internal_texture
+            };
+            let snapshot = copy_export_attachment(
+                &self.device,
+                &mut encoder,
+                texture,
+                "concordia.export.hdr",
+            )?;
+            Some(crate::HdrFrame::new(self.device.clone(), self.queue.clone(), snapshot, width, height))
+        } else {
+            None
+        };
         let output = Arc::new(tracked_create_texture(
             &self.device,
             &wgpu::TextureDescriptor {
@@ -693,6 +739,12 @@ impl TerrainScene {
             "cloud_parameters":cloud_parameters,
             "fallbacks": {"ssgi_miss": "shared_ibl", "ssr_miss": "retained_surface_ibl_probe"},
         }).to_string();
+        if exports.hdr || exports.visibility {
+            crate::core::certificate::record_input(
+                "concordia.export",
+                serde_json::json!({"scene_linear_hdr": exports.hdr, "device_depth_and_surface_kind": exports.visibility}).to_string(),
+            );
+        }
         crate::core::certificate::record_input("concordia.pipeline", self.concordia_report.clone());
         crate::core::certificate::record_model("concordia.ao","bounded height-horizon * GTAO-contact visibility product; combined GTAO excludes terrain-to-terrain samples; buildings use GTAO once");
         crate::core::certificate::record_model("concordia.readback","routine GPU frame has no intermediate image transfers; the returned Frame counts completed final beauty reads");
@@ -707,8 +759,32 @@ impl TerrainScene {
             height,
             wgpu::TextureFormat::Rgba8Unorm,
         )
-        .with_readback_counter(readbacks))
+        .with_readback_counter(readbacks)
+        .with_interactive_exports(hdr, visibility))
     }
+}
+
+fn copy_export_attachment(
+    device: &wgpu::Device,
+    encoder: &mut wgpu::CommandEncoder,
+    source: &wgpu::Texture,
+    label: &str,
+) -> Result<TrackedTexture> {
+    let texture = tracked_create_texture(
+        device,
+        &wgpu::TextureDescriptor {
+            label: Some(label),
+            size: source.size(),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: source.format(),
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        },
+    )?;
+    encoder.copy_texture_to_texture(source.as_image_copy(), texture.as_image_copy(), source.size());
+    Ok(texture)
 }
 
 #[pymethods]
@@ -716,7 +792,7 @@ impl TerrainRenderer {
     /// Render the native shared-depth HDR pipeline. Requested unavailable
     /// resources fail before returning a frame; no CPU effect substitutes run.
     /// ANAMNESIS does not yet serialize this graph; a non-None cache is rejected.
-    #[pyo3(signature = (material_set, env_maps, params, heightmap, water_mask=None, time_seconds=0.0, clouds=None, label_batches=None, vector_batches=None, furniture_batches=None, point_batches=None, certificate=None, cache=None))]
+    #[pyo3(signature = (material_set, env_maps, params, heightmap, water_mask=None, time_seconds=0.0, clouds=None, label_batches=None, vector_batches=None, furniture_batches=None, point_batches=None, certificate=None, cache=None, *, _export_hdr=false, _export_visibility=false))]
     fn render_interactive<'py>(
         &mut self,
         py: Python<'py>,
@@ -733,6 +809,8 @@ impl TerrainRenderer {
         point_batches: Option<Bound<'py, PyAny>>,
         certificate: Option<Bound<'py, PyAny>>,
         cache: Option<Bound<'py, PyAny>>,
+        _export_hdr: bool,
+        _export_visibility: bool,
     ) -> PyResult<Py<crate::Frame>> {
         self.last_anamnesis_report = crate::core::anamnesis::CacheReport::default();
         self.last_anamnesis_graph_submissions = 0;
@@ -769,6 +847,7 @@ impl TerrainRenderer {
                 vector_batches.as_ref(),
                 furniture_batches.as_ref(),
                 point_batches.as_ref(),
+                InteractiveExports { hdr: _export_hdr, visibility: _export_visibility },
             )
             .map_err(|error| {
                 PyRuntimeError::new_err(format!("CONCORDIA rendering failed: {error:#}"))

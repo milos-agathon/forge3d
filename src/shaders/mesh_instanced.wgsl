@@ -11,6 +11,7 @@ struct ScatterBatchUniforms {
   wind_bend_fade: vec4<f32>,
   terrain_blend: vec4<f32>, // x=enabled, y=bury_depth, z=fade_distance
   terrain_contact: vec4<f32>, // x=enabled, y=distance, z=strength, w=vertical_weight
+  identity: vec4<u32>,
 }
 
 @group(0) @binding(0) var<uniform> U : ScatterBatchUniforms;
@@ -245,11 +246,14 @@ fn mesh_shadow_visibility(world_pos: vec3<f32>) -> f32 {
   return sum / max(count, 1.0);
 }
 
-@fragment
-fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+fn shade_scatter(in: VsOut) -> vec4<f32> {
   let n = normalize(in.n_ws);
   let l = normalize(U.light_dir_ws.xyz);
-  let ndotl = max(dot(n, -l), 0.0);
+  var ndotl = max(dot(n, -l), 0.0);
+  if (U.identity.y != 0u) {
+    // C01 consumes the terrain's direction toward the sun in rendered space.
+    ndotl = max(dot(n, l), 0.0);
+  }
   let intensity = max(U.light_dir_ws.w, 0.0);
   let base = U.color.rgb;
   let terrain_sample = terrain_height_delta(in.world_pos);
@@ -279,5 +283,30 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     contact = proximity * side_factor * strength;
   }
   let shaded = lit * (1.0 - contact);
+  if (U.identity.y == 1u) {
+    // One-shot display targets are Unorm; HDR accumulation retains radiance.
+    let c = max(shaded, vec3<f32>(0.0));
+    let encoded = select(1.055 * pow(c, vec3<f32>(1.0 / 2.4)) - 0.055,
+                         12.92 * c, c <= vec3<f32>(0.0031308));
+    return vec4<f32>(encoded, alpha);
+  }
   return vec4<f32>(shaded, alpha);
+}
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+  return shade_scatter(in);
+}
+
+struct ScatterIdentityOutput {
+  @location(0) color: vec4<f32>,
+  @location(1) batch_id: u32,
+}
+
+@fragment
+fn fs_main_with_identity(in: VsOut) -> ScatterIdentityOutput {
+  var out: ScatterIdentityOutput;
+  out.color = shade_scatter(in);
+  out.batch_id = U.identity.x;
+  return out;
 }

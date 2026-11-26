@@ -402,13 +402,20 @@ impl Scene {
                     tr.set_resolution(self.width, self.height);
                     tr.set_alpha(self.text_overlay_alpha);
                     tr.set_enabled(true);
-                    tr.upload_uniforms(&g.queue);
+                    tr.set_label_starts(&self.text_label_starts);
                     if !self.text_instances.is_empty() {
                         let inst = self.text_instances.clone();
                         tr.upload_instances(&g.device, &g.queue, &inst)?;
                     }
+                    tr.upload_uniforms(&g.queue);
                     tr.render(&mut rp);
                 }
+            }
+        }
+
+        if self.text_overlay_enabled {
+            if let Some(ref mut tr) = self.text_overlay_renderer {
+                tr.encode_union(encoder, &self.color_view)?;
             }
         }
 

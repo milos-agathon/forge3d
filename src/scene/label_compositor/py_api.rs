@@ -22,11 +22,13 @@ impl LabelCompositor {
         Ok(())
     }
 
+    #[pyo3(signature = (atlas, channels = None, smoothing = None, *, px_range = 8.0))]
     fn set_native_text_atlas(
         &mut self,
         atlas: &pyo3::types::PyAny,
         channels: Option<u32>,
         smoothing: Option<f32>,
+        px_range: f32,
     ) -> PyResult<()> {
         super::super::text_upload::upload_atlas(
             &self.allocation_owner,
@@ -34,10 +36,19 @@ impl LabelCompositor {
             atlas,
             channels,
             smoothing,
+            px_range,
         )
     }
 
+    fn begin_native_text_label(&mut self) {
+        let start = self.text_instances.len();
+        if self.text_label_starts.last() != Some(&start) {
+            self.text_label_starts.push(start);
+        }
+    }
+
     fn clear_native_text(&mut self) {
+        self.text_label_starts.clear();
         self.text_instances.clear();
         if let Some(renderer) = &mut self.text_overlay_renderer {
             renderer.instance_count = 0;

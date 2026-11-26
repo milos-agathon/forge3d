@@ -86,13 +86,34 @@ pub(super) fn prepare_labels(
             TextOverlayRenderer::new(&scene.device, wgpu::TextureFormat::Rgba8Unorm)?;
         renderer.set_atlas(texture, view);
         renderer.recreate_bind_group(&scene.device, None)?;
-        renderer.set_channels(item.get_item("channels")?.extract::<u32>()?);
+        let declared_channels = item.get_item("channels")?.extract::<u32>()?;
+        if declared_channels == 4 && channels != 4 {
+            return Err(anyhow!("channels=4 requires RGBA MSDF data with the scalar SDF in alpha"));
+        }
+        let optional = |key| match item.get_item(key) {
+            Ok(value) => Ok(Some(value)),
+            Err(error) if error.is_instance_of::<pyo3::exceptions::PyKeyError>(item.py()) => Ok(None),
+            Err(error) => Err(error),
+        };
+        let px_range = optional("px_range")?
+            .map(|value| value.extract::<f32>())
+            .transpose()?
+            .unwrap_or(8.0);
+        if !px_range.is_finite() || px_range <= 0.0 {
+            return Err(anyhow!("atlas px_range must be finite and positive"));
+        }
+        renderer.set_channels(declared_channels);
+        renderer.set_distance_range(px_range);
         renderer.set_smoothing(1.0);
         renderer.set_resolution(width, height);
         renderer.set_enabled(true);
         renderer.set_alpha(1.0);
-        renderer.upload_uniforms(&scene.queue);
         let rects = item.get_item("rects")?.extract::<Vec<Vec<f32>>>()?;
+        let label_starts: Vec<usize> = optional("label_starts")?
+            .map(|value| value.extract())
+            .transpose()?
+            .unwrap_or_default();
+        renderer.set_label_starts(&label_starts);
         let mut instances = Vec::with_capacity(rects.len());
         for rect in rects {
             if !matches!(rect.len(), 17 | 18) || !rect.iter().all(|value| value.is_finite()) {
@@ -126,6 +147,7 @@ pub(super) fn prepare_labels(
             instances.push(instance);
         }
         renderer.upload_instances(&scene.device, &scene.queue, &instances)?;
+        renderer.upload_uniforms(&scene.queue);
         batches.push(LabelBatch { renderer, alpha });
     }
     Ok(batches)
@@ -176,6 +198,7 @@ pub(super) fn render_labels(
             crate::core::shader_registry::record_shader_use("text_overlay_shader");
             batch.renderer.render(&mut pass);
         }
+        batch.renderer.encode_union(encoder, &view)?;
         if batch.alpha < 1.0 {
             output = fade(scene, encoder, &output, &target, batch.alpha)?;
         }

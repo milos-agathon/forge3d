@@ -57,12 +57,12 @@ def height_array(values):
     return np.ascontiguousarray(values, dtype=np.float32)
 
 
-def gradient(values):
+def gradient(values, dy=1.0, dx=1.0):
     """Return row and column derivatives. Each axis needs one valid neighbour."""
     if np.isfinite(values).all():
-        return np.gradient(values)
+        return np.gradient(values, dy, dx)
     result = []
-    for axis in (0, 1):
+    for axis, spacing in enumerate((dy, dx)):
         rows = np.moveaxis(values, axis, 0)
         padded = np.pad(rows, ((1, 1), (0, 0)), constant_values=np.nan)
         before, after = padded[:-2], padded[2:]
@@ -74,5 +74,5 @@ def gradient(values):
         derivative[forward] = after[forward] - rows[forward]
         backward = left & ~right & np.isfinite(rows)
         derivative[backward] = rows[backward] - before[backward]
-        result.append(np.moveaxis(derivative, 0, axis))
+        result.append(np.moveaxis(derivative, 0, axis) / spacing)
     return tuple(result)

@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import Tuple, Optional, Sequence, Any, Dict, List, Literal, Mapping, Callable, NoReturn
 import os
 import numpy as np
+from os import PathLike
 from . import gis
 from . import cinema as cinema
 from .cinema import Subject as Subject, FramingSpec as FramingSpec, Shot as Shot, ShotPlan as ShotPlan, CinemaInfeasible as CinemaInfeasible, CinemaNativeUnavailable as CinemaNativeUnavailable, plan as plan_shots
@@ -28,6 +29,8 @@ from .graticule import GraticuleSpec, generate_graticule
 from .legend import Legend, LegendConfig
 from .raster_recipe import RasterRecipe as RasterRecipe, RasterRecipeSource as RasterRecipeSource
 from .raster_style import RasterHeightSurfaceStyle as RasterHeightSurfaceStyle, CategoricalRasterStyle as CategoricalRasterStyle, BivariateRasterStyle as BivariateRasterStyle, RasterStyleResult as RasterStyleResult
+from .terrain_materials import MaterialGrid as MaterialGrid, MaterialTexture as MaterialTexture, MaterialMask as MaterialMask, TerrainMaterialLayer as TerrainMaterialLayer, TerrainMaterialRecipe as TerrainMaterialRecipe, PreparedTerrainMaterial as PreparedTerrainMaterial, TerrainMaterialStyle as TerrainMaterialStyle
+from .geospatial_materials import GeospatialMaterialRecipe as GeospatialMaterialRecipe, MaterialLayer as MaterialLayer, MaterialEvaluation as MaterialEvaluation, MaterialRasterStyle as MaterialRasterStyle
 from .map_plate import BBox, MapPlate, MapPlateConfig, PlateRegion
 from .publication import PublicationSource as PublicationSource, PublicationExtent as PublicationExtent, PublicationRecipe as PublicationRecipe
 from .publication import PublicationInset as PublicationInset, PublicationLayout as PublicationLayout, PublicationSubject as PublicationSubject, publication_output_support as publication_output_support
@@ -196,7 +199,13 @@ from .style import (
 from .vector_line import VectorLineLayer as VectorLineLayer, VectorLineStyleError as VectorLineStyleError
 from . import smoke
 from . import verify
-from .path_tracing import ExperimentalSyntheticOutput, render_terrain_poster
+from .path_tracing import (
+    ExperimentalSyntheticOutput,
+    ProgressCallback,
+    TerrainRenderCancelled as TerrainRenderCancelled,
+    TerrainRenderProgress as TerrainRenderProgress,
+    render_terrain_poster,
+)
 
 PathLikeStr = os.PathLike[str] | str
 
@@ -545,8 +554,9 @@ class Scene:
     def add_native_text_rect(self, x: float, y: float, w: float, h: float, r: float, g: float, b: float, a: float) -> None: ...
     def add_native_text_rect_uv(self, x: float, y: float, w: float, h: float, u0: float, v0: float, u1: float, v1: float, r: float, g: float, b: float, a: float) -> None: ...
     def add_native_text_rect_uv_halo(self, x: float, y: float, w: float, h: float, u0: float, v0: float, u1: float, v1: float, r: float, g: float, b: float, a: float, halo_r: float, halo_g: float, halo_b: float, halo_a: float, halo_width: float, rotation: float = 0.0) -> None: ...
+    def begin_native_text_label(self) -> None: ...
     def clear_native_text(self) -> None: ...
-    def set_native_text_atlas(self, atlas: np.ndarray, channels: int | None = ..., smoothing: float | None = ...) -> None: ...
+    def set_native_text_atlas(self, atlas: np.ndarray, channels: int | None = ..., smoothing: float | None = ..., *, px_range: float = 8.0) -> None: ...
 
     # --- 3D text meshes ---
     def enable_text_meshes(self) -> None: ...
@@ -694,6 +704,7 @@ class TerrainRenderParams:
     def python_object(self) -> Any: ...
 
 class Frame:
+    def _take_interactive_exports(self) -> tuple[HdrFrame | None, AovFrame | None]: ...
     width: int
     height: int
     format: str
@@ -757,6 +768,9 @@ class AovFrame:
     def cloud_shadow(self) -> np.ndarray: ...
     def optical_depth(self) -> np.ndarray: ...
     def source_id(self) -> np.ndarray: ...
+    def _visibility_depth(self) -> Tuple[np.ndarray, np.ndarray]: ...
+    def _interactive_surface_kind(self) -> np.ndarray | None: ...
+    def _building_ids(self) -> np.ndarray: ...
     def save_albedo(self, path: PathLikeStr) -> None: ...
     def save_normal(self, path: PathLikeStr) -> None: ...
     def save_depth(self, path: PathLikeStr) -> None: ...
@@ -944,6 +958,7 @@ class TerrainRenderer:
         point_batches: Optional[Sequence[Mapping[str, Any]]] = None,
         certificate: bool | str | PathLikeStr | None = ...,
         cache: str | PathLikeStr | None = ...,
+        *, _export_hdr: bool = False, _export_visibility: bool = False,
     ) -> Frame: ...
     def interactive_pipeline_info(self) -> str: ...
     def _interactive_validation_data(self) -> dict[str, Any]: ...
@@ -1930,6 +1945,10 @@ def hybrid_render_terrain_reference(
     temperature_c: float | None = ...,
     atmosphere: AtmosphereSettings | Mapping[str, Any] | AtmosphereLutHandle | None = ...,
     sdf_scene: object | None = ...,
+    on_progress: ProgressCallback | None = ...,
+    checkpoint_path: str | PathLike[str] | None = ...,
+    checkpoint_every: int | None = ...,
+    resume: bool = ...,
 ) -> Dict[str, Any]: ...
 
 # AETHER: independent stochastic spectral atmosphere acceptance reference.

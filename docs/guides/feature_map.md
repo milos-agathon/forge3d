@@ -22,10 +22,13 @@ organized by workflow rather than by Rust module layout.
 | Caller-driven water surfaces and optics | `WaterOpticsSettings` through `TerrainRenderer` | [Water optics](water_optics.md), `terrain_water_optics.py` |
 | Native/offscreen rendering | `Scene`, `Session`, `TerrainRenderer`, `render_offline` | `terrain_atmosphere_path_demo.py`, `triangle_png.py` |
 | DEM-resolution terrain meshes | `TerrainRenderParams.camera_mode` through `TerrainRenderer` | [DEM-resolution meshes](../terrain/dem-mesh.md) |
+| Recoverable terrain and poster renders | `hybrid_render_terrain_reference`, `render_terrain_poster` | [Resume a render](recoverable_terrain_renders.md) |
 | Match a compatible terrain reference | `recover_scene`, `RecoveredScene` | GPU acceptance scene; this estimates surface colour, sunlight, and haze without changing an existing map on its own |
 | Typed map scenes | `MapScene`, `LabelLayer`, `MapSceneBuildingLayer`, `Tiles3DLayer`, `MapScene.save_bundle`, `MapScene.load_bundle` | `mapscene_terrain_raster.py`, `mapscene_vector_labels.py`, `mapscene_buildings_labels.py` |
 | Map scale continuity | `forge3d.semantic_scale` | [Semantic scale guide](semantic_scale.md), `c03_semantic_scale.py` |
 | Reusable geographic preparation | `PreparationRecipe`, `prepare_scene`, `PreparedScene`, `export_landscape` | `prepare_scene.py`, [data-to-scene guide](data_to_scene.md) |
+| Terrain material recipes | `TerrainMaterialRecipe`, `MaterialGrid`, `MaterialMask`, `MaterialTexture`, `TerrainMaterialStyle` | `terrain_material_recipe.py`; [recipe contract](terrain_material_recipes.md) |
+| Geospatial material authoring | `GeospatialMaterialRecipe`, `MaterialLayer`, `MaterialRasterStyle` | [Terrain, raster, vector and building bindings](geospatial_materials.md) |
 | Ordered map composition | `RenderPassInput`, `RenderPassSpec`, `MapScene.render_passes` | [Composition contracts](ordered_map_composition.md), [physical render example](../examples/mapscene_render_passes.py) |
 | Geometry, mesh, vector, SDF, path tracing | `geometry`, `mesh`, `vector`, `sdf`, `path_tracing` | API-level usage; not every module has a dedicated showcase script |
 | Device and memory diagnostics | `has_gpu`, `device_probe`, `mem` | diagnostics and tooling flows rather than gallery scripts |

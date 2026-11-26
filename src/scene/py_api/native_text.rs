@@ -69,8 +69,18 @@ impl Scene {
     }
 
     #[pyo3(text_signature = "($self)")]
+    pub fn begin_native_text_label(&mut self) -> PyResult<()> {
+        let start = self.text_instances.len();
+        if self.text_label_starts.last() != Some(&start) {
+            self.text_label_starts.push(start);
+        }
+        Ok(())
+    }
+
+    #[pyo3(text_signature = "($self)")]
     pub fn clear_native_text(&mut self) -> PyResult<()> {
         self.text_instances.clear();
+        self.text_label_starts.clear();
         if let Some(ref mut tr) = self.text_overlay_renderer {
             tr.instance_count = 0;
         }
@@ -111,10 +121,11 @@ impl Scene {
     }
 
     #[pyo3(
+        name = "add_native_text_rect_uv_halo",
         signature = (x, y, w, h, u0, v0, u1, v1, r, g, b, a, halo_r, halo_g, halo_b, halo_a, halo_width, rotation=0.0)
     )]
     #[allow(clippy::too_many_arguments)]
-    pub fn add_native_text_rect_uv_halo(
+    fn add_native_text_rect_uv_halo_py(
         &mut self,
         x: f32,
         y: f32,
@@ -147,12 +158,13 @@ impl Scene {
         Ok(())
     }
 
-    #[pyo3(text_signature = "($self, atlas, channels=3, smoothing=1.0)")]
-    pub fn set_native_text_atlas(
+    #[pyo3(name = "set_native_text_atlas", signature = (atlas, channels = None, smoothing = None, *, px_range = 8.0))]
+    fn set_native_text_atlas_py(
         &mut self,
         atlas: &pyo3::PyAny,
         channels: Option<u32>,
         smoothing: Option<f32>,
+        px_range: f32,
     ) -> PyResult<()> {
         super::super::text_upload::upload_atlas(
             &self.allocation_owner,
@@ -160,6 +172,48 @@ impl Scene {
             atlas,
             channels,
             smoothing,
+            px_range,
+        )
+    }
+}
+
+#[cfg(feature = "extension-module")]
+impl Scene {
+    /// Preserve the existing Rust entry point; Python additionally carries the
+    /// baker's distance range for the opt-in RGBA union renderer.
+    pub fn set_native_text_atlas(
+        &mut self,
+        atlas: &pyo3::PyAny,
+        channels: Option<u32>,
+        smoothing: Option<f32>,
+    ) -> PyResult<()> {
+        self.set_native_text_atlas_py(atlas, channels, smoothing, 8.0)
+    }
+
+    /// Preserve the existing Rust call signature; Python also accepts rotation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_native_text_rect_uv_halo(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        u0: f32,
+        v0: f32,
+        u1: f32,
+        v1: f32,
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+        halo_r: f32,
+        halo_g: f32,
+        halo_b: f32,
+        halo_a: f32,
+        halo_width: f32,
+    ) -> PyResult<()> {
+        self.add_native_text_rect_uv_halo_py(
+            x, y, w, h, u0, v0, u1, v1, r, g, b, a, halo_r, halo_g, halo_b, halo_a, halo_width, 0.0,
         )
     }
 }

@@ -874,6 +874,30 @@ impl TerrainScene {
                 sky_texture.is_some(),
             )?;
 
+            #[cfg(feature = "enable-gpu-instancing")]
+            {
+                let mut scatter_state = self.build_scatter_render_state(
+                    &state.params,
+                    &state.decoded,
+                    state.height_inputs.width,
+                    state.height_inputs.height,
+                    view,
+                    jittered_proj,
+                    eye,
+                    // Offline's public API has no animation-time parameter;
+                    // freeze the scene at the same default time as reference.
+                    0.0,
+                );
+                scatter_state.offline = true;
+                self.render_scatter_pass(
+                    &mut encoder,
+                    render_targets,
+                    &state.height_inputs.heightmap_view,
+                    shadow_setup.shadow_bind_group.as_ref(),
+                    &scatter_state,
+                    None,
+                )?;
+            }
             media_sample_view = if self
                 .encode_attached_realtime_media_inject_with_matrices(
                     &mut encoder,

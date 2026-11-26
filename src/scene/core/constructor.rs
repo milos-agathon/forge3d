@@ -227,6 +227,7 @@ impl Scene {
             text_overlay_enabled: false,
             text_overlay_alpha: 1.0,
             text_instances: Vec::new(),
+            text_label_starts: Vec::new(),
             text3d_renderer: Some(text3d_renderer),
             text3d_enabled: false,
             text3d_instances: Vec::new(),

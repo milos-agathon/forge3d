@@ -29,6 +29,9 @@
 //! terrain proof summaries switch off. Rerun `shader_sources::tests` too:
 //! their source-text checks can reject the rewriter's spelling. If one does,
 //! barrier the operand inside the callee instead of at the call site.
+//! The explicit, computed pin refresh is `terrain_source_pin_rewrite`; see
+//! `docs/guides/shader_pin_refresh.md`. It is separate from arithmetic rewriting
+//! and never runs in write mode without its owner-approved environment option.
 
 #[cfg(test)]
 mod instrument {

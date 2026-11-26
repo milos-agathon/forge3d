@@ -1247,6 +1247,16 @@ impl TerrainRenderer {
             native_batches.push(super::scatter::TerrainScatterUploadBatch {
                 name,
                 color,
+                physical_color: batch_dict
+                    .get_item("physical_color")?
+                    .map(|value| value.extract::<bool>())
+                    .transpose()?
+                    .unwrap_or(false),
+                surface_depth: batch_dict
+                    .get_item("surface_depth")?
+                    .map(|value| value.extract::<bool>())
+                    .transpose()?
+                    .unwrap_or(false),
                 max_draw_distance,
                 terrain_blend,
                 terrain_contact,

@@ -542,6 +542,10 @@ def test_sun_color_signature_stubs_and_native_order():
         ("temperature_c", ko, None, "float | None"),
         ("atmosphere", ko, None, "Mapping[str, Any] | Any | None"),
         ("sdf_scene", ko, None, "object | None"),
+        ("on_progress", ko, None, "ProgressCallback | None"),
+        ("checkpoint_path", ko, None, "str | PathLike[str] | None"),
+        ("checkpoint_every", ko, None, "int | None"),
+        ("resume", ko, False, "bool"),
     ]
     wrapper_stub = [
         (name, kind, required if default == required else "...", ann)
@@ -620,6 +624,8 @@ def test_sun_color_signature_stubs_and_native_order():
         ("temperature_c", po, 15.0, ""),
         ("atmosphere", po, None, ""),
         ("sdf_scene", po, None, ""),
+        ("_on_progress", ko, None, ""),
+        ("_checkpoint", ko, None, ""),
     ]
     psig = inspect.signature(hybrid_render_terrain_reference)
     assert _runtime_model(psig) == wrapper_runtime

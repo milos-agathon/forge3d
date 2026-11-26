@@ -37,6 +37,13 @@ pub fn finish_shader_render_capture() -> BTreeMap<String, String> {
     RENDER_CAPTURE.with(|capture| capture.borrow_mut().take().unwrap_or_default())
 }
 
+#[cfg(feature = "extension-module")]
+pub(crate) fn swap_shader_render_capture(
+    value: Option<BTreeMap<String, String>>,
+) -> Option<BTreeMap<String, String>> {
+    RENDER_CAPTURE.with(|capture| capture.replace(value))
+}
+
 pub fn abort_shader_render_capture() {
     RENDER_CAPTURE.with(|capture| {
         capture.borrow_mut().take();

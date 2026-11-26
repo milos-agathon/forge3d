@@ -19,6 +19,10 @@ Utilities:
     has_gpu             - Check GPU availability
 """
 
+from .terrain_materials import (MaterialGrid, MaterialTexture, MaterialMask, TerrainMaterialLayer,
+                                TerrainMaterialRecipe, PreparedTerrainMaterial, TerrainMaterialStyle)
+from .geospatial_materials import GeospatialMaterialRecipe, MaterialLayer, MaterialEvaluation, MaterialRasterStyle
+
 __version__ = "1.52.0"
 version = __version__
 
@@ -308,6 +312,8 @@ from .path_tracing import (
     hybrid_render_terrain_reference,
     make_camera,
     render_terrain_poster,
+    TerrainRenderCancelled,
+    TerrainRenderProgress,
 )
 from .inverse import (
     InverseSolveUnavailable,
@@ -752,6 +758,9 @@ from .precision import dd_harness, dd_jitter_demo, dd_selftest
 # -----------------------------------------------------------------------------
 __all__ = [
     "cinema", "Subject", "FramingSpec", "Shot", "ShotPlan", "CinemaInfeasible", "CinemaNativeUnavailable", "plan_shots",
+    "GeospatialMaterialRecipe", "MaterialLayer", "MaterialEvaluation", "MaterialRasterStyle",
+    "MaterialGrid", "MaterialTexture", "MaterialMask", "TerrainMaterialLayer",
+    "TerrainMaterialRecipe", "PreparedTerrainMaterial", "TerrainMaterialStyle",
     "RasterHeightSurfaceStyle",
     "CategoricalRasterStyle",
     "RasterRecipe",
@@ -780,6 +789,8 @@ __all__ = [
     "ExperimentalSyntheticOutput",
     "make_camera",
     "render_terrain_poster",
+    "TerrainRenderCancelled",
+    "TerrainRenderProgress",
     # Native types (when available)
     "Scene",
     "Session",

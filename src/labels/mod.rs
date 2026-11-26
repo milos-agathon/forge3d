@@ -30,6 +30,8 @@ pub mod py_text;
 pub mod raster;
 pub mod rtree;
 pub mod shape;
+#[cfg(feature = "extension-module")]
+mod svg_outline;
 mod types;
 pub mod typography;
 pub mod unicode;
