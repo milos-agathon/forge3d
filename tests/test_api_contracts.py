@@ -25,6 +25,16 @@ from forge3d._native import NATIVE_AVAILABLE, get_native_module
 from _toml_compat import load_toml
 
 
+def test_elevation_change_python_surface():
+    from pathlib import Path
+    from forge3d.elevation_change import elevation_change
+
+    assert "elevation_change" in f3d.__all__
+    assert f3d.elevation_change is elevation_change
+    stub = Path(f3d.__file__).with_suffix(".pyi").read_text(encoding="utf-8")
+    assert "elevation_change as elevation_change" in stub
+
+
 def test_c06_publication_python_surface():
     from forge3d import publication
     for name in publication.__all__:

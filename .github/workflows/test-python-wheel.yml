@@ -175,6 +175,10 @@ jobs:
           subprocess.check_call([sys.executable, "scripts/install_compatible_wheel.py", "dist"])
           subprocess.check_call([sys.executable, "-m", "pip", "install", "pytest", "pyyaml", "numpy", "pillow", "mypy", "pyproj", "rasterio"])
 
+      - name: Install elevation change test dependencies
+        if: inputs.test_mode == 'full'
+        run: python -m pip install matplotlib scipy
+
       - name: Install Windows timezone data
         if: inputs.test_mode == 'full' && runner.os == 'Windows'
         shell: python
