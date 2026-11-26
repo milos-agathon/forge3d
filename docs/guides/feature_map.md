@@ -26,6 +26,7 @@ organized by workflow rather than by Rust module layout.
 | Match a compatible terrain reference | `recover_scene`, `RecoveredScene` | GPU acceptance scene; this estimates surface colour, sunlight, and haze without changing an existing map on its own |
 | Typed map scenes | `MapScene`, `LabelLayer`, `MapSceneBuildingLayer`, `Tiles3DLayer`, `MapScene.save_bundle`, `MapScene.load_bundle` | `mapscene_terrain_raster.py`, `mapscene_vector_labels.py`, `mapscene_buildings_labels.py` |
 | Map scale continuity | `forge3d.semantic_scale` | [Semantic scale guide](semantic_scale.md), `c03_semantic_scale.py` |
+| Inspect original DEM elevations | `dem_audit.audit`, declared preparation repairs | [DEM inspection guide](dem_inspection.md) |
 | Reusable geographic preparation | `PreparationRecipe`, `prepare_scene`, `PreparedScene`, `export_landscape` | `prepare_scene.py`, [data-to-scene guide](data_to_scene.md) |
 | Terrain material recipes | `TerrainMaterialRecipe`, `MaterialGrid`, `MaterialMask`, `MaterialTexture`, `TerrainMaterialStyle` | `terrain_material_recipe.py`; [recipe contract](terrain_material_recipes.md) |
 | Geospatial material authoring | `GeospatialMaterialRecipe`, `MaterialLayer`, `MaterialRasterStyle` | [Terrain, raster, vector and building bindings](geospatial_materials.md) |

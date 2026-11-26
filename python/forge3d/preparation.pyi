@@ -35,8 +35,9 @@ class PreparationSource:
     mask_path: str | Path | None
     resampling: str | None
     metadata: Mapping[str, Any]
+    repairs: Sequence[Mapping[str, Any]]
     registration_conversion: RegistrationConversion | None
-    def __init__(self, source_id: str, path: str | Path, kind: str, crs: str | None = ..., grid: PreparationGrid | None = ..., units: str | None = ..., vertical_reference: str | None = ..., nodata: float | int | None = ..., mask_path: str | Path | None = ..., resampling: str | None = ..., metadata: Mapping[str, Any] = ..., registration_conversion: RegistrationConversion | None = ...) -> None: ...
+    def __init__(self, source_id: str, path: str | Path, kind: str, crs: str | None = ..., grid: PreparationGrid | None = ..., units: str | None = ..., vertical_reference: str | None = ..., nodata: float | int | None = ..., mask_path: str | Path | None = ..., resampling: str | None = ..., metadata: Mapping[str, Any] = ..., registration_conversion: RegistrationConversion | None = ..., repairs: Sequence[Mapping[str, Any]] = ...) -> None: ...
     def to_dict(self) -> dict[str, Any]: ...
 
 class PreparationRecipe:

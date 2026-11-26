@@ -33,6 +33,7 @@ FAST_LANE_FILES = [
     "tests/test_install_smoke.py",
     "tests/test_license.py",
     "tests/test_api_contracts.py",
+    "tests/test_dem_audit.py",
     "tests/test_publication.py",
     "tests/test_observation_time.py",
     "tests/test_publication_ci.py",

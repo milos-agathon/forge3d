@@ -6,6 +6,7 @@ display of those cells may subsequently be sampled onto the terrain grid.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 import hashlib
 import json
@@ -162,7 +163,14 @@ class PreparationSource:
 
     registration_conversion: RegistrationConversion | None = None
 
+    repairs: Sequence[Mapping[str, Any]] = ()
+
     def __post_init__(self) -> None:
+        if self.repairs and self.kind != "elevation":
+            _fail("invalid_recipe", "DEM repairs require an elevation source.", "Declare repairs on the terrain source.", self.source_id)
+        if self.repairs:
+            from ._dem_repairs import normalize_repair
+            object.__setattr__(self, "repairs", tuple(normalize_repair(step) for step in self.repairs))
         if self.registration_conversion is not None:
             require_compatible_registration("area", "area", self.registration_conversion)
         if not self.source_id or self.kind not in _KINDS:
@@ -178,6 +186,12 @@ class PreparationSource:
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
+        if self.repairs:
+            # Nested declaration values can be edited after source construction.
+            from ._dem_repairs import normalize_repair
+            result["repairs"] = [normalize_repair(step) for step in self.repairs]
+        else:
+            result.pop("repairs")
         if self.registration_conversion is None:
             result.pop("registration_conversion")
         result["path"] = str(self.path)
@@ -226,6 +240,8 @@ class PreparationRecipe:
                       "For vectors and observations use source_xy, or choose a raster source for source_pixel.")
         try:
             _json(self.to_dict())
+        except PreparationError:
+            raise
         except (TypeError, ValueError, OverflowError) as exc:
             raise PreparationError("invalid_recipe", f"Recipe is not finite JSON: {exc}",
                                    "Use finite JSON values in metadata and settings; replace NaN/infinity with an explicit missing-value representation.") from exc
@@ -344,6 +360,9 @@ def _decode_raster(source: PreparationSource, path: Path, base: Path) -> tuple[n
             if any(s != 1 for s in ds.scales) or any(o != 0 for o in ds.offsets):
                 if source.kind in {"categorical", "count"}:
                     _fail("encoded_discrete_values", "Discrete data has scale/offset encoding.", "Decode and verify class/count meaning externally before preparation.", source.source_id)
+                if source.repairs:
+                    from ._dem_repairs import require_exact_integers
+                    require_exact_integers(data, valid)
                 data = data.astype(np.float64)
                 for band, (scale, offset) in enumerate(zip(ds.scales, ds.offsets)):
                     keep = valid[band]
@@ -451,6 +470,9 @@ def _transform_geometry_checked(geometry: Mapping[str, Any], source_crs: str, ta
 
 def prepare_scene(recipe: PreparationRecipe, *, base_dir: str | Path = ".") -> PreparedScene:
     """Execute a recipe. No network access, rendering, or provider guessing."""
+    if any(source.repairs for source in recipe.sources):
+        # Hash, execute and save one detached snapshot of the declarations.
+        recipe = PreparationRecipe.from_dict(deepcopy(recipe.to_dict()))
     base = Path(base_dir).resolve()
     layers: dict[str, PreparedLayer] = {}
     reports = []
@@ -532,6 +554,26 @@ def prepare_scene(recipe: PreparationRecipe, *, base_dir: str | Path = ".") -> P
                             and (int(data[valid].min()) < -(2**53) or int(data[valid].max()) > 2**53)):
                         _fail("category_precision", "Warp scratch cannot exactly represent these IDs.", "Remap IDs to exactly representable integers with a recorded lookup table.", source.source_id)
                 if source.kind == "elevation":
+                    if source.repairs:
+                        from ._dem_repairs import apply_repair
+                        raster = np.ma.array(data[0], mask=~valid[0])
+                        metadata["repairs_sha256"] = hashlib.sha256(
+                            _json(list(source.repairs)).encode("utf-8")).hexdigest()
+                        for step in source.repairs:
+                            try:
+                                operation = step["operation"]
+                                params = {k: v for k, v in step.items() if k != "operation"}
+                                raster, record = apply_repair(raster, operation, **params)
+                            except (KeyError, ValueError, TypeError, IndexError) as exc:
+                                raise PreparationError("invalid_repair", str(exc),
+                                                       "Check the operation and source-grid region.", source.source_id) from exc
+                            if source.mask_path and record["newly_valid"]:
+                                protected = ~np.load(_local(source.mask_path, base), allow_pickle=False)
+                                if np.any(protected & ~np.ma.getmaskarray(raster)):
+                                    _fail("invalid_repair", "Fill crosses the declared source mask.",
+                                          "Limit the fill region to disclosed cells.", source.source_id)
+                            operations.append(record)
+                        data, valid = raster.data[None], (~np.ma.getmaskarray(raster))[None]
                     data = _height_conversion(data, valid, original_grid, source, recipe.vertical_reference)
                     metadata.update({"units": "m", "vertical_reference": recipe.vertical_reference})
                     operations.append({"operation": "height_reference", "from": source.vertical_reference,

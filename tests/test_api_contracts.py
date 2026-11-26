@@ -25,6 +25,11 @@ from forge3d._native import NATIVE_AVAILABLE, get_native_module
 from _toml_compat import load_toml
 
 
+def test_dem_audit_python_surface():
+    assert "dem_audit" in f3d.__all__
+    assert callable(f3d.dem_audit.audit)
+
+
 def test_c06_publication_python_surface():
     from forge3d import publication
     for name in publication.__all__:
