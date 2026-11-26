@@ -688,6 +688,28 @@ def test_geodesic_nonfinite_span_returns_a_diagnostic(monkeypatch):
     assert "nonfinite" in str(exc.value)
 
 
+def test_geodesic_span_rejects_one_invalid_edge(monkeypatch):
+    import pyproj
+
+    class OneBadEdgeGeod:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def inv(self, *args):
+            if args[1] != args[3]:
+                return (0.0, 0.0, float("nan"))
+            return (90.0, 0.0, 9734.4)
+
+    monkeypatch.setattr(pyproj, "Geod", OneBadEdgeGeod)
+    terrain = f3d.TerrainSource(
+        data=np.zeros((100, 100), np.float32), crs="EPSG:4326",
+        metadata={"bounds": BOUNDS, "resolution": (0.0009, 0.0008)},
+    )
+    with pytest.raises(f3d.MapSceneNativeUnavailable) as exc:
+        map_scene._terrain_frame(terrain)
+    assert "nonfinite geodesic edge" in str(exc.value)
+
+
 # --- Milos's fourth review ---------------------------------------------------
 
 def test_inline_dem_shape_matches_explicit_dimensions(tmp_path):
@@ -803,10 +825,10 @@ def test_mixed_elevation_stays_inside_the_far_plane(tmp_path):
 
 # --- Milos's fifth review ----------------------------------------------------
 
-def _mixed_elevation_scene(exaggeration: float):
+def _mixed_elevation_scene(exaggeration: float, elevation_offset: float = 0.0):
     scene = _country_scene([])
-    dem = np.full((128, 128), -1800.0, dtype=np.float32)
-    dem[:64, :] = 1800.0
+    dem = np.full((128, 128), -1800.0 + elevation_offset, dtype=np.float32)
+    dem[:64, :] = 1800.0 + elevation_offset
     scene.recipe.terrain.data = dem
     settings = dict(scene.recipe.lighting.settings or {})
     settings["exaggeration"] = exaggeration
@@ -814,19 +836,38 @@ def _mixed_elevation_scene(exaggeration: float):
     return scene
 
 
+def test_eight_exaggeration_far_plane_is_invariant_to_elevation_shift():
+    for offset in (0.0, 100.0):
+        scene = _mixed_elevation_scene(8.0, offset)
+        params = map_scene._build_mapscene_terrain_params(
+            scene.recipe, scene.recipe.terrain.data, (128, 128), projection_only=True
+        )
+        low = float(scene.recipe.terrain.data.min())
+        high = float(scene.recipe.terrain.data.max())
+        center = (low + high) * 0.5
+        expected_reach = 24000.0 + abs(high - low) * 8.0 - (low - center) * 8.0
+        assert params.clip[1] > expected_reach
+
+
+@pytest.mark.parametrize("elevation_offset", [0.0, 100.0])
 @engine_required
-def test_eight_exaggeration_keeps_low_terrain_and_matches_wide_far_control(tmp_path):
+def test_eight_exaggeration_keeps_low_terrain_and_matches_wide_far_control(tmp_path, elevation_offset):
     from PIL import Image
 
-    scene = _mixed_elevation_scene(8.0)
+    scene = _mixed_elevation_scene(8.0, elevation_offset)
     # Keep the original screen-space effects and TAA enabled: the clipping bug
     # lived on this path, not only on the deterministic single-sample path.
     params = map_scene._build_mapscene_terrain_params(
         scene.recipe, scene.recipe.terrain.data, (128, 128), projection_only=True
     )
-    # Native screen mode puts the eye at radius + height_range * z_scale.
-    # The low plateau is another 14,400 m below that eye at 8x.
-    assert params.clip[1] > 24000.0 + 3600.0 * 8.0 + 1800.0 * 8.0
+    # Native screen mode centres heights on their midpoint and puts the eye at
+    # radius + height_range * z_scale. The shifted fixture must clear the same
+    # deepest centred sample as the original one.
+    low = float(scene.recipe.terrain.data.min())
+    high = float(scene.recipe.terrain.data.max())
+    center = (low + high) * 0.5
+    expected_reach = 24000.0 + abs(high - low) * 8.0 - (low - center) * 8.0
+    assert params.clip[1] > expected_reach
 
     out = tmp_path / "eight.png"
     scene.render(str(out))
@@ -844,7 +885,7 @@ def test_eight_exaggeration_keeps_low_terrain_and_matches_wide_far_control(tmp_p
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(module, "_terrain_render_span_and_clip", wide_clip)
     try:
-        scene = _mixed_elevation_scene(8.0)  # fresh scene for the control
+        scene = _mixed_elevation_scene(8.0, elevation_offset)  # fresh scene for the control
         control_out = tmp_path / "control.png"
         scene.render(str(control_out))
     finally:
@@ -983,23 +1024,54 @@ def test_file_header_keeps_an_explicit_dimension_without_affine(tmp_path):
     assert frame[2] == pytest.approx(5000.0)
 
 
-def test_invalid_metadata_affine_falls_back_to_the_file_header(tmp_path):
+def test_explicit_dimensions_resolve_independently_from_header(tmp_path):
     import rasterio
     from rasterio.transform import from_origin
 
-    path = tmp_path / "valid.tif"
+    path = tmp_path / "wide.tif"
     with rasterio.open(
-        path, "w", driver="GTiff", width=100, height=100, count=1,
+        path, "w", driver="GTiff", width=100, height=10, count=1,
         dtype="float32", crs="EPSG:32632",
         transform=from_origin(500000.0, 5200000.0, 100.0, 100.0),
     ) as dataset:
-        dataset.write(np.zeros((100, 100), np.float32), 1)
+        dataset.write(np.zeros((10, 100), np.float32), 1)
     frame = map_scene._terrain_grid_frame(
         f3d.TerrainSource(
-            path=str(path), crs="EPSG:32632",
-            metadata={"transform": "not-an-affine"},
+            path=str(path), crs="EPSG:32632", metadata={"width": 50, "height": 10}
         )
     )
-    assert frame[3] is not None
-    assert frame[4] == (100, 100)
-    assert frame[2] == pytest.approx(10000.0)
+    assert frame[4] == (50, 10)
+    assert frame[2] == pytest.approx(5000.0)
+
+
+def test_caller_affine_survives_header_crs_and_bad_affine_falls_back(tmp_path):
+    import rasterio
+    from affine import Affine
+    from rasterio.transform import from_origin
+
+    path = tmp_path / "cells.tif"
+    header = from_origin(500000.0, 5200000.0, 100.0, 100.0)
+    with rasterio.open(
+        path, "w", driver="GTiff", width=100, height=100, count=1,
+        dtype="float32", crs="EPSG:32632", transform=header,
+    ) as dataset:
+        dataset.write(np.zeros((100, 100), np.float32), 1)
+    supplied = Affine.translation(500000.0, 5200000.0) * Affine.scale(200.0, -200.0)
+
+    caller = map_scene._terrain_grid_frame(
+        f3d.TerrainSource(path=str(path), metadata={"transform": supplied.to_gdal()})
+    )
+    assert caller[1] == "EPSG:32632"
+    assert caller[3] == supplied
+    assert caller[2] == pytest.approx(20000.0)
+
+    fallback = map_scene._terrain_grid_frame(
+        f3d.TerrainSource(
+            path=str(path), crs="EPSG:32632",
+            metadata={"width": 100, "height": 100, "transform": "not-an-affine"},
+        )
+    )
+    assert fallback[3] == header
+    assert fallback[4] == (100, 100)
+    assert fallback[2] == pytest.approx(10000.0)
+    assert fallback[0] == pytest.approx((500000.0, 5190000.0, 510000.0, 5200000.0))
