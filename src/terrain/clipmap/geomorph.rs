@@ -317,7 +317,11 @@ pub fn analyze_depth_discontinuities(
         let bottom = at(x0, y1) * (1.0 - tx) + at(x1, y1) * tx;
         top * (1.0 - ty) + bottom * ty
     };
+    let pyramid = crate::terrain::masked_height::MaskedPyramid::new(heightmap, height_dims);
     let sample = |vertex: &ClipmapVertex| {
+        if let Some(levels) = &pyramid {
+            return levels.morph(vertex.uv, vertex.morph_data) * z_scale;
+        }
         let fine = sample_uv(vertex.uv);
         let coarse_texels = 1u32 << ((vertex.ring_index() as u32 + 1).min(16));
         let step = Vec2::new(
@@ -361,8 +365,16 @@ pub fn analyze_depth_discontinuities(
         let (lo_axis, lo) = candidates[upper - 1];
         let (hi_axis, hi) = candidates[upper];
         let t = ((axis - lo_axis) / (hi_axis - lo_axis).max(f32::EPSILON)).clamp(0.0, 1.0);
-        let coarse_depth = sample(lo) * (1.0 - t) + sample(hi) * t;
+        let (low, high) = (sample(lo), sample(hi));
+        let coarse_depth = if low.is_finite() && high.is_finite() {
+            low * (1.0 - t) + high * t
+        } else {
+            crate::terrain::masked_height::bilinear([low, high, low, high], t, 0.0)
+        };
         let gap = (sample(fine) - coarse_depth).abs();
+        if !gap.is_finite() {
+            continue;
+        }
         result.sample_count += 1;
         result.max_depth_gap = result.max_depth_gap.max(gap);
         total += gap;

@@ -196,41 +196,83 @@ impl ViewerTerrainScene {
         let (width, height) = decoder.dimensions()?;
         let image = decoder.read_image()?;
 
-        let mut heightmap: Vec<f32> = match image {
-            tiff::decoder::DecodingResult::F32(data) => data,
-            tiff::decoder::DecodingResult::F64(data) => data.iter().map(|&v| v as f32).collect(),
-            tiff::decoder::DecodingResult::I16(data) => data.iter().map(|&v| v as f32).collect(),
-            tiff::decoder::DecodingResult::U16(data) => data.iter().map(|&v| v as f32).collect(),
-            tiff::decoder::DecodingResult::I32(data) => data.iter().map(|&v| v as f32).collect(),
-            tiff::decoder::DecodingResult::U32(data) => data.iter().map(|&v| v as f32).collect(),
-            tiff::decoder::DecodingResult::U8(data) => data.iter().map(|&v| v as f32).collect(),
-            tiff::decoder::DecodingResult::I8(data) => data.iter().map(|&v| v as f32).collect(),
-            tiff::decoder::DecodingResult::U64(data) => data.iter().map(|&v| v as f32).collect(),
-            tiff::decoder::DecodingResult::I64(data) => data.iter().map(|&v| v as f32).collect(),
+        let marker = raster_info.nodata_per_band.first().copied().flatten();
+        macro_rules! decode {
+            ($values:expr, $marker:expr) => {{
+                let marker = $marker;
+                $values
+                    .into_iter()
+                    .map(|value| {
+                        if Some(value) == marker {
+                            f32::NAN
+                        } else {
+                            value as f32
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            }};
+        }
+        macro_rules! integers {
+            ($values:expr, $ty:ty) => {{
+                let typed = marker.and_then(|m| {
+                    let value = m as $ty;
+                    (m.is_finite() && value as f64 == m).then_some(value)
+                });
+                decode!($values, typed)
+            }};
+        }
+        use tiff::decoder::DecodingResult as Samples;
+        let mut heightmap = match image {
+            Samples::F32(v) => decode!(v, marker.map(|m| m as f32)),
+            Samples::F64(v) => decode!(v, marker),
+            Samples::I8(v) => integers!(v, i8),
+            Samples::I16(v) => integers!(v, i16),
+            Samples::I32(v) => integers!(v, i32),
+            Samples::I64(v) => integers!(v, i64),
+            Samples::U8(v) => integers!(v, u8),
+            Samples::U16(v) => integers!(v, u16),
+            Samples::U32(v) => integers!(v, u32),
+            Samples::U64(v) => integers!(v, u64),
         };
-
-        // Filter out nodata values (common nodata: -9999, -32768, etc.)
-        let (min_h, max_h) = heightmap
-            .iter()
-            .filter(|h| h.is_finite() && **h > -1000.0 && **h < 10000.0)
-            .fold((f32::MAX, f32::MIN), |(min, max), &h| {
-                (min.min(h), max.max(h))
-            });
-
-        // Debug: print height range to diagnose flat terrain issue
-        let h_range = max_h - min_h;
-        println!(
-            "[terrain] Height range: {:.1} to {:.1} (range: {:.1})",
-            min_h, max_h, h_range
-        );
-
-        // Replace NoData values with min_h to prevent edge artifacts
-        // NoData values are typically: NaN, Inf, < -1000, > 10000
-        for h in heightmap.iter_mut() {
-            if !h.is_finite() || *h < -1000.0 || *h > 10000.0 {
-                *h = min_h;
+        let bands = usize::from(raster_info.band_count);
+        if bands > 1 {
+            heightmap = heightmap.into_iter().step_by(bands).collect();
+        }
+        if let Some(valid) = crate::gis::raster_mask::read_explicit_mask(
+            std::path::Path::new(path), &mut decoder, bands,
+        )? {
+            for (height, valid) in heightmap.iter_mut().zip(valid) {
+                if !valid {
+                    *height = f32::NAN;
+                }
             }
         }
+        let dense_legacy = heightmap.iter().all(|h| h.is_finite());
+        let (mut min_h, mut max_h) = heightmap
+            .iter()
+            .copied()
+            .filter(|h| h.is_finite())
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), h| {
+                (lo.min(h), hi.max(h))
+            });
+        // Fully covered files historically used this display interval, including files with an unused tag.
+        // Keep that rendering convention when there is a usable reference floor.
+        if dense_legacy {
+            let mut range = heightmap
+                .iter()
+                .copied()
+                .filter(|&h| h > -1000.0 && h < 10000.0);
+            if let Some(first) = range.next() {
+                (min_h, max_h) = range.fold((first, first), |(lo, hi), h| (lo.min(h), hi.max(h)));
+                for h in &mut heightmap {
+                    if !(-1000.0..=10000.0).contains(h) {
+                        *h = min_h;
+                    }
+                }
+            }
+        }
+        anyhow::ensure!(min_h <= max_h, "terrain has no valid heights");
+        let masked = crate::terrain::masked_height::masked_texels(&heightmap);
 
         let heightmap_texture = tracked_create_texture(
             &self.device,
@@ -244,7 +286,7 @@ impl ViewerTerrainScene {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R32Float,
+                format: if masked.is_some() { wgpu::TextureFormat::Rg32Float } else { wgpu::TextureFormat::R32Float },
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             },
@@ -257,10 +299,10 @@ impl ViewerTerrainScene {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            bytemuck::cast_slice(&heightmap),
+            masked.as_deref().map(bytemuck::cast_slice).unwrap_or_else(|| bytemuck::cast_slice(&heightmap)),
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(width * 4),
+                bytes_per_row: Some(width * if masked.is_some() {8} else {4}),
                 rows_per_image: Some(height),
             },
             wgpu::Extent3d {
@@ -281,6 +323,12 @@ impl ViewerTerrainScene {
             }
         }
 
+        let indices = if masked.is_some() {
+            clip_missing_triangles(&mut vertices, &indices, &heightmap, width, height)?
+        } else {
+            indices
+        };
+
         let vertex_buffer = tracked_create_buffer_init(
             &self.device,
             &wgpu::util::BufferInitDescriptor {
@@ -294,7 +342,9 @@ impl ViewerTerrainScene {
             &self.device,
             &wgpu::util::BufferInitDescriptor {
                 label: Some("terrain_viewer.index_buffer"),
-                contents: bytemuck::cast_slice(&indices),
+                // A coarse mesh may have no covered triangles. wgpu still
+                // needs a sliceable index buffer for a zero-count draw.
+                contents: if indices.is_empty() { &[0; 4] } else { bytemuck::cast_slice(&indices) },
                 usage: wgpu::BufferUsages::INDEX,
             },
         )?;
@@ -359,6 +409,7 @@ impl ViewerTerrainScene {
         let next_revision = self.terrain_revision_counter.wrapping_add(1);
         let mut terrain = ViewerTerrainData {
             heightmap,
+            masked_geometry: masked.is_some(),
             dimensions: (width, height),
             domain: (min_h, max_h),
             revision: next_revision,
@@ -586,6 +637,68 @@ fn sample_lattice_uv(node_uv: f32, samples: u32) -> f32 {
         return node_uv;
     }
     ((node_uv * (samples - 1) as f32).round() + 0.5) / samples as f32
+}
+
+// Vertex layout is [position UV, height-source UV]. Clip the mesh at half
+// barycentric support. At a mixed edge its sole valid endpoint supplies all
+// the height, while the geometry ends halfway along that edge.
+fn clip_missing_triangles(
+    vertices: &mut Vec<f32>,
+    indices: &[u32],
+    heights: &[f32],
+    width: u32,
+    height: u32,
+) -> Result<Vec<u32>> {
+    use std::collections::HashMap;
+    let covered: Vec<bool> = vertices
+        .chunks_exact(4)
+        .map(|v| {
+            let x = ((v[2] * width as f32) as u32).min(width - 1);
+            let y = ((v[3] * height as f32) as u32).min(height - 1);
+            heights[y as usize * width as usize + x as usize].is_finite()
+        })
+        .collect();
+    let mut edges = HashMap::new();
+    let mut result = Vec::with_capacity(indices.len());
+    for tri in indices.chunks_exact(3) {
+        let mut polygon = [0; 4];
+        let mut count = 0;
+        for i in 0..3 {
+            let a = tri[i];
+            let b = tri[(i + 1) % 3];
+            let a_valid = covered[a as usize];
+            if a_valid {
+                polygon[count] = a;
+                count += 1;
+            }
+            if a_valid != covered[b as usize] {
+                let edge = (a.min(b), a.max(b));
+                let index = match edges.entry(edge) {
+                    std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        let index = u32::try_from(vertices.len() / 4)?;
+                        let valid = (if a_valid { a } else { b }) as usize * 4;
+                        let (i, j) = (a as usize * 4, b as usize * 4);
+                        let vertex = [
+                            (vertices[i] + vertices[j]) * 0.5,
+                            (vertices[i + 1] + vertices[j + 1]) * 0.5,
+                            vertices[valid + 2],
+                            vertices[valid + 3],
+                        ];
+                        vertices.extend_from_slice(&vertex);
+                        *entry.insert(index)
+                    }
+                };
+                polygon[count] = index;
+                count += 1;
+            }
+        }
+        for i in 2..count {
+            result.extend_from_slice(&[polygon[0], polygon[i - 1], polygon[i]]);
+        }
+    }
+    u32::try_from(result.len())?;
+    Ok(result)
 }
 
 fn create_grid_mesh(cols: u32, rows: u32) -> (Vec<f32>, Vec<u32>) {

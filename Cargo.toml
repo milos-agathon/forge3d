@@ -50,7 +50,7 @@ images = ["dep:exr"]
 # P2.2: LAZ decompression in COPC reader
 copc_laz = ["dep:laz"]
 # P3: Cloud Optimized GeoTIFF streaming
-cog_streaming = ["dep:reqwest", "dep:async-trait", "dep:tokio", "dep:flate2"]
+cog_streaming = ["dep:reqwest", "dep:async-trait", "dep:tokio"]
 # ORBIS: opt-in planetary clipmap assembly.
 enable-globe = ["cog_streaming"]
 # G-002 Later: explicit remote geodata fetch/cache backend
@@ -75,6 +75,7 @@ pollster = "0.3"
 bytemuck = { version = "1", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 tiff = "0.9"
+flate2 = "1.0"
 exr = { version = "1.72", optional = true }
 glam = "0.24"
 thiserror = "1"
@@ -113,7 +114,6 @@ numpy = "0.21"
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync"], optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls"], optional = true }
 async-trait = { version = "0.1", optional = true }
-flate2 = { version = "1.0", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokio = { version = "1", features = ["rt", "sync"], optional = true }

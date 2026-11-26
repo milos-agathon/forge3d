@@ -9,6 +9,7 @@ import numpy as np
 
 from ._map_scene_common import _layer_id, _metadata, _same_crs, _stable_hash
 from .crs import transform_coords
+from ._raster_sampling import output_nodata, read_band_validity
 from .raster_registration import (
     PixelRegistration, RegistrationConversion, geotiff_registration,
     pixel_registration, require_compatible_registration,
@@ -145,6 +146,50 @@ def _grid_metadata(crs: Any, transform: Any, width: int, height: int, nodata: An
     }
 
 
+def _warp_band(values, valid, destination, *, src_transform, src_crs, dst_transform,
+               dst_crs, method, nodata):
+    """Warp continuous values and support using identical kernel coordinates."""
+    from rasterio.warp import reproject
+    kwargs = dict(src_transform=src_transform, src_crs=src_crs,
+                  dst_transform=dst_transform, dst_crs=dst_crs,
+                  resampling=_resampling_method(method))
+    if valid.all() or str(method).lower() in ("nearest", "mode"):
+        scratch = values if valid.all() else np.where(valid, values, np.nan)
+        # Coverage determines padding. Passing a finite destination marker here
+        # lets GDAL perturb a real value that rounds onto that marker.
+        reproject(scratch, destination, src_nodata=None if valid.all() else np.nan,
+                  init_dest_nodata=False, **kwargs)
+        # Distinguish real zero values (including integer imagery) from padding.
+        weight = np.zeros(destination.shape, np.float64)
+        reproject(valid.astype(np.float64), weight, dst_nodata=0, **kwargs)
+        covered = weight >= 0.5
+        destination[~covered] = nodata
+        return covered
+    weight = np.zeros(destination.shape, np.float64)
+    total = np.zeros_like(weight)
+    reproject(valid.astype(np.float64), weight, dst_nodata=0, **kwargs)
+    reproject(np.where(valid, values, 0).astype(np.float64), total, dst_nodata=0, **kwargs)
+    covered = weight >= 0.5
+    result = total[covered] / weight[covered]
+    if np.issubdtype(destination.dtype, np.integer):
+        limits = np.iinfo(destination.dtype)
+        result = np.clip(np.rint(result), limits.min, limits.max)
+    destination.fill(nodata)
+    destination[covered] = result
+    return covered
+
+
+def _verify_written_validity(rasterio, path, expected):
+    with rasterio.open(path) as written:
+        for _, window in written.block_windows(1):
+            actual = np.ones((int(window.height), int(window.width)), dtype=bool)
+            for band in written.indexes:
+                _, valid = read_band_validity(written, band, window=window)
+                actual &= valid
+            if not np.array_equal(actual, expected[window.toslices()]):
+                raise ValueError(f"GeoTIFF validity changed after writing {path} at {window}")
+
+
 def reproject_dem_to_target(
     source: str | Path,
     target_crs: str,
@@ -160,7 +205,7 @@ def reproject_dem_to_target(
     """
 
     rasterio = _require_rasterio()
-    from rasterio.warp import calculate_default_transform, reproject
+    from rasterio.warp import calculate_default_transform
 
     src_path = Path(source)
     with rasterio.open(src_path) as src:
@@ -177,19 +222,15 @@ def reproject_dem_to_target(
         nodata = dst_nodata if dst_nodata is not None else src.nodata
         if nodata is None:
             nodata = -9999.0
-        destination = np.full((height, width), nodata, dtype=np.float32)
-        reproject(
-            source=rasterio.band(src, 1),
-            destination=destination,
-            src_transform=src.transform,
-            src_crs=src.crs,
-            src_nodata=src.nodata,
-            dst_transform=transform,
-            dst_crs=target_crs,
-            dst_nodata=nodata,
-            init_dest_nodata=True,
-            resampling=_resampling_method(resampling),
-        )
+        destination = np.full((height, width), np.nan, dtype=np.float32)
+        raw, valid = read_band_validity(src, 1)
+        validity = _warp_band(raw, valid, destination, src_transform=src.transform,
+                              src_crs=src.crs, dst_transform=transform, dst_crs=target_crs,
+                              method=resampling, nodata=np.nan)
+        if np.any(validity & ~np.isfinite(destination)):
+            raise ValueError("valid warped elevation cannot be represented as Float32")
+        nodata = output_nodata(destination, validity, nodata)
+        destination[~validity] = nodata
         profile = src.profile.copy()
         profile.update(
             driver="GTiff",
@@ -207,9 +248,11 @@ def reproject_dem_to_target(
             out_path.parent.mkdir(parents=True, exist_ok=True)
             with rasterio.open(out_path, "w", **profile) as dst:
                 dst.write(destination, 1)
+                dst.write_mask(validity)
                 dst.update_tags(AREA_OR_POINT=registration.title())
                 dst.scales = src.scales[:1]
                 dst.offsets = src.offsets[:1]
+            _verify_written_validity(rasterio, out_path, validity)
             written_path = str(out_path)
         metadata = _grid_metadata(target_crs, transform, width, height, nodata, registration=registration)
         metadata["scales"] = list(src.scales[:1])
@@ -222,7 +265,7 @@ def reproject_dem_to_target(
                 "resampling": str(resampling),
             }
         )
-    return {"array": destination, "metadata": metadata, "profile": profile, "path": written_path}
+    return {"array": destination, "validity_mask": validity, "metadata": metadata, "profile": profile, "path": written_path}
 
 
 def resample_raster_to_grid(
@@ -237,7 +280,6 @@ def resample_raster_to_grid(
     """Resample a raster onto an explicit target grid."""
 
     rasterio = _require_rasterio()
-    from rasterio.warp import reproject
 
     target_crs = target_grid.get("crs") or target_grid.get("target_crs")
     if target_crs is None:
@@ -256,25 +298,15 @@ def resample_raster_to_grid(
         nodata = dst_nodata if dst_nodata is not None else target_grid.get("nodata", src.nodata)
         fill = 0 if nodata is None else nodata
         destination = np.full((src.count, height, width), fill, dtype=src.dtypes[0])
+        validity = np.ones((height, width), bool)
         for band in range(1, src.count + 1):
-            reproject(
-                source=rasterio.band(src, band),
-                destination=destination[band - 1],
-                src_transform=src.transform,
-                src_crs=src.crs,
-                src_nodata=src.nodata,
-                dst_transform=transform,
-                dst_crs=target_crs,
-                dst_nodata=nodata,
-                init_dest_nodata=True,
-                resampling=_resampling_method(resampling),
-            )
-        validity = np.zeros((height, width), dtype=np.uint8)
-        source_validity = np.min(src.read_masks(), axis=0)
-        reproject(source=source_validity, destination=validity,
-                  src_transform=src.transform, src_crs=src.crs, src_nodata=0,
-                  dst_transform=transform, dst_crs=target_crs, dst_nodata=0,
-                  resampling=_resampling_method("nearest"))
+            raw, valid = read_band_validity(src, band)
+            validity &= _warp_band(raw, valid, destination[band-1], src_transform=src.transform,
+                                   src_crs=src.crs, dst_transform=transform, dst_crs=target_crs,
+                                   method=resampling, nodata=fill)
+        nodata = output_nodata(destination, validity, nodata)
+        if nodata is not None and np.isnan(nodata):
+            destination[:, ~validity] = nodata
         profile = src.profile.copy()
         profile.update(
             driver="GTiff",
@@ -290,9 +322,11 @@ def resample_raster_to_grid(
             out_path.parent.mkdir(parents=True, exist_ok=True)
             with rasterio.open(out_path, "w", **profile) as dst:
                 dst.write(destination)
+                dst.write_mask(validity)
                 dst.update_tags(AREA_OR_POINT=registration.title())
                 dst.scales = src.scales
                 dst.offsets = src.offsets
+            _verify_written_validity(rasterio, out_path, validity)
             written_path = str(out_path)
         metadata = _grid_metadata(target_crs, transform, width, height, nodata, registration=registration)
         if native_origin_shift:

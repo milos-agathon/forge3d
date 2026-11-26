@@ -17,6 +17,7 @@ from typing import Any, Mapping, NoReturn, Sequence
 
 import numpy as np
 
+from ._raster_sampling import read_band_validity
 from .alignment import _affine_from_metadata, _require_rasterio, _resampling_method
 from .diagnostics import Diagnostic
 from .raster_registration import (
@@ -319,7 +320,7 @@ def _decode_raster(source: PreparationSource, path: Path, base: Path) -> tuple[n
             if source.grid and not source.grid.same_as(grid):
                 _fail("conflicting_grid", "Declared grid differs from GeoTIFF metadata.", "Correct the grid declaration or the source geotransform.", source.source_id)
             data = ds.read()
-            valid = ds.read_masks() != 0
+            valid = np.stack([read_band_validity(ds, i, data[i - 1])[1] for i in ds.indexes])
             if source.nodata is not None:
                 valid &= data != source.nodata
             extra = {"tags": ds.tags(), "scales": list(ds.scales), "offsets": list(ds.offsets),
@@ -345,7 +346,8 @@ def _decode_raster(source: PreparationSource, path: Path, base: Path) -> tuple[n
                     _fail("encoded_discrete_values", "Discrete data has scale/offset encoding.", "Decode and verify class/count meaning externally before preparation.", source.source_id)
                 data = data.astype(np.float64)
                 for band, (scale, offset) in enumerate(zip(ds.scales, ds.offsets)):
-                    data[band] = data[band] * scale + offset
+                    keep = valid[band]
+                    data[band, keep] = data[band, keep] * scale + offset
     elif path.suffix.lower() == ".npy":
         if source.grid is None:
             _fail("missing_grid", "NumPy arrays have no geographic metadata.", "Declare a source grid with CRS and corner transform.", source.source_id)
@@ -384,14 +386,13 @@ def _warp(data: np.ndarray, valid: np.ndarray, source: PreparationGrid,
     Float64 scratch values avoid narrowing scientific inputs. Discrete warps
     require exactly representable values and cast back only after nearest copy.
     """
-    from rasterio.warp import reproject
+    from .alignment import _warp_band
+
     destination = np.full((data.shape[0], target.height, target.width), np.nan, dtype=np.float64)
     for band in range(data.shape[0]):
-        values = data[band].astype(np.float64)
-        values[~valid[band]] = np.nan
-        reproject(values, destination[band], src_transform=source.transform, src_crs=source.crs,
-                  src_nodata=np.nan, dst_transform=target.transform, dst_crs=target.crs,
-                  dst_nodata=np.nan, resampling=_resampling_method(resampling))
+        _warp_band(data[band].astype(np.float64), valid[band], destination[band],
+                   src_transform=source.transform, src_crs=source.crs, dst_transform=target.transform,
+                   dst_crs=target.crs, method=resampling, nodata=np.nan)
     return destination, np.isfinite(destination)
 
 

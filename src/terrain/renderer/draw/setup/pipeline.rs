@@ -121,7 +121,7 @@ impl TerrainScene {
                 &self.material_layer_bind_group_layout,
                 color_format,
                 effective_msaa,
-            );
+            )?;
             // Invalidate so the clipmap variant is rebuilt at the new sample
             // count on next use.
             pipeline_cache.clipmap_pipeline = None;
@@ -146,7 +146,7 @@ impl TerrainScene {
                 &self.material_layer_bind_group_layout,
                 color_format,
                 effective_msaa,
-            ));
+            )?);
         }
         #[cfg(feature = "enable-globe")]
         if needs_clipmap

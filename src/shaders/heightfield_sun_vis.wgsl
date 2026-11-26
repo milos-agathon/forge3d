@@ -26,15 +26,15 @@ var height_samp: sampler;
 @group(0) @binding(3)
 var vis_output: texture_storage_2d<r32float, write>;
 
-fn sample_height(uv: vec2<f32>) -> f32 {
+fn sample_height(uv: vec2<f32>) -> vec2<f32> {
     // Use textureLoad since R32Float doesn't support filtering
     let tex_size = vec2<f32>(u_sun.params2.z, u_sun.params2.w);
     let pixel = vec2<i32>(uv * tex_size);
     let clamped_pixel = clamp(pixel, vec2<i32>(0), vec2<i32>(tex_size) - vec2<i32>(1));
-    let h = textureLoad(height_tex, clamped_pixel, 0).r;
+    let h = textureLoad(height_tex, clamped_pixel, 0).rg;
     // Height textures store raw elevation values. Convert them to the same
     // scene-space Y used by the terrain render path: (h - height_min) * z_scale.
-    return (h - u_sun.params1.w) * u_sun.params1.z;
+    return vec2<f32>((h.x - u_sun.params1.w) * u_sun.params1.z, h.y);
 }
 
 fn compute_sun_visibility(center_uv: vec2<f32>, center_height: f32) -> f32 {
@@ -93,7 +93,9 @@ fn compute_sun_visibility(center_uv: vec2<f32>, center_height: f32) -> f32 {
             }
             
             // Sample height at this position
-            let sample_h = sample_height(sample_uv);
+            let tap = sample_height(sample_uv);
+            if (tap.y > 0.5) { continue; }
+            let sample_h = tap.x;
             
             // Compute horizontal distance in world units
             let horizontal_dist = length((sample_uv - center_uv) * world_extent);
@@ -143,7 +145,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let uv = (vec2<f32>(global_id.xy) + 0.5) / vec2<f32>(output_size);
     
     // Sample center height
-    let center_height = sample_height(uv);
+    let center = sample_height(uv);
+    if (center.y > 0.5) { textureStore(vis_output,vec2<i32>(global_id.xy),vec4<f32>(1.0)); return; }
+    let center_height = center.x;
     
     // Compute sun visibility
     let visibility = compute_sun_visibility(uv, center_height);

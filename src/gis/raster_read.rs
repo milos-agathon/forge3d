@@ -17,7 +17,18 @@ use crate::gis::raster_write::{RasterArray, RasterData};
 use crate::gis::types::{RasterDType, RasterInfo};
 
 pub(crate) fn read_raster_data(path: impl AsRef<Path>) -> GisResult<LoadedRaster> {
-    let path = path.as_ref();
+    decode_raster(path.as_ref(), false)
+}
+
+pub(crate) fn read_sampling_raster(path: impl AsRef<Path>) -> GisResult<LoadedRaster> {
+    let mut loaded = decode_raster(path.as_ref(), true)?;
+    if let Some(mask) = loaded.explicit_mask.take() {
+        apply_sampling_mask(&mut loaded.array, &loaded.info.nodata_per_band, &mask)?;
+    }
+    Ok(loaded)
+}
+
+pub(crate) fn decode_raster(path: &Path, with_mask: bool) -> GisResult<LoadedRaster> {
     let info = read_raster_info(path)?;
     let file = File::open(path)?;
     let mut decoder = Decoder::new(BufReader::new(file))?;
@@ -53,7 +64,51 @@ pub(crate) fn read_raster_data(path: impl AsRef<Path>) -> GisResult<LoadedRaster
             "unsupported TIFF dtype for raster operation".to_string(),
         )),
     }?;
-    Ok(LoadedRaster { array, info })
+    let explicit_mask = if with_mask {
+        super::raster_mask::read_explicit_mask(path, &mut decoder, bands)?
+    } else {
+        None
+    };
+    Ok(LoadedRaster { array, info, explicit_mask })
+}
+
+fn apply_sampling_mask(
+    array: &mut RasterArray,
+    nodata: &[Option<f64>],
+    mask: &[bool],
+) -> GisResult<()> {
+    if mask.iter().all(|v| *v) {
+        return Ok(());
+    }
+    let dtype = array.dtype();
+    let output_type = if dtype.is_float()
+        || nodata
+            .iter()
+            .all(|m| m.is_some_and(|v| dtype.nodata_fits(v)))
+    {
+        dtype
+    } else {
+        RasterDType::Float64
+    };
+    let plane = array.width * array.height;
+    let mut values = super::raster_values::raster_to_f64(array);
+    for (band, samples) in values.chunks_exact_mut(plane).enumerate() {
+        let covered = super::raster_values::mask_plane(mask, band, plane);
+        let fill = nodata[band].unwrap_or(f64::NAN);
+        for (value, valid) in samples.iter_mut().zip(covered) {
+            if !valid {
+                *value = fill;
+            }
+        }
+    }
+    *array = super::raster_values::f64_to_raster_data(
+        output_type,
+        values,
+        array.bands,
+        array.height,
+        array.width,
+    )?;
+    Ok(())
 }
 
 fn read_uncompressed_strips(path: &Path, info: &RasterInfo) -> GisResult<DecodingResult> {

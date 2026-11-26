@@ -201,8 +201,43 @@ pub struct MinMaxMips {
 /// Level 0 covers the (w-1) x (h-1) bilinear DEM cells (cell (x, y) stores
 /// the min/max of its four corner samples, which bounds the bilinear surface
 /// over the cell), padded to power-of-two dims. Every coarser mip reduces
-/// 2x2 children, so parents always cover all children.
+/// 2x2 logical children. Report a range when at least half are valid;
+/// power-of-two padding is outside the footprint.
 pub fn build_minmax_mips(heights: &[f32], w: u32, h: u32) -> Result<MinMaxMips, RenderError> {
+    reduce_minmax(heights, w, h, BoundsPolicy::Report)
+}
+
+/// Traversal may prune only an entirely empty branch: one valid corner
+/// can still support a hit sufficiently close to that corner.
+pub(crate) fn build_traversal_bounds(
+    heights: &[f32],
+    w: u32,
+    h: u32,
+) -> Result<MinMaxMips, RenderError> {
+    reduce_minmax(heights, w, h, BoundsPolicy::Traverse)
+}
+
+#[derive(Clone, Copy)]
+enum BoundsPolicy {
+    Report,
+    Traverse,
+}
+
+impl BoundsPolicy {
+    fn covered(self, valid: u32, children: u32) -> bool {
+        match self {
+            Self::Report => valid > 0 && 2 * valid >= children,
+            Self::Traverse => valid > 0,
+        }
+    }
+}
+
+fn reduce_minmax(
+    heights: &[f32],
+    w: u32,
+    h: u32,
+    policy: BoundsPolicy,
+) -> Result<MinMaxMips, RenderError> {
     if w < 2 || h < 2 {
         return Err(RenderError::Upload(format!(
             "terrain heightfield must be at least 2x2 texels, got {w}x{h}"
@@ -214,7 +249,7 @@ pub fn build_minmax_mips(heights: &[f32], w: u32, h: u32) -> Result<MinMaxMips, 
             heights.len()
         )));
     }
-    if heights.iter().any(|v| !v.is_finite()) {
+    if heights.iter().any(|v| v.is_infinite()) || !heights.iter().any(|v| v.is_finite()) {
         return Err(RenderError::Upload(
             "terrain heightfield contains non-finite samples".into(),
         ));
@@ -233,12 +268,21 @@ pub fn build_minmax_mips(heights: &[f32], w: u32, h: u32) -> Result<MinMaxMips, 
             let i01 = i00 + w as usize;
             let i11 = i01 + 1;
             let (a, b, c, d) = (heights[i00], heights[i10], heights[i01], heights[i11]);
-            level0[y * pw as usize + x] = [a.min(b).min(c).min(d), a.max(b).max(c).max(d)];
+            let mut bounds = EMPTY;
+            let mut count = 0;
+            for value in [a, b, c, d].into_iter().filter(|v| v.is_finite()) {
+                count += 1;
+                bounds = [bounds[0].min(value), bounds[1].max(value)];
+            }
+            if policy.covered(count, 4) {
+                level0[y * pw as usize + x] = bounds;
+            }
         }
     }
 
     let mut levels = vec![level0];
     let mut dims = vec![(pw, ph)];
+    let (mut logical_w, mut logical_h) = (cw, ch);
     while dims.last().unwrap().0 > 1 || dims.last().unwrap().1 > 1 {
         let (lw, lh) = *dims.last().unwrap();
         let (nw, nh) = ((lw / 2).max(1), (lh / 2).max(1));
@@ -248,22 +292,27 @@ pub fn build_minmax_mips(heights: &[f32], w: u32, h: u32) -> Result<MinMaxMips, 
             for x in 0..nw as usize {
                 let mut mn = f32::INFINITY;
                 let mut mx = f32::NEG_INFINITY;
-                for dy in 0..2usize {
-                    for dx in 0..2usize {
-                        // Non-square pot dims collapse one axis early; clamp
-                        // keeps full coverage in that case.
-                        let sx = (2 * x + dx).min(lw as usize - 1);
-                        let sy = (2 * y + dy).min(lh as usize - 1);
-                        let v = prev[sy * lw as usize + sx];
-                        mn = mn.min(v[0]);
-                        mx = mx.max(v[1]);
+                let (mut count, mut total) = (0, 0);
+                for sy in 2 * y..(2 * y + 2).min(logical_h as usize) {
+                    for sx in 2 * x..(2 * x + 2).min(logical_w as usize) {
+                        let [lo, hi] = prev[sy * lw as usize + sx];
+                        total += 1;
+                        if lo <= hi {
+                            count += 1;
+                            mn = mn.min(lo);
+                            mx = mx.max(hi);
+                        }
                     }
                 }
-                next[y * nw as usize + x] = [mn, mx];
+                if policy.covered(count, total) {
+                    next[y * nw as usize + x] = [mn, mx];
+                }
             }
         }
         levels.push(next);
         dims.push((nw, nh));
+        logical_w = logical_w.div_ceil(2);
+        logical_h = logical_h.div_ceil(2);
     }
 
     Ok(MinMaxMips {
@@ -318,12 +367,21 @@ impl TerrainMinMaxPyramid {
         h: u32,
         precision: MinMaxPrecision,
     ) -> Result<Self, RenderError> {
-        let mips = build_minmax_mips(heights, w, h)?;
+        let mips = build_traversal_bounds(heights, w, h)?;
         let (pot_w, pot_h) = mips.dims[0];
         let (cell_w, cell_h) = (mips.cell_w, mips.cell_h);
         let mip_count = mips.levels.len() as u32;
-        let h_min = heights.iter().copied().fold(f32::INFINITY, f32::min);
-        let h_max = heights.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let masked = crate::terrain::masked_height::masked_texels(heights);
+        let h_min = heights
+            .iter()
+            .copied()
+            .filter(|v| v.is_finite())
+            .fold(f32::INFINITY, f32::min);
+        let h_max = heights
+            .iter()
+            .copied()
+            .filter(|v| v.is_finite())
+            .fold(f32::NEG_INFINITY, f32::max);
 
         let height_texture = tracked_create_texture(
             device,
@@ -337,7 +395,11 @@ impl TerrainMinMaxPyramid {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: TextureFormat::R32Float,
+                format: if masked.is_some() {
+                    TextureFormat::Rg32Float
+                } else {
+                    TextureFormat::R32Float
+                },
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             },
@@ -349,10 +411,13 @@ impl TerrainMinMaxPyramid {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            bytemuck::cast_slice(heights),
+            masked
+                .as_deref()
+                .map(bytemuck::cast_slice)
+                .unwrap_or_else(|| bytemuck::cast_slice(heights)),
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(w * 4),
+                bytes_per_row: Some(w * if masked.is_some() { 8 } else { 4 }),
                 rows_per_image: Some(h),
             },
             wgpu::Extent3d {
@@ -386,7 +451,7 @@ impl TerrainMinMaxPyramid {
                 view_formats: &[],
             },
         )?;
-        let height_bytes = (w as u64) * (h as u64) * 4;
+        let height_bytes = (w as u64) * (h as u64) * if masked.is_some() { 8 } else { 4 };
         let mut minmax_bytes = 0u64;
         for (level, ((lw, lh), data)) in mips.dims.iter().zip(mips.levels.iter()).enumerate() {
             // Conservative half-float bounds: min rounds down, max rounds up.
@@ -2551,6 +2616,28 @@ fn main_helios_production_terrain_trace_proof(@builtin(global_invocation_id) gid
     #[test]
     fn primary_below_entry_with_upward_exit_keeps_exact_root() {
         assert!(deviation_span_hit(-1.0, 0.0, 1.0, false));
+    }
+
+    #[test]
+    fn vacuum_production_ray_obeys_masked_coverage() {
+        let mut heights = vec![0.0; PROOF_DEM_SIDE * PROOF_DEM_SIDE];
+        heights[0] = f32::NAN;
+        heights[PROOF_DEM_SIDE + 1] = 1.0;
+        let rays = [0.9, 0.1].map(|uv| ProofRay {
+            origin: [uv * PROOF_SPACING_M, 10.0, uv * PROOF_SPACING_M],
+            direction: [0.0, -1.0, 0.0],
+            inv_two_r_prime: 1.0 / 14_650_000.0,
+        });
+        let (hits, _, _) = production_gpu_hits(&heights, &rays).unwrap();
+        assert_eq!(hits, [1, 0]);
+
+        heights.fill(f32::NAN);
+        heights[0] = 0.0;
+        let dims = PROOF_DEM_SIDE as u32;
+        let reported = build_minmax_mips(&heights, dims, dims).unwrap();
+        assert_eq!(reported.levels.last().unwrap()[0], [f32::INFINITY, f32::NEG_INFINITY]);
+        let (hits, _, _) = production_gpu_hits(&heights, &rays).unwrap();
+        assert_eq!(hits, [0, 1]);
     }
 
     #[test]

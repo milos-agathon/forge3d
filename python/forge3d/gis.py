@@ -61,7 +61,9 @@ def read_raster(
 
     Band numbers are 1-based. Pixel windows use
     (col_off, row_off, width, height); boundless reads remain
-    read_raster_window-only.
+    read_raster_window-only. With masked=True, the returned mask is true
+    where the selected sample is finite, differs from its stored-type nodata
+    marker, and is covered by the file mask. The array contains stored values.
     """
     return _require_native().read_raster(
         os.fspath(path),
@@ -87,7 +89,9 @@ def derive_water_mask(
     if not finite.any():
         return np.zeros(dem.shape, dtype=np.float32)
     threshold = float(level) if level is not None else float(np.nanquantile(dem[finite], float(quantile)))
-    gy, gx = np.gradient(np.where(finite, dem, threshold))
+    from ._raster_sampling import gradient
+
+    gy, gx = gradient(dem)
     slope = np.hypot(gx, gy)
     mask = finite & (dem <= threshold) & (slope <= float(slope_threshold))
     return np.ascontiguousarray(mask.astype(np.float32))
@@ -717,7 +721,12 @@ def apply_nodata(array: Any, nodata: float | list[float | None] | None, *, mask:
 
 
 def read_raster_mask(path: os.PathLike[str] | str, band: int | None = None):
-    """Read a true-valid raster mask."""
+    """Read band-first validity from file coverage, nodata and finite samples.
+
+    Mask flags identify explicit coverage as per_dataset or per_band and
+    report nodata when declared. Without either, the flags describe whether
+    the samples are all_valid or contain nonfinite values.
+    """
     return _require_native().read_raster_mask(os.fspath(path), band)
 
 
@@ -727,7 +736,11 @@ def resample_raster(
     *,
     method: str | None = None,
 ) -> dict[str, Any]:
-    """Resample; result["info"] is a serialized RasterInfo dict."""
+    """Resample a raster and return its array and serialized RasterInfo.
+
+    NumPy masked-array cells carry zero weight. Insufficient support produces
+    NaN for array inputs, promoting integer data to float64 when it has holes.
+    """
     return _require_native().resample_raster(
         _path_or_self(source),
         shape_or_resolution,
@@ -958,6 +971,10 @@ def prepare_terrain_derivatives(
     dem: os.PathLike[str] | str | Any,
     derivatives: list[str] | tuple[str, ...] = ("slope", "hillshade"),
 ) -> dict[str, Any]:
+    """Compute slope and hillshade on valid DEM cells using available neighbours.
+
+    A GeoTIFF path, its RasterInfo, and its masked read use the same coverage.
+    """
     return _require_native().prepare_terrain_derivatives(_path_or_self(dem), derivatives=derivatives)
 
 

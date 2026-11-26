@@ -28,6 +28,9 @@ impl TerrainScene {
             for x in 0..width as i32 {
                 let idx = (y as u32 * width + x as u32) as usize;
                 let center_h = heightmap_data[idx];
+                if !center_h.is_finite() {
+                    continue;
+                }
 
                 let mut occlusion = 0.0f32;
                 let mut sample_count = 0;
@@ -42,6 +45,9 @@ impl TerrainScene {
                         if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
                             let nidx = (ny as u32 * width + nx as u32) as usize;
                             let neighbor_h = heightmap_data[nidx];
+                            if !neighbor_h.is_finite() {
+                                continue;
+                            }
                             let dist = ((dx * dx + dy * dy) as f32).sqrt();
                             let h_diff = (neighbor_h - center_h) * height_scale;
                             if h_diff > 0.0 {

@@ -252,17 +252,24 @@ pub(super) fn record_observation(
     if !crate::core::shader_contract_runtime::capture_active() {
         return Ok(());
     }
-    crate::core::shader_contract_runtime::record_observation(build_observation(
+    // The shader observes the finite R channel uploaded by masked_texels.
+    // Validate that payload with the same range checks as a dense R32F upload.
+    let packed = crate::terrain::masked_height::masked_texels(heightmap);
+    let uploaded = packed
+        .as_ref()
+        .map(|p| p.iter().map(|v| v[0]).collect::<Vec<_>>());
+    let observation = build_observation(
         scene,
         terrain,
         shading,
         overlay,
-        heightmap,
+        uploaded.as_deref().unwrap_or(heightmap),
         width,
         height,
         water,
         water_mask_max,
-    )?)
+    )?;
+    crate::core::shader_contract_runtime::record_observation(observation)
 }
 
 fn check_slice(

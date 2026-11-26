@@ -226,7 +226,7 @@ fn pack_images(args: &Args) -> Result<(StoreMetadata, Vec<PackedPage>), String> 
             }
             let next_width = mip_width.div_ceil(2);
             let next_height = mip_height.div_ceil(2);
-            mip_data = downsample_rgba(&mip_data, mip_width, mip_height);
+            mip_data = downsample_rgba(&mip_data, mip_width, mip_height, family == 0);
             mip_width = next_width;
             mip_height = next_height;
             mip = mip
@@ -327,7 +327,7 @@ fn bordered_tile(
     tile
 }
 
-fn downsample_rgba(source: &[u8], width: u32, height: u32) -> Vec<u8> {
+fn downsample_rgba(source: &[u8], width: u32, height: u32, masked_color: bool) -> Vec<u8> {
     let next_width = width.div_ceil(2);
     let next_height = height.div_ceil(2);
     let mut next = Vec::with_capacity(next_width as usize * next_height as usize * 4);
@@ -340,11 +340,19 @@ fn downsample_rgba(source: &[u8], width: u32, height: u32) -> Vec<u8> {
                     for dx in 0..2 {
                         let sx = (x * 2 + dx).min(width - 1);
                         let sy = (y * 2 + dy).min(height - 1);
-                        sum += u32::from(source[((sy * width + sx) * 4 + channel) as usize]);
+                        let start = ((sy * width + sx) * 4) as usize;
+                        if masked_color && source[start + 3] == 0 {
+                            continue;
+                        }
+                        sum += u32::from(source[start + channel as usize]);
                         count += 1;
                     }
                 }
-                next.push(((sum + count / 2) / count) as u8);
+                next.push(if count < 2 {
+                    0
+                } else {
+                    ((sum + count / 2) / count) as u8
+                });
             }
         }
     }

@@ -86,6 +86,27 @@ impl TerrainRenderParams {
             let x1 = (x0 + 1).min(cols - 1);
             let y1 = (y0 + 1).min(rows - 1);
             let (tx, ty) = (x - x0 as f64, y - y0 as f64);
+            if let Some(limit) = nodata_height_below {
+                let taps = [
+                    (dem[[y0, x0]], (1.0 - tx) * (1.0 - ty)),
+                    (dem[[y0, x1]], tx * (1.0 - ty)),
+                    (dem[[y1, x0]], (1.0 - tx) * ty),
+                    (dem[[y1, x1]], tx * ty),
+                ];
+                if taps.iter().any(|(h, _)| *h < limit) {
+                    let (sum, support) = taps
+                        .into_iter()
+                        .filter(|(h, _)| *h >= limit)
+                        .fold((0.0, 0.0), |(sum, w), (h, v)| {
+                            (sum + f64::from(h) * v, w + v)
+                        });
+                    return if support >= 0.5 {
+                        sum / support
+                    } else {
+                        f64::NAN
+                    };
+                }
+            }
             let top = f64::from(dem[[y0, x0]]) * (1.0 - tx) + f64::from(dem[[y0, x1]]) * tx;
             let bottom = f64::from(dem[[y1, x0]]) * (1.0 - tx) + f64::from(dem[[y1, x1]]) * tx;
             top * (1.0 - ty) + bottom * ty
@@ -129,14 +150,6 @@ impl TerrainRenderParams {
                         ]
                     };
                     for indices in triangles {
-                        // Fully nodata triangles leave the renderer's holes empty.
-                        if nodata_height_below.is_some_and(|limit| {
-                            indices
-                                .iter()
-                                .all(|&(y, x)| sample(y, x) < f64::from(limit))
-                        }) {
-                            continue;
-                        }
                         let triangle =
                             indices.map(|(y, x)| if y == row { current[x] } else { previous[x] });
                         if let [Some(a), Some(b), Some(c)] = triangle {

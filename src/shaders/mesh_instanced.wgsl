@@ -156,14 +156,14 @@ fn saturate(value: f32) -> f32 {
   return clamp(value, 0.0, 1.0);
 }
 
-fn load_height(pixel: vec2<i32>) -> f32 {
+fn load_height(pixel: vec2<i32>) -> vec2<f32> {
   let dims_u = textureDimensions(height_tex, 0);
   let dims = vec2<i32>(i32(dims_u.x), i32(dims_u.y));
   let clamped = clamp(pixel, vec2<i32>(0, 0), max(dims - vec2<i32>(1, 1), vec2<i32>(0, 0)));
-  return textureLoad(height_tex, clamped, 0).r;
+  return textureLoad(height_tex, clamped, 0).rg;
 }
 
-fn sample_height_bilinear(uv: vec2<f32>) -> f32 {
+fn sample_height_bilinear(uv: vec2<f32>) -> vec2<f32> {
   let dims_u = textureDimensions(height_tex, 0);
   let dims = vec2<f32>(f32(dims_u.x), f32(dims_u.y));
   let max_index = max(dims - vec2<f32>(1.0, 1.0), vec2<f32>(1.0, 1.0));
@@ -174,23 +174,29 @@ fn sample_height_bilinear(uv: vec2<f32>) -> f32 {
   let h10 = load_height(base + vec2<i32>(1, 0));
   let h01 = load_height(base + vec2<i32>(0, 1));
   let h11 = load_height(base + vec2<i32>(1, 1));
-  let hx0 = mix(h00, h10, frac.x);
-  let hx1 = mix(h01, h11, frac.x);
-  return mix(hx0, hx1, frac.y);
+  let flags = vec4<f32>(h00.y, h10.y, h01.y, h11.y);
+  if (all(flags <= vec4<f32>(0.5))) {
+    return vec2<f32>(mix(mix(h00.x,h10.x,frac.x), mix(h01.x,h11.x,frac.x), frac.y), 1.0);
+  }
+  let taps = vec4<f32>((1.0-frac.x)*(1.0-frac.y), frac.x*(1.0-frac.y), (1.0-frac.x)*frac.y, frac.x*frac.y);
+  let w = select(taps, vec4<f32>(0.0), flags > vec4<f32>(0.5));
+  let support = dot(w, vec4<f32>(1.0));
+  return vec2<f32>(dot(w, vec4<f32>(h00.x,h10.x,h01.x,h11.x))/max(support, 0.5), support);
 }
 
 fn terrain_up_component(value: vec3<f32>) -> f32 {
   return select(value.y, value.z, T.height_to_world.z != 0.0);
 }
 
-fn terrain_height_delta(world_pos: vec3<f32>) -> f32 {
+fn terrain_height_delta(world_pos: vec3<f32>) -> vec2<f32> {
   let horizontal = select(world_pos.xz, world_pos.xy, T.height_to_world.z != 0.0);
   let uv = vec2<f32>(
     horizontal.x * T.world_to_uv_scale_bias.x + T.world_to_uv_scale_bias.z,
     horizontal.y * T.world_to_uv_scale_bias.y + T.world_to_uv_scale_bias.w
   );
-  let terrain_height = sample_height_bilinear(uv) * T.height_to_world.x + T.height_to_world.y;
-  return terrain_up_component(world_pos) - terrain_height;
+  let sample = sample_height_bilinear(uv);
+  let terrain_height = sample.x * T.height_to_world.x + T.height_to_world.y;
+  return vec2<f32>(terrain_up_component(world_pos) - terrain_height, sample.y);
 }
 
 fn mesh_shadow_visibility(world_pos: vec3<f32>) -> f32 {
@@ -246,10 +252,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let ndotl = max(dot(n, -l), 0.0);
   let intensity = max(U.light_dir_ws.w, 0.0);
   let base = U.color.rgb;
-  let height_delta = terrain_height_delta(in.world_pos);
+  let terrain_sample = terrain_height_delta(in.world_pos);
+  let height_delta = terrain_sample.x;
 
   var alpha = U.color.a;
-  if (U.terrain_blend.x > 0.5) {
+  if (U.terrain_blend.x > 0.5 && terrain_sample.y >= 0.5) {
     let bury_depth = max(U.terrain_blend.y, 1e-4);
     let fade_distance = max(U.terrain_blend.z, 1e-4);
     alpha = alpha * smoothstep(-bury_depth, fade_distance, height_delta);
@@ -263,7 +270,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let direct_shadow = mix(0.20, 1.0, shadow_visibility);
   let lit = base * (0.2 + 0.7 * ndotl * intensity * direct_shadow);
   var contact = 0.0;
-  if (U.terrain_contact.x > 0.5) {
+  if (U.terrain_contact.x > 0.5 && terrain_sample.y >= 0.5) {
     let contact_distance = max(U.terrain_contact.y, 1e-4);
     let strength = saturate(U.terrain_contact.z);
     let vertical_weight = saturate(U.terrain_contact.w);

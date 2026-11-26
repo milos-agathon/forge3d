@@ -131,6 +131,35 @@ mod output_mask_tests {
     }
 
     #[test]
+    fn terrain_pipeline_refuses_incompatible_colour_before_drawing() -> Result<()> {
+        // The Windows debug shader compiler overflows libtest's default thread stack.
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(|| -> Result<()> {
+                let context = crate::core::gpu::try_ctx()?;
+                let scene = TerrainScene::new(
+                    context.device.clone(),
+                    context.queue.clone(),
+                    context.adapter.clone(),
+                )?;
+                let original = scene.pipeline.lock().unwrap().color_format;
+                // fs_main writes floating-point colour. An integer target must fail validation.
+                let error = scene
+                    .ensure_pipeline_sample_count(1, false, wgpu::TextureFormat::R32Uint)
+                    .expect_err("an invalid render pipeline must never enter the cache");
+                assert!(matches!(
+                    error.downcast_ref(),
+                    Some(crate::core::error::RenderError::DegradedCapability(detail))
+                        if detail.contains("terrain_pbr_pom.pipeline")
+                ));
+                assert_eq!(scene.pipeline.lock().unwrap().color_format, original);
+                scene.ensure_pipeline_sample_count(1, false, original)
+            })?
+            .join()
+            .expect("terrain validation thread panicked")
+    }
+
+    #[test]
     fn scaled_media_capture_executes_resolve_and_public_dimension_readback() {
         let context = crate::core::gpu::try_ctx().expect("scaled media AOV test requires a GPU");
         let scene = TerrainScene::new(
@@ -344,7 +373,7 @@ impl TerrainScene {
                 output_mask,
                 include_source_id,
                 clipmap_geometry,
-            ));
+            )?);
             *sample_count = effective_msaa;
             *cached_color_format = color_format;
             *cached_output_mask = output_mask;

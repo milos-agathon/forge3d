@@ -1,5 +1,6 @@
 // A2-BEGIN:terrain-module
 // T11-BEGIN:terrain-mesh-mod
+pub(crate) mod masked_height;
 pub mod mesh;
 pub use mesh::{make_grid, GridMesh, GridVertex, Indices};
 // T11-END:terrain-mesh-mod

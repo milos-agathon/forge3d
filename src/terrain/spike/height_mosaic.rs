@@ -26,12 +26,10 @@ impl TerrainSpike {
         // If filter policy changed (e.g., RG16F fallback enables filtering), recreate pipeline accordingly
         let mosaic_filterable = want_linear;
         if mosaic_filterable != self.height_filterable {
-            self.tp = crate::terrain::pipeline::TerrainPipeline::create(
+            self.tp = crate::terrain::pipeline::TerrainPipeline::create_spike(
                 &self.device,
                 TEXTURE_FORMAT,
                 NORMAL_FORMAT,
-                1,
-                None,
                 mosaic_filterable,
             );
             // Recreate dependent bind groups with the new layouts
@@ -53,9 +51,12 @@ impl TerrainSpike {
         }
 
         // Rebind group(1) to the mosaic texture/sampler
-        self.bg1_height = self
-            .tp
-            .make_bg_height(&self.device, &mosaic.view, &mosaic.sampler);
+        self.bg1_height = self.tp.make_bg_height_covered(
+            &self.device,
+            &mosaic.view,
+            &mosaic.sampler,
+            &mosaic.coverage_view,
+        );
         // Upload mosaic params (inv tiles and dims)
         let inv_tiles_x = if tiles_x > 0 {
             1.0 / tiles_x as f32
@@ -71,7 +72,9 @@ impl TerrainSpike {
             inv_tiles_x,
             inv_tiles_y,
             tiles_x,
-            tiles_y,
+            // WGPU texture dimensions use fewer than 31 bits. The high bit
+            // selects the independent coverage atlas in the existing tile ABI.
+            tiles_y: tiles_y | (1 << 31),
         };
         self.queue
             .write_buffer(&self.mosaic_params_ubo, 0, bytemuck::bytes_of(&mp));

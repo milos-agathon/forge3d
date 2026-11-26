@@ -528,6 +528,9 @@ fn bilinear_sample(
     let h10 = heightmap.get(idx(x1, y0)).copied().unwrap_or(h00);
     let h01 = heightmap.get(idx(x0, y1)).copied().unwrap_or(h00);
     let h11 = heightmap.get(idx(x1, y1)).copied().unwrap_or(h10);
+    if ![h00, h10, h01, h11].iter().all(|v| v.is_finite()) {
+        return crate::terrain::masked_height::bilinear([h00, h10, h01, h11], fx, fy);
+    }
     let h0 = lerp(h00, h10, fx);
     let h1 = lerp(h01, h11, fx);
     lerp(h0, h1, fy)

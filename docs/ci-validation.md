@@ -4,6 +4,19 @@ forge3d separates merge validation from high-cost acceptance. A green hosted
 check is evidence only for the claim named by that check; it is not evidence of
 physical NVIDIA/Vulkan execution.
 
+## Local Windows terrain validation
+
+Use a release extension for native Python tests that initialize GPU shaders.
+The Windows debug build can exhaust the default Python stack during the
+adapter probe. Build in the worktree's own Cargo target and install the matching
+release wheel into the test interpreter. Run the parent and child probes with
+that interpreter, with `FORGE3D_NO_BOOTSTRAP=1` and
+`FORGE3D_TEST_INSTALLED_WHEEL=1`. If testing a staged package, export its
+directory through `PYTHONPATH` so child processes see the same extension.
+Check `forge3d._forge3d.__file__` in a fresh child before relying on the
+GPU results. For the NVIDIA determinism lane set `WGPU_BACKEND=vulkan` and
+`FORGE3D_DETERMINISM_TEST_BACKEND=vulkan`.
+
 ## Pull-request core
 
 `PR Core Success` is the stable branch-protection context for every pull

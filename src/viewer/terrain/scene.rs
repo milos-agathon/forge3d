@@ -76,6 +76,7 @@ pub struct ViewerTerrainData {
     pub vertex_buffer: TrackedBuffer,
     pub index_buffer: TrackedBuffer,
     pub index_count: u32,
+    pub(super) masked_geometry: bool,
     pub uniform_buffer: TrackedBuffer,
     pub bind_group: wgpu::BindGroup,
     // Camera
@@ -385,7 +386,7 @@ pub struct ViewerTerrainScene {
     pub(super) csm_uniform_buffer: Option<TrackedBuffer>,
 
     // Shadow rendering resources
-    pub(super) shadow_pipeline: Option<wgpu::RenderPipeline>,
+    pub(super) shadow_pipeline: Option<(wgpu::RenderPipeline, wgpu::RenderPipeline)>,
     pub(super) shadow_uniform_buffers: Vec<TrackedBuffer>, // One per cascade
     pub(super) shadow_bind_groups: Vec<wgpu::BindGroup>,   // One per cascade
     /// Terrain revision captured by every live shadow bind group.

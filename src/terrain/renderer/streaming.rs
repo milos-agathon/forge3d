@@ -561,9 +561,7 @@ impl DemSliceHeightReader {
         let h10 = self.dem[y0 * self.width + x1];
         let h01 = self.dem[y1 * self.width + x0];
         let h11 = self.dem[y1 * self.width + x1];
-        let top = h00 * (1.0 - tx) + h10 * tx;
-        let bottom = h01 * (1.0 - tx) + h11 * tx;
-        top * (1.0 - ty) + bottom * ty
+        crate::terrain::masked_height::bilinear([h00,h10,h01,h11], tx, ty)
     }
 }
 

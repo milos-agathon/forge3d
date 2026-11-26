@@ -156,7 +156,7 @@ def test_layer_centers_and_nodata_reach_the_uniforms_and_shader() -> None:
     assert "params.material_layer_centers.as_deref()" in upload
     assert "params.nodata_height_below.unwrap_or(0.0)" in upload
     assert (
-        "u_overlay.params6.z > 0.5 && sample_height(uv) < u_overlay.params6.y"
+        "masked_height && overview_sample(uv, 0.0).y < 0.5"
         in shader
     )
 

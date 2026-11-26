@@ -1,0 +1,11 @@
+[module]
+path = "src/shaders/includes/masked_height.wgsl"
+owner = "render-quality"
+expiry = "2027-01-17"
+
+[[entry]]
+name = "height_footprint"
+proof_status = "proven"
+inputs = ["value:a.x:-65536:65536", "value:a.y:0:1", "value:b.x:-65536:65536", "value:b.y:0:1", "value:c.x:-65536:65536", "value:c.y:0:1", "value:d.x:-65536:65536", "value:d.y:0:1", "value:f:0:1"]
+outputs = ["return:-524288:524288"]
+invariants = []

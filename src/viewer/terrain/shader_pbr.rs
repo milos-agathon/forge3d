@@ -6,6 +6,7 @@ pub const TERRAIN_PBR_SHADER: &str = concat!(
     "\n",
     include_str!("../../shaders/includes/shadow_moments.wgsl"),
     "\n",
+    include_str!("shader_pbr/masked_grid.wgsl"),
     include_str!("shader_pbr/terrain_pbr.wgsl")
 );
 

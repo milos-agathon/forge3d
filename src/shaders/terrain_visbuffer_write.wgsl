@@ -25,5 +25,7 @@ fn fs_visibility(
     input: VertexOutput,
     @builtin(primitive_index) primitive_index: u32,
 ) -> @location(0) u32 {
+    det_seed(input.clip_position.x);
+    if (local_height_has_mask() && overview_sample(input.tex_coord, 0.0).y < 0.5) { discard; }
     return terrain_visbuffer_pack(input.tile_id, primitive_index) + 1u;
 }

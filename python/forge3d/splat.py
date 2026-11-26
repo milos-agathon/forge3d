@@ -387,12 +387,13 @@ def _resolve_terrain(terrain: Any) -> Optional[FusedTerrain]:
         terrain = FusedTerrain(**terrain)
     elif not isinstance(terrain, FusedTerrain):
         terrain = FusedTerrain(heights=np.asarray(terrain))
-    heights = np.ascontiguousarray(terrain.heights, dtype=np.float32)
+    from ._raster_sampling import height_array
+    heights = height_array(terrain.heights)
     if heights.ndim != 2 or min(heights.shape) < 2:
         raise ValueError(
             f"terrain heights must be a 2-D array of at least 2x2 samples, got shape {heights.shape}"
         )
-    if not np.isfinite(heights).all():
+    if np.isinf(heights).any() or not np.isfinite(heights).any():
         raise ValueError("terrain heights contain non-finite samples")
     albedo_map = terrain.albedo_map
     if albedo_map is not None:

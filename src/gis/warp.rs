@@ -3,7 +3,8 @@ use std::path::Path;
 use crate::gis::affine::{raster_bounds, require_transform, transform_from_tuple};
 use crate::gis::crs::{authority_map, crs_equal, require_crs, transform_point};
 use crate::gis::error::{GisError, GisResult};
-use crate::gis::raster_info::{read_raster_data, LoadedRaster};
+use crate::gis::raster_info::read_raster_data;
+use crate::gis::raster_read::read_sampling_raster;
 use crate::gis::raster_write::{write_raster, CrsSpec, RasterArray, WriteRasterOptions};
 use crate::gis::types::{
     AffineTransform, RasterDType, RasterInfo, RasterWarning, WARNING_ASSIGNMENT_NOT_REPROJECTION,
@@ -82,7 +83,7 @@ pub struct RasterOperationResult {
 
 pub fn assign_crs(path: impl AsRef<Path>, crs: CrsSpec, overwrite: bool) -> GisResult<RasterInfo> {
     let path = path.as_ref();
-    let loaded = read_raster(path)?;
+    let loaded = read_raster_data(path)?;
     if require_crs(&loaded.info).is_ok() && !overwrite {
         return Err(GisError::CrsAlreadyExists(
             "crs_exists: raster already has CRS metadata; pass overwrite=True to replace it"
@@ -119,7 +120,7 @@ pub fn resample_raster(
     target: ResampleTarget,
     method: ResamplingMethod,
 ) -> GisResult<RasterOperationResult> {
-    let loaded = read_raster(path)?;
+    let loaded = read_sampling_raster(path)?;
     let (height, width, transform) = match target {
         ResampleTarget::Shape { height, width } => {
             validate_shape(height, width)?;
@@ -208,7 +209,7 @@ pub fn align_raster_to(
     target: &RasterInfo,
     method: ResamplingMethod,
 ) -> GisResult<RasterOperationResult> {
-    let loaded = read_raster(path)?;
+    let loaded = read_sampling_raster(path)?;
     align_raster_data(&loaded.array, &loaded.info, target, method)
 }
 
@@ -317,7 +318,7 @@ pub fn reproject_raster(
     method: ResamplingMethod,
     on_transform_error: TransformErrorPolicy,
 ) -> GisResult<RasterOperationResult> {
-    let loaded = read_raster(path)?;
+    let loaded = read_sampling_raster(path)?;
     let src_crs = require_crs(&loaded.info)?;
     let source_transform = require_transform(&loaded.info)?;
     let source_bounds = raster_bounds(&loaded.info)?;
@@ -466,10 +467,6 @@ fn validate_shape(height: u32, width: u32) -> GisResult<()> {
     }
 }
 
-pub(crate) fn read_raster(path: impl AsRef<Path>) -> GisResult<LoadedRaster> {
-    read_raster_data(path)
-}
-
 fn resize_array(
     array: &RasterArray,
     width: u32,
@@ -566,11 +563,21 @@ fn sample_band(
     if !col.is_finite() || !row.is_finite() {
         return None;
     }
+    let missing = || {
+        let inside = col >= -0.5
+            && row >= -0.5
+            && col < array.width as f64 - 0.5
+            && row < array.height as f64 - 0.5;
+        (inside
+            && nodata.is_none()
+            && matches!(array.dtype(), RasterDType::Float32 | RasterDType::Float64))
+        .then_some(f64::NAN)
+    };
     match method {
         ResamplingMethod::Nearest => {
             let col = col.round() as isize;
             let row = row.round() as isize;
-            get_valid_sample(values, array, band, col, row, nodata)
+            get_valid_sample(values, array, band, col, row, nodata).or_else(missing)
         }
         ResamplingMethod::Bilinear => {
             let c0 = col.floor();
@@ -587,9 +594,17 @@ fn sample_band(
             ];
             let mut weighted_sum = 0.0;
             let mut weight_sum = 0.0;
+            let mut available = 0.0;
             for (sample_col, sample_row, weight) in samples {
                 if weight <= 0.0 {
                     continue;
+                }
+                if sample_col >= 0
+                    && sample_row >= 0
+                    && sample_col < array.width as isize
+                    && sample_row < array.height as isize
+                {
+                    available += weight;
                 }
                 if let Some(value) =
                     get_valid_sample(values, array, band, sample_col, sample_row, nodata)
@@ -598,7 +613,11 @@ fn sample_band(
                     weight_sum += weight;
                 }
             }
-            (weight_sum > 0.0).then_some(weighted_sum / weight_sum)
+            if weight_sum > 0.0 && 2.0 * weight_sum >= available {
+                Some(weighted_sum / weight_sum)
+            } else {
+                missing()
+            }
         }
     }
 }
@@ -612,11 +631,7 @@ fn get_valid_sample(
     nodata: Option<f64>,
 ) -> Option<f64> {
     let value = get_sample(values, array, band, col, row)?;
-    if nodata.is_some_and(|nodata| nodata_eq(Some(value), Some(nodata))) {
-        None
-    } else {
-        Some(value)
-    }
+    super::raster_values::sample_valid(value, nodata, array.dtype()).then_some(value)
 }
 
 fn get_sample(

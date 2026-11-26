@@ -88,6 +88,19 @@ pub fn slope_aspect_compute(
     Ok(result)
 }
 
+/// Derivative in sample units; absent taps (including the grid edge) have no weight.
+pub(crate) fn axis_difference(center: f64, before: f64, after: f64) -> f64 {
+    if !center.is_finite() {
+        return f64::NAN;
+    }
+    match (before.is_finite(), after.is_finite()) {
+        (true, true) => (after - before) * 0.5,
+        (false, true) => after - center,
+        (true, false) => center - before,
+        (false, false) => f64::NAN,
+    }
+}
+
 /// Compute slope and aspect at a specific point using finite differences
 fn compute_slope_aspect_at_point(
     heights: &[f32],
@@ -112,9 +125,21 @@ fn compute_slope_aspect_at_point(
 
     // Calculate gradients using finite differences
     // dz/dx (positive eastward)
-    let dz_dx = (h_right - h_left) / (dx * (x_next - x_prev) as f32);
+    let center = heights[y * width + x];
+    let derivative = |before: f32, after: f32, step: f32, span: usize| {
+        if center.is_finite() && before.is_finite() && after.is_finite() {
+            (after - before) / (step * span as f32)
+        } else {
+            if span == 1 && (!before.is_finite() || !after.is_finite()) {
+                f32::NAN
+            } else {
+                axis_difference(center.into(), before.into(), after.into()) as f32 / step
+            }
+        }
+    };
+    let dz_dx = derivative(h_left, h_right, dx, x_next - x_prev);
     // dz/dy (positive northward)
-    let dz_dy = (h_top - h_bottom) / (dy * (y_next - y_prev) as f32);
+    let dz_dy = derivative(h_bottom, h_top, dy, y_next - y_prev);
 
     // Calculate slope magnitude in radians, then convert to degrees
     let slope_rad = (dz_dx * dz_dx + dz_dy * dz_dy).sqrt().atan();
@@ -141,8 +166,8 @@ fn compute_slope_aspect_at_point(
     let aspect_deg = aspect_rad * 180.0 / PI;
 
     SlopeAspect {
-        slope_deg: slope_deg.max(0.0).min(90.0), // Clamp to valid range
-        aspect_deg: aspect_deg.max(0.0).min(360.0), // Clamp to valid range
+        slope_deg: slope_deg.clamp(0.0, 90.0), // Clamp to valid range
+        aspect_deg: aspect_deg.clamp(0.0, 360.0), // Clamp to valid range
     }
 }
 
@@ -225,6 +250,9 @@ fn extract_contours_for_level(
             let h01 = heights[(y + 1) * width + x]; // Top-left
             let h11 = heights[(y + 1) * width + (x + 1)]; // Top-right
 
+            if ![h00, h10, h01, h11].iter().all(|v| v.is_finite()) {
+                continue;
+            }
             // Determine marching squares case
             let case = compute_marching_squares_case(h00, h10, h01, h11, level);
 
@@ -337,6 +365,28 @@ fn get_marching_squares_segments(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vacuum_slope_aspect_on_a_plane_with_a_hole() {
+        let plane: Vec<_> = (0..81)
+            .map(|i| ((i % 9 + 2 * (i / 9)) as f32) / 128.0)
+            .collect();
+        let dense = slope_aspect_compute(&plane, 9, 9, 1.0, 1.0).unwrap();
+        let mut heights = plane;
+        for y in 3..6 {
+            heights[y * 9 + 3..y * 9 + 6].fill(f32::NAN);
+        }
+        let result = slope_aspect_compute(&heights, 9, 9, 1.0, 1.0).unwrap();
+        for (i, sample) in result.iter().enumerate() {
+            if heights[i].is_finite() {
+                assert_eq!(sample.slope_deg, dense[i].slope_deg);
+                assert_eq!(sample.aspect_deg, dense[i].aspect_deg);
+            } else {
+                assert!(sample.slope_deg.is_nan());
+                assert!(sample.aspect_deg.is_nan());
+            }
+        }
+    }
 
     #[test]
     fn test_slope_aspect_flat_surface() {

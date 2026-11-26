@@ -143,12 +143,12 @@ fn vs_main(@location(0) pos: vec2<f32>, @location(1) uv: vec2<f32>) -> VertexOut
     
     let world_y = height_to_world_y(h);
     
-    let world_xz = u.render_origin_xz + uv * u.render_span_xz;
+    let world_xz = u.render_origin_xz + pos * u.render_span_xz;
     
     var out: VertexOutput;
     out.world_pos = vec3<f32>(world_xz.x, world_y, world_xz.y);
     out.position = u.view_proj * vec4<f32>(out.world_pos, 1.0);
-    out.uv = uv;
+    out.uv = pos;
     out.raw_height = h;
     return out;
 }
@@ -199,6 +199,9 @@ fn compute_normal_smooth(uv: vec2<f32>) -> vec3<f32> {
 
 // Improved normal calculation from height gradient
 fn compute_normal(uv: vec2<f32>) -> vec3<f32> {
+    let node = viewer_height_node(uv);
+    let tap = textureLoad(heightmap,node,0).rg;
+    if (tap.y != 0.0) { return viewer_masked_normal(node,tap.x,u.pbr_params.y); }
     if SMOOTH_NORMALS {
         return compute_normal_smooth(uv);
     }
@@ -705,6 +708,7 @@ fn terrain_view_depth(world_pos: vec3<f32>) -> f32 {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    if (textureLoad(heightmap,viewer_height_node(in.uv),0).g > 0.5) { discard; }
     let sun_intensity = u.lighting.x;
     let ambient_strength = u.lighting.y;
     let shadow_strength = u.lighting.z;

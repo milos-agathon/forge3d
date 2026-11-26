@@ -5,6 +5,14 @@ use numpy::PyUntypedArrayMethods;
 use pyo3::types::PyDict;
 use sha2::{Digest, Sha256};
 
+pub(super) fn terrain_render_error(context: &str, error: anyhow::Error) -> PyErr {
+    if let Some(crate::core::error::RenderError::DegradedCapability(message)) = error.downcast_ref()
+    {
+        return crate::core::error::DegradedCapability::new_err(message.clone());
+    }
+    PyRuntimeError::new_err(format!("{context}: {error:#}"))
+}
+
 fn terrain_cache_bypass_reason(
     scene: &TerrainScene,
     params: &render_params::TerrainRenderParams,
@@ -328,9 +336,7 @@ impl TerrainRenderer {
             ctx.queue.clone(),
             session.adapter.clone(),
         )
-        .map_err(|e| {
-            PyRuntimeError::new_err(format!("Failed to create TerrainRenderer: {:#}", e))
-        })?;
+        .map_err(|e| terrain_render_error("Failed to create TerrainRenderer", e))?;
 
         Ok(Self {
             scene,
@@ -479,7 +485,7 @@ impl TerrainRenderer {
                 time_seconds,
                 cache_options.as_ref(),
             )
-            .map_err(|e| PyRuntimeError::new_err(format!("Rendering failed: {e:#}")))?;
+            .map_err(|e| terrain_render_error("Rendering failed", e))?;
         self.last_anamnesis_report = report;
         self.last_anamnesis_graph_submissions = graph_submissions;
 
@@ -552,7 +558,7 @@ impl TerrainRenderer {
                 water_mask,
                 time_seconds,
             )
-            .map_err(|e| PyRuntimeError::new_err(format!("Rendering with AOV failed: {:#}", e)))?;
+            .map_err(|e| terrain_render_error("Rendering with AOV failed", e))?;
 
         crate::core::certificate::emit_certificate_for_kwarg(py, certificate.as_ref())?;
         Ok((Py::new(py, frame)?, Py::new(py, aov_frame)?))
