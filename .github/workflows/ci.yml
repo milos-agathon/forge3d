@@ -367,6 +367,18 @@ jobs:
               - 'tests/_deltae.py'
               - 'tests/_ssim.py'
               - 'tests/_obliqua_gpu_guard.py'
+              - 'tools/measure_modus_poster.py'
+              - 'tools/measure_modus_scene.py'
+              - 'python/forge3d/certificate.py'
+              - 'tests/test_mapscene_render_png.py'
+              - 'src/core/process_memory.rs'
+              - 'python/forge3d/chronos.py'
+              - 'python/forge3d/map_scene.py'
+              - 'python/forge3d/mem.py'
+              - 'tests/test_modus_scene_memory.py'
+              - 'python/forge3d/_job_memory.py'
+              - 'python/forge3d/_scene_memory.py'
+              - 'python/forge3d/_poster_memory.py'
               - 'tests/test_obliqua_*.py'
               - 'examples/obliqua_*.py'
               - 'examples/southeast_europe_*.py'
@@ -1391,7 +1403,7 @@ jobs:
         run: |
           python scripts/install_compatible_wheel.py dist
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m pip install pytest numpy pyproj pillow rasterio
+          python -m pip install pytest numpy pyproj pillow rasterio psutil
           exit $LASTEXITCODE
 
       - name: Require physical NVIDIA Vulkan terrain adapter
@@ -1716,7 +1728,7 @@ jobs:
           FORGE3D_ALLOW_HOSTED_WINDOWS_TERRAIN: '1'
           FORGE3D_RUN_OBLIQUA_GPU: '1'
         run: |
-          python -m pytest tests/test_obliqua_camera.py tests/test_obliqua_albedo.py tests/test_obliqua_poster.py tests/test_api_contracts.py tests/test_render_certificate_contract.py -v --tb=short
+          python -m pytest tests/test_obliqua_camera.py tests/test_obliqua_albedo.py tests/test_obliqua_poster.py tests/test_modus_scene_memory.py tests/test_api_contracts.py tests/test_render_certificate_contract.py -v --tb=short
           exit $LASTEXITCODE
 
       - name: Upload OBLIQUA artifacts

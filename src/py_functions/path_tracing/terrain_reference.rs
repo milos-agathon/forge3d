@@ -641,6 +641,7 @@ pub(crate) fn hybrid_render_terrain_reference(
     let _owner_guard = owner.activate();
     let owner_capture = crate::core::resource_tracker::begin_owner_capture(owner.id());
     let recoverable = _on_progress.is_some() || _checkpoint.is_some();
+    crate::core::process_memory::render_phase("tracer and pipeline creation");
     let (out, dispatch) = if recoverable {
         let options = if let Some((path, every, resume)) = _checkpoint {
             Some(TerrainCheckpointOptions {
@@ -688,6 +689,7 @@ pub(crate) fn hybrid_render_terrain_reference(
             None,
         )
     };
+    crate::core::process_memory::render_phase("render setup and publication");
     let owner_report = owner_capture.finish();
     if owner_report.peak_host_visible_bytes > 512 * 1024 * 1024 {
         return Err(PyRuntimeError::new_err(format!(

@@ -35,6 +35,8 @@ pub mod det_probe;
 
 // CENSOR Task 9: RenderCertificate execution report (per-render pass timings)
 pub mod certificate;
+#[cfg(feature = "extension-module")]
+pub(crate) mod process_memory;
 
 pub mod gpu_types;
 pub mod memory_tracker;

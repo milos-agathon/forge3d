@@ -32,6 +32,7 @@ from ._map_scene_common import (
 )
 from ._map_scene_compiler import _FrozenLabelPlans, _SceneCompiler
 from ._material_preparation import material_preparation_context, scoped_material_preparation
+from ._job_memory import measured_render, owned_array, job_report, scene_resource
 from ._map_scene_labels import (
     _atlas_glyph_set,
     _diagnostic_for_layer,
@@ -220,16 +221,18 @@ def _as_native_heightmap(data: Any, *, dtype: Any, source_label: str, nodata: An
 
     from .io import _valid_dem_mask
 
-    source = np.asanyarray(data)
-    valid = _valid_dem_mask(np.asarray(source), nodata)
+    source = owned_array(np.asanyarray(data), data)
+    valid = owned_array(_valid_dem_mask(np.asarray(source), nodata))
     if np.ma.isMaskedArray(source):
         valid &= ~np.ma.getmaskarray(source)
-    heightmap = np.asarray(np.where(valid, source, 0) if not valid.all() else source, dtype=dtype)
-    if not valid.all():
-        heightmap = np.where(valid, heightmap.astype(np.float32), np.nan)
+    all_valid = valid.all()
+    filled = source if all_valid else owned_array(np.where(valid, source, 0))
+    heightmap = owned_array(np.asarray(filled, dtype=dtype), filled)
+    if not all_valid:
+        heightmap = owned_array(np.where(valid, owned_array(heightmap.astype(np.float32)), np.nan))
     if heightmap.ndim != 2:
         raise ValueError(f"MapScene native/offscreen terrain {source_label} input must be a 2D heightmap")
-    return np.ascontiguousarray(heightmap.astype(np.float32, copy=False))
+    return owned_array(np.ascontiguousarray(heightmap.astype(np.float32, copy=False)), source)
 
 
 def _load_native_heightmap(terrain: "TerrainSource") -> Any | None:
@@ -262,7 +265,7 @@ def _load_raw_heightmap(terrain: "TerrainSource") -> Any | None:
     import numpy as np
 
     if suffix == ".npy":
-        return _as_native_heightmap(np.load(path), dtype=dtype, source_label=".npy", nodata=_metadata_dict(terrain.metadata).get("nodata"))
+        return _as_native_heightmap(owned_array(np.load(path)), dtype=dtype, source_label=".npy", nodata=_metadata_dict(terrain.metadata).get("nodata"))
 
     from . import io
 
@@ -272,7 +275,7 @@ def _load_raw_heightmap(terrain: "TerrainSource") -> Any | None:
         fill_nodata_values=nodata_policy != "preserve",
         dtype=dtype,
     )
-    return _as_native_heightmap(dem.data, dtype=dtype, source_label="GeoTIFF", nodata=dem.nodata_value)
+    return _as_native_heightmap(owned_array(dem.data), dtype=dtype, source_label="GeoTIFF", nodata=dem.nodata_value)
 
 
 def _is_geotiff_path(path: Path) -> bool:
@@ -898,7 +901,7 @@ def _heightmap_domain(heightmap: Any) -> tuple[float, float]:
     import numpy as np
 
     finite = np.asarray(heightmap, dtype=np.float32)
-    finite = finite[np.isfinite(finite)]
+    finite = owned_array(finite[np.isfinite(finite)])
     if finite.size == 0:
         return (0.0, 1.0)
     lo = float(finite.min())
@@ -919,7 +922,7 @@ def _mapscene_nodata_heightmap(heightmap: Any) -> tuple[Any, float | None]:
     import numpy as np
 
     arr = np.asarray(heightmap, dtype=np.float32)
-    valid = np.isfinite(arr)
+    valid = owned_array(np.isfinite(arr))
     if valid.all():
         return heightmap, None
     if not valid.any():
@@ -932,7 +935,7 @@ def _mapscene_nodata_heightmap(heightmap: Any) -> tuple[Any, float | None]:
     ulp = float(np.spacing(np.float32(max(abs(lo), abs(hi), 1.0))))
     step = max(1e-3 * (hi - lo), 64.0 * ulp)
     filled = np.where(valid, arr, np.float32(lo - step)).astype(np.float32)
-    return np.ascontiguousarray(filled), lo - 0.5 * step
+    return owned_array(np.ascontiguousarray(filled)), lo - 0.5 * step
 
 
 def _write_minimal_hdr(path: Path) -> None:
@@ -974,6 +977,11 @@ def _mapscene_aa_seed(recipe: "SceneRecipe") -> int | None:
 
 def _mapscene_denoise_enabled(output: "OutputSpec" | None) -> bool:
     return output is not None and str(output.denoiser).lower() not in {"", "none", "off"}
+
+
+def _mapscene_needs_offline(output: "OutputSpec", samples: int) -> bool:
+    return (samples > 1 or _mapscene_denoise_enabled(output)
+            or str(output.format).lower() == "exr" or bool(output.hdr))
 
 
 def _mapscene_aov_settings(
@@ -1950,7 +1958,7 @@ def _mapscene_ibl_intensity(ibl: Mapping[str, Any], gi_modes: Sequence[str]) -> 
 def _frame_to_rgba(frame: Any, output: "OutputSpec", *, pixel_centres: bool = False) -> Any:
     import numpy as np
 
-    rgba = np.asarray(frame.to_numpy())
+    rgba = owned_array(np.asarray(frame.to_numpy()))
     if rgba.shape[:2] != (int(output.height), int(output.width)):
         rgba = _resize_nearest_array(rgba, (output.height, output.width), pixel_centres=pixel_centres)
     if rgba.dtype != np.uint8:
@@ -2031,13 +2039,13 @@ class _TerrainRenderResources:
     @property
     def session(self) -> Any:
         if self._session is None:
-            self._session = self._f3d.Session(window=False)
+            self._session = scene_resource("session initialization", self._f3d.Session, window=False)
         return self._session
 
     @property
     def renderer(self) -> Any:
         if self._renderer is None:
-            self._renderer = self._f3d.TerrainRenderer(self.session)
+            self._renderer = scene_resource("terrain renderer construction", self._f3d.TerrainRenderer, self.session)
         return self._renderer
 
     def anamnesis_resource_fingerprint(self, environment: Any, *, context_ready: Any = None) -> bytes | None:
@@ -2055,7 +2063,7 @@ class _TerrainRenderResources:
         cache_key = hashlib.sha256(Path(hdr_path).read_bytes()).digest()
         env_maps = self._ibl_cache.get(cache_key)
         if env_maps is None:
-            env_maps = self._f3d.IBL.from_hdr(hdr_path, intensity=1.0)
+            env_maps = scene_resource("environment map initialization", self._f3d.IBL.from_hdr, hdr_path, intensity=1.0)
             self._ibl_cache[cache_key] = env_maps
         return env_maps
 
@@ -2254,7 +2262,7 @@ def _render_terrain_renderer_result_impl(
         sample_count = max(1, int(output.samples))
         output_format = str(output.format).lower()
         needs_hdr = output_format == "exr" or bool(output.hdr)
-        needs_offline = sample_count > 1 or _mapscene_denoise_enabled(output) or needs_hdr
+        needs_offline = _mapscene_needs_offline(output, sample_count)
         water_mask = _mapscene_water_mask(recipe, heightmap)
         building_scatter = (
             _terrain_scatter_building_batches_for_recipe(recipe, heightmap, shared_frame=bool(requested_effects))
@@ -4953,7 +4961,7 @@ class TerrainSource:
             arr = np.asarray(self.data)
             if arr.dtype.kind not in "biuf":
                 raise ValueError("Terrain samples must be real numeric values")
-            canonical = np.array(arr, dtype=arr.dtype.newbyteorder("<"), order="C", copy=True)
+            canonical = owned_array(np.array(arr, dtype=arr.dtype.newbyteorder("<"), order="C", copy=True))
             canonical[canonical == 0] = 0  # Canonical positive zero.
             if canonical.dtype.kind == "f":
                 canonical[np.isnan(canonical)] = np.nan  # One quiet-NaN representation per dtype.
@@ -6356,6 +6364,7 @@ class MapScene:
         self.reproducibility_profile = recipe.reproducibility_profile
         self._compiler = _SceneCompiler()
         self.last_render_path: str | None = None
+        self.last_process_memory: dict[str, Any] | None = None
         self.last_render_backend: str | None = None
         self.last_render_metadata: dict[str, Any] | None = None
         self.last_bundle_path: str | None = None
@@ -6668,6 +6677,7 @@ class MapScene:
         self.last_validation_report = updated
         return updated
 
+    @measured_render("MapScene.render")
     @scoped_material_preparation
     def render(
         self,
@@ -6678,6 +6688,7 @@ class MapScene:
         certificate: "bool | str | os.PathLike[str]" = False,
         cache: "str | os.PathLike[str] | None" = None,
         raster_recipe: "RasterRecipe | None" = None,
+        process_limit_bytes: int | None = None,
     ) -> ValidationReport:
         """Render the scene; ``cache`` holds path-free per-scene subfolders."""
         if raster_recipe is not None and (cache is not None or emit_provenance or certificate
@@ -6768,6 +6779,7 @@ class MapScene:
                 "frame_sha256": sequence.frame_hashes[0],
                 "bypass_reason": sequence.bypass_reason,
             })
+            self.last_process_memory = job_report()
             return report
 
         from . import certificate as _certificate
@@ -6785,13 +6797,11 @@ class MapScene:
                 provenance_signing_key=provenance_signing_key,
                 **({"raster_recipe": raster_recipe} if raster_recipe is not None else {}),
             )
-        if certificate:
-            sha = _certificate._emit_current_render_certificate(certificate)
-            if sha is not None:
-                self.last_render_metadata["certificate_payload_sha256"] = sha
         if cache is not None:
             self.last_render_metadata = dict(self.last_render_metadata or {})
             self.last_render_metadata.update(cache_hit=False, bypass_reason=bypass_reason)
+        self.last_process_memory = job_report(certificate, digest_target=self.last_render_metadata,
+                                              digest_key="certificate_payload_sha256")
         return report
 
     def render_passes(

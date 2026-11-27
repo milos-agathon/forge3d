@@ -1278,6 +1278,8 @@ impl HybridPathTracer {
             wgpu::TextureUsages::empty()
         };
 
+        #[cfg(feature = "extension-module")]
+        crate::core::process_memory::render_phase("terrain scene upload");
         // --- Terrain scene: min-max pyramid + env map (validates the DEM,
         // registers itself with the memory tracker, frees on drop) ---
         let terrain_scene = TerrainPtScene::new_with_albedo(
@@ -1336,6 +1338,8 @@ impl HybridPathTracer {
             tracked.buffer(&mesh_buffers.bvh_buffer);
         }
 
+        #[cfg(feature = "extension-module")]
+        crate::core::process_memory::render_phase("tile buffer and texture creation");
         // --- Camera + lighting uniforms ---
         let origin = glam::Vec3::from(desc.cam_origin);
         let forward = (glam::Vec3::from(desc.cam_look_at) - origin).normalize();
@@ -1854,6 +1858,8 @@ impl HybridPathTracer {
             ],
         });
 
+        #[cfg(feature = "extension-module")]
+        crate::core::process_memory::render_phase("GPU dispatch and wait");
         // --- One-shot ReSTIR G-buffer pass (static scene + camera) ---
         let wg_x = width.div_ceil(8);
         let wg_y = height.div_ceil(8);
@@ -2150,6 +2156,8 @@ impl HybridPathTracer {
             aether_post_timing = Some(post_timing);
         }
 
+        #[cfg(feature = "extension-module")]
+        crate::core::process_memory::render_phase("tile readback and resource release");
         // --- ReSTIR reservoir validity: the merged history must be finite
         // and (for a lit scene) actually populated by the reuse chain ---
         let res_stride = std::mem::size_of::<Reservoir>() as u64;

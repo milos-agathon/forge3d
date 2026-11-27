@@ -162,6 +162,7 @@ def render_terrain_poster(
     albedo_map: np.ndarray | None = ...,
     albedo_sampling: str = ...,
     tile: int = ...,
+    process_limit_bytes: int | None = ...,
     spacing: Tuple[float, float] = ...,
     exaggeration: float = ...,
     albedo: Tuple[float, float, float] = ...,

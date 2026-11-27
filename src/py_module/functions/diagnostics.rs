@@ -4,6 +4,8 @@ pub(super) fn register_diagnostics_py_functions(m: &Bound<'_, PyModule>) -> PyRe
     m.add_function(wrap_pyfunction!(enumerate_adapters, m)?)?;
     m.add_function(wrap_pyfunction!(device_probe, m)?)?;
     m.add_function(wrap_pyfunction!(global_memory_metrics, m)?)?;
+    m.add_class::<crate::core::process_memory::ProcessMemoryCapture>()?;
+    m.add_class::<crate::core::process_memory::OwnedArrayBytes>()?;
     m.add_function(wrap_pyfunction!(set_memory_budget_policy, m)?)?;
     m.add_function(wrap_pyfunction!(get_memory_budget_policy, m)?)?;
     m.add_function(wrap_pyfunction!(

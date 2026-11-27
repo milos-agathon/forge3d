@@ -138,6 +138,7 @@ class CompiledScenePlan:
     def __init__(self, recipe_hash: str, camera_terrain_key: str, label_plans: Mapping[str, Any], manifest: Any, validation_report: ValidationReport, frame: Any | None = ..., render_passes_json: str | None = ..., render_pass_inputs: Mapping[str, RenderPassInput] = ...) -> None: ...
 
 class MapScene:
+    last_process_memory: dict[str, Any] | None
     recipe: SceneRecipe
     last_validation_report: ValidationReport | None
     last_render_path: str | None
@@ -165,6 +166,7 @@ class MapScene:
         # ANAMNESIS uses path-free keys in per-scene subfolders of this cache.
         cache: str | Path | None = ...,
         raster_recipe: RasterRecipe | None = ...,
+        process_limit_bytes: int | None = ...,
     ) -> ValidationReport: ...
     def save_bundle(self, path: str | Path) -> ValidationReport: ...
 
