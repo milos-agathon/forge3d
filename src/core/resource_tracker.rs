@@ -900,7 +900,32 @@ pub struct TrackedBuffer {
     _registry: ResourceHandle,
 }
 
+// The host budget also reserves bytes for ordinary Rust payloads such as
+// compiled CHRONOS frames. Only actual MAP buffers add to CPU heap ownership.
+#[cfg(feature = "extension-module")]
+static MAPPED_BUFFERS: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(feature = "extension-module")]
+pub(crate) fn mapped_buffer_bytes() -> u64 {
+    MAPPED_BUFFERS.load(Ordering::Relaxed)
+}
+
 impl TrackedBuffer {
+    fn new(inner: wgpu::Buffer, registry: ResourceHandle) -> Self {
+        #[cfg(feature = "extension-module")]
+        if let ResourceHandle::Buffer {
+            size,
+            is_host_visible: true,
+            ..
+        } = &registry
+        {
+            MAPPED_BUFFERS.fetch_add(*size, Ordering::Relaxed);
+        }
+        Self {
+            inner,
+            _registry: registry,
+        }
+    }
     /// Explicit accessor for the wrapped buffer (equivalent to `&*self`).
     pub fn inner(&self) -> &wgpu::Buffer {
         &self.inner
@@ -909,6 +934,20 @@ impl TrackedBuffer {
     /// Stable ledger handle for this exact tracked allocation.
     pub fn ledger_id(&self) -> u64 {
         self._registry.ledger_id()
+    }
+}
+
+#[cfg(feature = "extension-module")]
+impl Drop for TrackedBuffer {
+    fn drop(&mut self) {
+        if let ResourceHandle::Buffer {
+            size,
+            is_host_visible: true,
+            ..
+        } = &self._registry
+        {
+            MAPPED_BUFFERS.fetch_sub(*size, Ordering::Relaxed);
+        }
     }
 }
 
@@ -971,10 +1010,7 @@ pub fn tracked_create_buffer(
         .unwrap_or_else(|| call_site.clone());
     let registry = register_buffer_with_ledger(desc.size, host_visible, label, call_site)?;
     let buffer = device.create_buffer(desc);
-    Ok(TrackedBuffer {
-        inner: buffer,
-        _registry: registry,
-    })
+    Ok(TrackedBuffer::new(buffer, registry))
 }
 
 /// Create a buffer with initial contents (like `DeviceExt::create_buffer_init`),
@@ -996,10 +1032,7 @@ pub fn tracked_create_buffer_init(
     let size = ((unpadded + align_mask) & !align_mask).max(wgpu::COPY_BUFFER_ALIGNMENT);
     let registry = register_buffer_with_ledger(size, host_visible, label, call_site)?;
     let buffer = device.create_buffer_init(desc);
-    Ok(TrackedBuffer {
-        inner: buffer,
-        _registry: registry,
-    })
+    Ok(TrackedBuffer::new(buffer, registry))
 }
 
 #[cfg(all(test, windows))]

@@ -90,7 +90,7 @@ env_logger = "0.10"
 anyhow = "1"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["raw_value"] }
 gltf = { version = "1.3", features = ["import", "KHR_materials_unlit", "KHR_texture_transform"] }
 sha2 = "0.10"
 ed25519-dalek = { version = "2", features = ["std"] }
@@ -106,7 +106,7 @@ proj = { version = "0.27", optional = true }
 geo = { version = "0.33.1", default-features = false, optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pyo3 = { version = "0.21.2", features = ["abi3-py310", "macros", "multiple-pymethods"] }

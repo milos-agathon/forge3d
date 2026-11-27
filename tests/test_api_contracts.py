@@ -32,6 +32,18 @@ def test_c06_publication_python_surface():
         assert getattr(f3d, name) is getattr(publication, name)
 
 
+def test_modus_poster_public_surface():
+    from inspect import Parameter, signature
+    from forge3d import mem
+
+    limit = signature(f3d.render_terrain_poster).parameters["process_limit_bytes"]
+    assert limit.kind is Parameter.KEYWORD_ONLY and limit.default is None
+    assert {"estimate", "MemoryAdmissionRefused"} <= set(mem.__all__)
+    assert mem.MemoryAdmissionRefused.code == "memory_admission_refused"
+    report = signature(f3d.finish_render_execution_capture).parameters["_process_memory_json"]
+    assert report.kind is Parameter.KEYWORD_ONLY and report.default is None
+
+
 def test_d04_python_composition_public_surface():
     from forge3d.map_scene import RenderPassInput, RenderPassSpec
 

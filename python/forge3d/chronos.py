@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from ._canonical_json import canonical_json_bytes
+from ._job_memory import job_report, measured_render, owned_array
 from .map_scene import (
     MapScene,
     ReproducibilityProfile,
@@ -406,7 +407,7 @@ def _decode_png_rgba(path: Path):
     rgba = np.asarray(load_png_rgba(path), dtype=np.uint8)
     if rgba.ndim != 3 or rgba.shape[2] != 4:
         raise RuntimeError(f"decoded PNG is not HxWx4 RGBA: {rgba.shape}")
-    return np.ascontiguousarray(rgba)
+    return owned_array(np.ascontiguousarray(rgba))
 
 
 _FRAME_RECORD_FIELDS = (
@@ -438,6 +439,11 @@ class FlythroughManifest:
     frames: tuple[Mapping[str, Any], ...] = ()
     schema: str = _CHRONOS_MANIFEST_SCHEMA
     _compiled_frames: tuple[Any, ...] = field(default=(), repr=False, compare=False)
+
+    @property
+    def process_memory(self) -> Mapping[str, Any] | None:
+        """Runtime observation for a rendered manifest; absent on deserialization."""
+        return getattr(self, "_process_memory", None)
 
     def __post_init__(self) -> None:
         if self.schema != _CHRONOS_MANIFEST_SCHEMA:
@@ -619,6 +625,7 @@ class FlythroughManifest:
         return self.replay_frame(MapScene(MapScene._recipe_from_dict(recipe)), frame_index, out_path)
 
 
+@measured_render("render_flythrough")
 def render_flythrough(
     camera_path: Sequence[MapScene] | Mapping[int, MapScene],
     *,
@@ -628,6 +635,7 @@ def render_flythrough(
     certificate: bool = False,
     cache: "str | os.PathLike[str] | None" = None,
     label_fade_frames: int = _DEFAULT_LABEL_FADE_FRAMES,
+    process_limit_bytes: int | None = None,
 ) -> FlythroughManifest:
     """Render a deterministic CHRONOS flythrough to ``out_dir``.
 
@@ -762,6 +770,8 @@ def render_flythrough(
         _compiled_frames=tuple(compiled_frames),
     )
     manifest.save(out_dir / "flythrough_manifest.json")
+    final_certificate = out_dir / _frame_certificate_name(sorted_indices[-1]) if certificate else False
+    object.__setattr__(manifest, "_process_memory", job_report(final_certificate, flythrough=True))
     return manifest
 
 

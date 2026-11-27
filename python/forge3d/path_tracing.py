@@ -23,11 +23,12 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Iterable, Mapping,
 import numpy as np
 import time as _time
 
-from .certificate import _emit_current_render_certificate, _render_capture
+from .certificate import _render_capture
 from .certificate import emit_render_certificate as emit_render_certificate
 from .denoise import atrous_denoise
 
 from ._native import get_native_symbol
+from ._job_memory import job_report, measured_render, owned_array
 from ._terrain_checkpoint import (
     PosterCheckpoint, Progress, ProgressCallback, TerrainRenderCancelled,
     TerrainRenderProgress, array_digest, options as _checkpoint_options,
@@ -1126,7 +1127,7 @@ def hybrid_render_terrain_reference(
         )
     material = None
     if albedo_map is not None:
-        material = np.ascontiguousarray(albedo_map, dtype=np.float32)
+        material = owned_array(np.ascontiguousarray(albedo_map, dtype=np.float32), albedo_map)
         if (
             material.ndim != 3
             or material.shape[:2] != dem.shape
@@ -1171,15 +1172,15 @@ def hybrid_render_terrain_reference(
         raise ValueError("cropped sensor_rect requires full_width and full_height")
     env = None
     if env_map is not None:
-        env = np.ascontiguousarray(env_map, dtype=np.float32)
+        env = owned_array(np.ascontiguousarray(env_map, dtype=np.float32), env_map)
         if env.ndim != 3 or env.shape[2] != 3:
             raise ValueError(f"env_map must be (H, W, 3) float32, got {env.shape}")
     if (mesh_vertices is None) != (mesh_indices is None):
         raise ValueError("mesh_vertices and mesh_indices must be provided together")
     mv = mi = None
     if mesh_vertices is not None:
-        mv = np.ascontiguousarray(mesh_vertices, dtype=np.float32)
-        mi = np.ascontiguousarray(mesh_indices, dtype=np.uint32)
+        mv = owned_array(np.ascontiguousarray(mesh_vertices, dtype=np.float32), mesh_vertices)
+        mi = owned_array(np.ascontiguousarray(mesh_indices, dtype=np.uint32), mesh_indices)
         if mv.ndim != 2 or mv.shape[1] != 3:
             raise ValueError(f"mesh_vertices must be (N, 3), got {mv.shape}")
         if mi.ndim != 2 or mi.shape[1] != 3:
@@ -1317,6 +1318,7 @@ def render_registered_terrain(
     return result
 
 
+@measured_render("render_terrain_poster")
 def render_terrain_poster(
     heightmap: "np.ndarray",
     width: int,
@@ -1326,6 +1328,7 @@ def render_terrain_poster(
     albedo_map: "np.ndarray | None" = None,
     albedo_sampling: str = "nearest",
     tile: int = 1024,
+    process_limit_bytes: int | None = None,
     spacing: "tuple[float, float]" = (1.0, 1.0),
     exaggeration: float = 1.0,
     albedo: "tuple[float, float, float]" = (0.6, 0.6, 0.6),
@@ -1355,6 +1358,10 @@ def render_terrain_poster(
 
     The returned mapping contains the assembled ``rgba`` plate, scalar
     diagnostics for every tile in ``tiles``, and ``certificate_digest``.
+    Limited calls return the preflight calculation and the observed process
+    high-water mark in ``memory``. Requested poster certificates include
+    this report for unlimited calls as well. A limit below the prediction raises
+    forge3d.mem.MemoryAdmissionRefused before input copies or GPU work.
     ``cache`` is accepted for the ANAMNESIS render contract; the native terrain
     reference currently ignores it.
     checkpoint_path is a dedicated job directory. Completed tiles are
@@ -1391,11 +1398,11 @@ def render_terrain_poster(
 
     from ._raster_sampling import height_array
 
-    dem = height_array(heightmap)
+    dem = owned_array(height_array(heightmap), heightmap)
     # A checkpointed job hashes and renders the same owned scene data.
     # A caller can change its arrays while a tile receipt is being published.
     if path is not None:
-        dem = dem.copy()
+        dem = owned_array(dem.copy())
     if dem.ndim != 2:
         raise ValueError(f"heightmap must be 2D (H, W), got shape {dem.shape}")
     if np.isinf(dem).any() or not np.isfinite(dem).any():
@@ -1405,8 +1412,9 @@ def render_terrain_poster(
     if albedo_map is not None:
         material = (
             np.array(albedo_map, dtype=np.float32, order="C", copy=True)
-            if path is not None else np.ascontiguousarray(np.asarray(albedo_map, dtype=np.float32))
+            if path is not None else np.ascontiguousarray(albedo_map, dtype=np.float32)
         )
+        owned_array(material, albedo_map)
         if material.ndim != 3 or material.shape[2] != 4:
             raise ValueError(
                 f"albedo_map must be a 3D (H, W, 4) array, got shape {material.shape}"
@@ -1450,7 +1458,7 @@ def render_terrain_poster(
         )
 
     albedo_map_sha256 = (
-        "none" if material is None else hashlib.sha256(material.tobytes()).hexdigest()
+        "none" if material is None else hashlib.sha256(memoryview(material)).hexdigest()
     )
     n_x = (output_width + tile_size - 1) // tile_size
     n_y = (output_height + tile_size - 1) // tile_size
@@ -1472,9 +1480,9 @@ def render_terrain_poster(
         spacing = tuple(float(value) for value in spacing)
         albedo = tuple(float(value) for value in albedo)
         sun_color = tuple(float(value) for value in sun_color)
-        env_map = None if env_map is None else np.array(env_map, dtype=np.float32, order="C", copy=True)
-        mesh_vertices = None if mesh_vertices is None else np.array(mesh_vertices, dtype=np.float32, order="C", copy=True)
-        mesh_indices = None if mesh_indices is None else np.array(mesh_indices, dtype=np.uint32, order="C", copy=True)
+        env_map = None if env_map is None else owned_array(np.array(env_map, dtype=np.float32, order="C", copy=True))
+        mesh_vertices = None if mesh_vertices is None else owned_array(np.array(mesh_vertices, dtype=np.float32, order="C", copy=True))
+        mesh_indices = None if mesh_indices is None else owned_array(np.array(mesh_indices, dtype=np.uint32, order="C", copy=True))
         exaggeration, env_intensity = float(exaggeration), float(env_intensity)
         sun_azimuth_deg, sun_elevation_deg = float(sun_azimuth_deg), float(sun_elevation_deg)
         sun_intensity, variance_threshold = float(sun_intensity), float(variance_threshold)
@@ -1499,9 +1507,9 @@ def render_terrain_poster(
         return hybrid_render_terrain_reference(dem, width, height, cam, cache=cache, **options)
 
     with checkpoint.open() if checkpoint is not None else nullcontext():
-        return _render_poster_tiles(
+        result = _render_poster_tiles(
             render_tile, output_width, output_height, model, tile_size, n_x, n_y,
-            albedo_map_sha256, checkpoint, every, on_progress, resume, certificate,
+            albedo_map_sha256, checkpoint, every, on_progress, resume,
             dict(
                 spacing=spacing, exaggeration=exaggeration, albedo=albedo,
                 albedo_map=material, albedo_sampling=albedo_sampling,
@@ -1513,14 +1521,19 @@ def render_terrain_poster(
                 seed=seed, certificate=False,
             ),
         )
+    result["certificate_digest"] = None
+    memory = job_report(certificate, digest_target=result, digest_key="certificate_digest")
+    if process_limit_bytes is not None:
+        result["memory"] = memory
+    return result
 
 
 def _render_poster_tiles(
     render_tile, output_width, output_height, model, tile_size, n_x, n_y,
-    albedo_map_sha256, checkpoint, every, on_progress, resume, certificate,
+    albedo_map_sha256, checkpoint, every, on_progress, resume,
     render_options,
 ):
-    plate = np.empty((output_height, output_width, 4), dtype=np.uint8)
+    plate = owned_array(np.empty((output_height, output_width, 4), dtype=np.uint8))
     tiles = []
     progress = Progress(on_progress)
     frames_dispatched = 0
@@ -1637,6 +1650,7 @@ def _render_poster_tiles(
                         stats["frames"], stats["frames"], stats["variance"],
                         tile=tile_id, path=receipt, tile_complete=True,
                     )
+                del tile_rgba, result
 
         record_inputs = get_native_symbol("_record_terrain_poster_certificate_inputs")
         if record_inputs is None:
@@ -1664,8 +1678,7 @@ def _render_poster_tiles(
             **recovery_inputs,
         )
 
-    certificate_digest = _emit_current_render_certificate(certificate)
-    result = {"rgba": plate, "tiles": tiles, "certificate_digest": certificate_digest}
+    result = {"rgba": plate, "tiles": tiles}
     if checkpoint is not None or on_progress is not None:
         result.update(
             resumed=bool(recovered_tiles or resumed_tiles),

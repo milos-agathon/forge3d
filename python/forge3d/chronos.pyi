@@ -9,6 +9,8 @@ from .map_scene import MapScene
 __all__: list[str]
 
 class FlythroughManifest:
+    @property
+    def process_memory(self) -> Mapping[str, Any] | None: ...
     base_seed: int
     samples: int
     frames: tuple[Mapping[str, Any], ...]
@@ -41,4 +43,5 @@ def render_flythrough(
     certificate: bool = ...,
     cache: str | os.PathLike[str] | None = ...,
     label_fade_frames: int = ...,
+    process_limit_bytes: int | None = ...,
 ) -> FlythroughManifest: ...

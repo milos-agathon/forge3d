@@ -101,6 +101,25 @@ def test_payload_bytes_are_deterministic():
     assert a == b
 
 
+def test_process_memory_is_authenticated_without_changing_render_identity():
+    baseline = certificate.payload_sha256(FIXTURE)
+    for fields in (("process_memory",), ("flythrough_process_memory",),
+                   ("process_memory", "flythrough_process_memory")):
+        report = {field: {"measured_peak_bytes": 128} for field in fields}
+        signed = certificate.sign_certificate({**FIXTURE, **report})
+        public_key = signed["signature"]["pubkey"]
+        assert certificate.verify(signed, public_key)
+        assert certificate.payload_sha256(signed) == baseline
+        for field in fields:
+            altered = copy.deepcopy(signed)
+            altered[field]["measured_peak_bytes"] += 1
+            assert certificate.payload_sha256(altered) == baseline
+            assert not certificate.verify(altered, public_key)
+        changed_render = copy.deepcopy(signed)
+        changed_render["allocations"]["peak_host_visible_bytes"] += 1
+        assert certificate.payload_sha256(changed_render) != baseline
+
+
 def test_payload_normalizes_negative_zero():
     fixture = copy.deepcopy(FIXTURE)
     fixture["value"] = -0.0

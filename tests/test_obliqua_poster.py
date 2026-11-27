@@ -7,6 +7,8 @@ import inspect
 import json
 import math
 import os
+import subprocess
+import sys
 from pathlib import Path
 import threading
 
@@ -109,6 +111,150 @@ def test_poster_signature_has_certificate_and_cache():
     assert "cache" in signature.parameters
 
 
+def test_modus_refuses_before_copy_plate_checkpoint_or_dispatch(monkeypatch, tmp_path):
+    from forge3d import mem
+
+    def too_late(*args, **kwargs):
+        pytest.fail("refused job reached input conversion, plate allocation or native lookup")
+
+    dem = np.ones((4, 4), dtype="f8")
+    path = tmp_path / "refused"
+    monkeypatch.setattr(np, "array", too_late)
+    monkeypatch.setattr(np, "empty", too_late)
+    monkeypatch.setattr(pt, "get_native_symbol", too_late)
+    with pytest.raises(mem.MemoryAdmissionRefused) as caught:
+        pt.render_terrain_poster(dem, 16384, 16384, process_limit_bytes=1, checkpoint_path=path)
+    report = caught.value.estimate
+    assert caught.value.limit_bytes == 1 and not path.exists()
+    assert report["contributors"]["plate"] == 16384 ** 2 * 4
+    assert report["input_conversion_bytes"] == {"heightmap_conversion": dem.size * 4}
+
+
+def test_modus_estimate_uses_live_phases_and_owned_conversions(monkeypatch):
+    from forge3d import _poster_memory, mem
+
+    # An earlier high-water mark can dwarf the job after its allocations were released.
+    monkeypatch.setattr(_poster_memory, "process_bytes", lambda: (1234, sys.maxsize))
+    dem = np.ones((4, 8), dtype="f4")
+    options = dict(entry_point="render_terrain_poster", width=9, height=7, tile=4)
+    shared = mem.estimate(dict(options, heightmap=dem))
+    owned = mem.estimate(dict(options, heightmap=dem.T))
+    assert shared["input_conversion_bytes"] == {}
+    assert owned["predicted_peak_bytes"] - shared["predicted_peak_bytes"] == dem.nbytes
+    assert shared["known_growth_bytes"] == max(shared["phase_bytes"].values())
+    assert shared["known_growth_bytes"] == shared["cpu_at_peak_bytes"] + shared["host_visible_at_peak_bytes"]
+    assert sum(shared["contributors"].values()) == shared["predicted_peak_bytes"]
+    assert shared["predicted_peak_bytes"] < shared["prior_peak_bytes"]
+    masked = np.ma.array(dem, mask=dem == 0)
+    snapshot = mem.estimate(dict(options, heightmap=masked, checkpoint_path="checkpoint"))
+    assert snapshot["input_conversion_bytes"]["heightmap_conversion"] == dem.nbytes
+    assert snapshot["phase_bytes"]["height_conversion"] == 2 * dem.nbytes + dem.size
+    assert snapshot["phase_bytes"]["height_snapshot"] == 2 * dem.nbytes
+    # A limit equal to the prediction must reach the existing native-budget guard.
+    _disable_capture(monkeypatch)
+    monkeypatch.setattr(pt, "hybrid_render_terrain_reference", lambda *a, **k: {
+        "converged": True, "peak_host_visible_bytes": BUDGET_BYTES + 1,
+    })
+    with pytest.raises(RuntimeError, match="exceeded 512 MiB"):
+        pt.render_terrain_poster(dem, 9, 7, tile=4, process_limit_bytes=shared["predicted_peak_bytes"])
+
+
+def test_modus_admitted_certificate_contains_measured_report(tmp_path, monkeypatch):
+    from forge3d import certificate as cert
+    from forge3d import diagnostics
+
+    require_qualifying_gpu("MODUS poster memory report")
+    # Use the repository's development signing fixture for this local certificate.
+    monkeypatch.delenv("FORGE3D_CERT_SIGNING_KEY", raising=False)
+    job = dict(heightmap=np.zeros((32, 32), np.float32), width=64, height=64,
+               camera=_matrix_camera("off_axis", "oblique", 32), tile=32, **RENDER_OPTIONS)
+    path = tmp_path / "poster.json"
+    result = pt.render_terrain_poster(**job, process_limit_bytes=sys.maxsize, certificate=path)
+    emitted = json.loads(path.read_text())
+    assert emitted["process_memory"] == result["memory"]
+    assert result["certificate_digest"] == cert.payload_sha256(emitted)
+    result = pt.render_terrain_poster(**job, process_limit_bytes=sys.maxsize)
+    unsigned = diagnostics.render_certificate(sign=False)
+    assert unsigned["process_memory"] == result["memory"]
+    assert cert.emit_render_certificate(path) == cert.payload_sha256(unsigned)
+    assert json.loads(path.read_text())["process_memory"] == result["memory"]
+
+
+def test_modus_shape_none_provider_matches_array():
+    from forge3d import diagnostics, mem
+
+    require_qualifying_gpu("MODUS opaque heightmap parity")
+    dem = np.zeros((32, 32), np.float32)
+    calls = []
+
+    class Heightmap:
+        shape = None
+
+        def __array__(self, dtype=None, copy=None):
+            calls.append(dtype)
+            return np.asarray(dem, dtype=dtype)
+
+    provider = Heightmap()
+    opts = dict(width=32, height=32, tile=32, camera=_matrix_camera("off_axis", "oblique", 32),
+                **RENDER_OPTIONS)
+    with pytest.raises(TypeError, match="shape metadata") as preview_error:
+        mem.estimate(dict(entry_point="render_terrain_poster", heightmap=provider, **opts))
+    assert preview_error.value.code == "memory_estimate_unavailable"
+    with pytest.raises(TypeError, match="shape metadata") as admission_error:
+        pt.render_terrain_poster(provider, process_limit_bytes=sys.maxsize, **opts)
+    assert admission_error.value.code == "memory_estimate_unavailable"
+    assert admission_error.value.limit_bytes == sys.maxsize
+    assert not calls
+    reference = pt.render_terrain_poster(dem, **opts)
+    actual = pt.render_terrain_poster(provider, **opts)
+    assert calls and actual.keys() == reference.keys()
+    np.testing.assert_array_equal(actual["rgba"], reference["rgba"])
+    report = diagnostics.render_certificate(sign=False)["process_memory"]
+    assert "estimate_unavailable" in report and report["measured_peak_bytes"] > 0
+
+
+@pytest.mark.parametrize("job", [
+    "calibration", "compact", "dem-1024", "dem-rect", "dem-2048", "dem-2048-many",
+    "plain", "material", "large", "dem-2048-nodata", "masked", "dem-2048-exact", "resume",
+])
+def test_modus_poster_peak_in_fresh_process(job, tmp_path):
+    require_qualifying_gpu("MODUS independent process-peak matrix")
+    runner = [sys.executable, str(ROOT / "tools/measure_modus_poster.py")]
+    command = [*runner, "dem-2048" if job == "dem-2048-exact" else job, str(tmp_path)]
+    if job == "dem-2048-exact":
+        command.append("--exact-limit")
+    if job == "resume":
+        checkpoint = str(tmp_path / "checkpoint")
+        subprocess.run([*runner, "cancel", str(tmp_path), "--checkpoint", checkpoint], check=True)
+        command.extend(["--checkpoint", checkpoint])
+    subprocess.run(command, check=True)
+
+
+@pytest.mark.parametrize(("empty_job", "refused_job"), [
+    ("empty", "refuse"), ("empty-dem", "refuse-dem"),
+])
+def test_modus_poster_refusal_matches_empty_call(empty_job, refused_job, tmp_path):
+    runner = [sys.executable, str(ROOT / "tools/measure_modus_poster.py")]
+    subprocess.run([*runner, empty_job, str(tmp_path)], check=True)
+    subprocess.run([*runner, refused_job, str(tmp_path)], check=True)
+
+
+def test_modus_reports_a_smaller_second_job(tmp_path):
+    require_qualifying_gpu("MODUS job-local process peak")
+    dem = np.zeros((192, 192), np.float32)
+    camera = _matrix_camera("off_axis", "oblique", 32)
+    for width, height, tile in ((513, 257, 256), (4, 4, 2)):
+        report = pt.render_terrain_poster(dem, width, height, camera=camera, tile=tile,
+                                         process_limit_bytes=sys.maxsize, **RENDER_OPTIONS)["memory"]
+        (tmp_path / f"peak-{width}.json").write_text(json.dumps(report), encoding="utf8")
+        assert report["prediction_ratio"] == report["predicted_peak_bytes"] / report["measured_peak_bytes"]
+        assert report["ledger_samples"]["count"] >= 2
+        assert isinstance(report["unexplained_bytes"], int)
+        if report["peak_masked_by_history"]:
+            assert report["measured_peak_bytes"] == report["ledger_samples"]["at_peak"]["process"]
+            assert report["measured_peak_bytes"] < report["prior_peak_bytes"]
+
+
 class _PosterNative:
     def __init__(self):
         self.recorded = None
@@ -166,6 +312,7 @@ def test_poster_tiles_match_exact_grid(monkeypatch):
         assert kwargs["certificate"] is False
         assert kwargs["cache"] == "tile-cache"
     assert result["rgba"].shape == (7, 11, 4)
+    assert set(result) == {"rgba", "tiles", "certificate_digest"}
     assert len(result["tiles"]) == 6
     assert native.recorded[-2:] == (3, 2)
     source = inspect.getsource(pt.render_terrain_poster).lower()

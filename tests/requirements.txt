@@ -11,3 +11,6 @@ numpy>=1.20.0
 wgpu>=0.14
 pytest
 pytest-asyncio
+
+# Independent process-memory observer for MODUS qualification
+psutil

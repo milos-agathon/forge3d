@@ -42,7 +42,10 @@ struct AdapterSnapshot {
 /// Immutable snapshot of one completed render capture. Everything needed to
 /// serialize the certificate is captured at `finish_render_capture()` time so
 /// `execution_report_json()` is a pure function of this frozen state.
+#[derive(Clone)]
 struct FinishedCapture {
+    process_memory: Option<Box<serde_json::value::RawValue>>,
+    flythrough_process_memory: Option<Box<serde_json::value::RawValue>>,
     wgsl_module_hashes: BTreeMap<String, String>,
     adapter: AdapterSnapshot,
     requested: Vec<String>,
@@ -104,6 +107,7 @@ static LAST: Mutex<Option<Arc<FinishedCapture>>> = Mutex::new(None);
 
 thread_local! {
     static LAST_ON_THREAD: RefCell<Option<Arc<FinishedCapture>>> = const { RefCell::new(None) };
+    static CAPTURE_GENERATION: Cell<u64> = const { Cell::new(0) };
     static CURRENT_PASSES: RefCell<Vec<PassRecord>> = const { RefCell::new(Vec::new()) };
     static CAPTURE_USES_GPU: Cell<bool> = const { Cell::new(true) };
     static EXTERNAL_CAPTURE: RefCell<Option<RenderCaptureGuard>> = const { RefCell::new(None) };
@@ -130,10 +134,14 @@ pub struct RenderCaptureGuard {
 }
 
 impl RenderCaptureGuard {
-    pub fn finish(mut self) {
+    pub fn finish(self) {
+        self.finish_with_memory(None);
+    }
+
+    fn finish_with_memory(mut self, process_memory: Option<Box<serde_json::value::RawValue>>) {
         self.active = false;
         if self.root {
-            finish_render_capture();
+            finish_render_capture(process_memory);
             CAPTURE_DEPTH.with(|depth| depth.set(0));
         } else {
             CAPTURE_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
@@ -377,7 +385,7 @@ pub fn record_f3dz_pages(eps: f32, page_count: u32, base_quality: bool) {
 /// completed report. Adapter/capability info is read from the process GPU
 /// context when one already exists; certificate assembly never forces GPU
 /// initialization.
-fn finish_render_capture() {
+fn finish_render_capture(process_memory: Option<Box<serde_json::value::RawValue>>) {
     let uses_gpu = CAPTURE_USES_GPU.get();
     let passes = CURRENT_PASSES.take();
     let models = CURRENT_MODELS.with(|models| std::mem::take(&mut *models.borrow_mut()));
@@ -486,6 +494,8 @@ fn finish_render_capture() {
     };
 
     let finished = FinishedCapture {
+        flythrough_process_memory: None,
+        process_memory,
         wgsl_module_hashes,
         adapter,
         requested,
@@ -503,7 +513,36 @@ fn finish_render_capture() {
 
     let finished = Arc::new(finished);
     LAST_ON_THREAD.replace(Some(Arc::clone(&finished)));
+    CAPTURE_GENERATION.set(CAPTURE_GENERATION.get().wrapping_add(1));
     *lock_last() = Some(finished);
+}
+
+#[cfg(feature = "extension-module")]
+pub(crate) fn capture_generation() -> u64 {
+    CAPTURE_GENERATION.get()
+}
+
+/// Publish measurements only on a capture completed by this job. Cache hits
+/// without a new capture and newer process-wide captures keep their identity.
+#[cfg(feature = "extension-module")]
+pub(crate) fn attach_job_memory(
+    previous: u64, memory: Box<serde_json::value::RawValue>, flythrough: bool,
+) -> bool {
+    if capture_generation() == previous || CAPTURE_DEPTH.get() != 0 { return false; }
+    LAST_ON_THREAD.with(|slot| {
+        let mut own = slot.borrow_mut();
+        let Some(old) = own.as_ref() else { return false; };
+        let mut next = (**old).clone();
+        if flythrough { next.flythrough_process_memory = Some(memory); }
+        else { next.process_memory = Some(memory); }
+        let next = Arc::new(next);
+        let mut latest = lock_last();
+        if latest.as_ref().is_some_and(|cap| Arc::ptr_eq(cap, old)) {
+            *latest = Some(next.clone());
+        }
+        *own = Some(next);
+        true
+    })
 }
 
 pub fn abort_render_capture() {
@@ -534,11 +573,19 @@ pub fn finish_external_render_capture(
     pass_label: &str,
     draw_calls: u32,
 ) -> Result<(), RenderError> {
+    finish_external_render_capture_with_memory(pass_label, draw_calls, None)
+}
+
+pub(crate) fn finish_external_render_capture_with_memory(
+    pass_label: &str,
+    draw_calls: u32,
+    process_memory: Option<Box<serde_json::value::RawValue>>,
+) -> Result<(), RenderError> {
     let capture = EXTERNAL_CAPTURE
         .with(|slot| slot.borrow_mut().take())
         .ok_or_else(|| RenderError::render("no Python render capture is active"))?;
     record_pass(pass_label, 0.0, draw_calls);
-    capture.finish();
+    capture.finish_with_memory(process_memory);
     Ok(())
 }
 
@@ -605,6 +652,10 @@ struct CodecJson {
 
 #[derive(Serialize)]
 struct ReportJson<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    process_memory: Option<&'a serde_json::value::RawValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    flythrough_process_memory: Option<&'a serde_json::value::RawValue>,
     schema: &'a str,
     engine: EngineJson<'a>,
     adapter: AdapterJson<'a>,
@@ -655,6 +706,8 @@ pub(crate) fn calling_thread_execution_report_json() -> Result<String, RenderErr
 
 fn serialize_capture(cap: &FinishedCapture) -> Result<String, RenderError> {
     let report = ReportJson {
+        process_memory: cap.process_memory.as_deref(),
+        flythrough_process_memory: cap.flythrough_process_memory.as_deref(),
         schema: "forge3d.render_certificate/1",
         engine: EngineJson {
             version: env!("CARGO_PKG_VERSION"),
@@ -793,6 +846,24 @@ mod tests {
     /// default; serialize the whole-module state behind one lock.
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
+    #[test]
+    fn process_memory_belongs_to_the_finished_capture() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let memory = serde_json::value::RawValue::from_string(
+            r#"{"measured_peak_bytes":12345}"#.to_owned(),
+        ).unwrap();
+        begin_cpu_render_capture("test.poster").finish_with_memory(Some(memory));
+        let own = calling_thread_execution_report_json().unwrap();
+        assert_eq!(own, execution_report_json().unwrap());
+        let report: serde_json::Value = serde_json::from_str(&own).unwrap();
+        assert_eq!(report["process_memory"]["measured_peak_bytes"], 12345);
+        std::thread::spawn(|| begin_cpu_render_capture("test.unrelated").finish())
+            .join().unwrap();
+        let newest: serde_json::Value = serde_json::from_str(&execution_report_json().unwrap()).unwrap();
+        assert!(newest.get("process_memory").is_none());
+        assert_eq!(own, calling_thread_execution_report_json().unwrap());
+    }
+
     fn zero_gpu_ms(value: &mut serde_json::Value) {
         if let Some(passes) = value.get_mut("passes").and_then(|p| p.as_array_mut()) {
             for pass in passes {
@@ -879,7 +950,7 @@ mod tests {
         let _guard = TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         // No matching begin_render_capture: must not panic, and the report
         // (if any prior state exists) must still be serializable.
-        finish_render_capture();
+        finish_render_capture(None);
         let _ = execution_report_json();
     }
 

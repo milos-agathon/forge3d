@@ -530,10 +530,23 @@ pub(crate) fn begin_render_execution_capture(entry_point: &str) {
 
 #[cfg(feature = "extension-module")]
 #[pyfunction]
-#[pyo3(signature = (pass_label, draw_calls = 1))]
-pub(crate) fn finish_render_execution_capture(pass_label: &str, draw_calls: u32) -> PyResult<()> {
-    Ok(crate::core::certificate::finish_external_render_capture(
-        pass_label, draw_calls,
+#[pyo3(signature = (pass_label, draw_calls = 1, *, _process_memory_json = None))]
+pub(crate) fn finish_render_execution_capture(
+    pass_label: &str,
+    draw_calls: u32,
+    _process_memory_json: Option<String>,
+) -> PyResult<()> {
+    let memory = _process_memory_json
+        .map(|json| {
+            if !json.trim_start().starts_with('{') {
+                return Err(PyValueError::new_err("process memory must be a JSON object"));
+            }
+            serde_json::value::RawValue::from_string(json)
+                .map_err(|error| PyValueError::new_err(error.to_string()))
+        })
+        .transpose()?;
+    Ok(crate::core::certificate::finish_external_render_capture_with_memory(
+        pass_label, draw_calls, memory,
     )?)
 }
 

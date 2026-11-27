@@ -25,9 +25,9 @@ The signed message is::
 
 where :func:`canonical_payload_bytes` produces the *signed view* of the
 certificate: the ``"signature"`` block is removed entirely and the per-pass
-``"gpu_ms"`` live-timing values are removed (they are the only nondeterministic
-fields in the native report, so excluding them lets the signature survive
-re-timing the same render). The remaining structure is serialized with
+``"gpu_ms"`` timing values are removed. The signature authenticates the
+process memory reports when present. The stable render identity returned by
+:func:`payload_sha256` excludes these run-specific reports. The signed view is serialized with
 ``json.dumps(sort_keys=True, separators=(",", ":"), ensure_ascii=True,
 allow_nan=False)`` for a canonical, byte-stable payload.
 """
@@ -90,7 +90,7 @@ def _call_render_progress(callback, args):
 
 
 @contextmanager
-def _render_capture(entry_point: str, pass_label: str, draw_calls: int = 1):
+def _render_capture(entry_point: str, pass_label: str, draw_calls: int = 1, *, process_memory=None):
     """Capture one pure-Python render without overwriting an outer capture."""
     depth = int(getattr(_CAPTURE_STATE, "depth", 0))
     _CAPTURE_STATE.depth = depth + 1
@@ -114,11 +114,16 @@ def _render_capture(entry_point: str, pass_label: str, draw_calls: int = 1):
     native.begin_render_execution_capture(entry_point)
     try:
         yield
+        if process_memory is None:
+            native.finish_render_execution_capture(pass_label, int(draw_calls))
+        else:
+            native.finish_render_execution_capture(
+                pass_label, int(draw_calls),
+                _process_memory_json=json.dumps(process_memory, allow_nan=False),
+            )
     except BaseException:
         native.abort_render_execution_capture()
         raise
-    else:
-        native.finish_render_execution_capture(pass_label, int(draw_calls))
     finally:
         _CAPTURE_STATE.depth = 0
 
@@ -201,13 +206,12 @@ def canonical_payload_bytes(cert: Mapping[str, Any]) -> bytes:
     return canonical_json_bytes(payload, error_context="RenderCertificate serialization")
 
 
-def _payload_digest(cert: Mapping[str, Any]) -> bytes:
-    return hashlib.sha256(canonical_payload_bytes(cert)).digest()
-
-
 def payload_sha256(cert: Mapping[str, Any]) -> str:
-    """Hex SHA256 over :func:`canonical_payload_bytes`."""
-    return _payload_digest(cert).hex()
+    """Stable render identity across runs with different process measurements."""
+    render = dict(cert)
+    render.pop("process_memory", None)
+    render.pop("flythrough_process_memory", None)
+    return hashlib.sha256(canonical_payload_bytes(render)).hexdigest()
 
 
 def _signed_fields(cert: Mapping[str, Any]) -> list[str]:
