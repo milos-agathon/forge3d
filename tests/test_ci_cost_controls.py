@@ -1059,9 +1059,7 @@ def test_python_wheel_install_stops_before_dependencies_when_wheel_fails() -> No
     steps = _workflow_data("test-python-wheel.yml")["jobs"]["test"]["steps"]
     expected_dependencies = {
         "Install wheel and compatibility dependencies": ["pytest", "numpy"],
-        "Install wheel and full-suite dependencies": [
-            "pytest", "pyyaml", "numpy", "pillow", "mypy", "pyproj", "rasterio", "psutil",
-        ],
+        "Install wheel and full-suite dependencies": ["pytest", "pyyaml", "numpy", "pillow", "mypy", "pyproj", "rasterio"],
     }
     for name, dependencies in expected_dependencies.items():
         step = next(step for step in steps if step.get("name") == name)
