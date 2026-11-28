@@ -10,6 +10,7 @@ import numpy as np
 from os import PathLike
 from . import gis
 from . import cinema as cinema
+from . import film_audit as film_audit
 from .cinema import Subject as Subject, FramingSpec as FramingSpec, Shot as Shot, ShotPlan as ShotPlan, CinemaInfeasible as CinemaInfeasible, CinemaNativeUnavailable as CinemaNativeUnavailable, plan as plan_shots
 
 def cinema_solve(spec_json: str, heights: list[float], width: int, height: int, terrain_width: float) -> str: ...

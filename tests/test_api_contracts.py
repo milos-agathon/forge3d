@@ -40,6 +40,22 @@ def test_d04_python_composition_public_surface():
     assert callable(f3d.MapScene.render_passes)
 
 
+def test_argus_python_surface():
+    from inspect import signature
+    from pathlib import Path
+
+    assert "film_audit" in f3d.__all__
+    module = f3d.film_audit
+    assert {"audit", "AuditSettings"} <= set(module.__all__)
+    parameters = signature(module.audit).parameters
+    assert tuple(parameters) == (
+        "frames", "out_dir", "frames_dir", "cuts", "holds", "settings",
+    )
+    assert isinstance(parameters["settings"].default, module.AuditSettings)
+    stub = Path(f3d.__file__).with_name("__init__.pyi").read_text(encoding="utf-8")
+    assert "from . import film_audit as film_audit" in stub
+
+
 def test_d02_native_raster_overlay_constructor_registered():
     native = get_native_module()
     assert callable(native.OverlayLayer.from_raster_rgba)
