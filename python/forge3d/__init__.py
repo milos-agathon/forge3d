@@ -219,10 +219,10 @@ class _NativeSymbolMissing(AttributeError):
 
 
 def __getattr__(name: str):
-    if name == "anamnesis":
+    if name in {"anamnesis", "film_audit"}:
         import importlib
 
-        module = importlib.import_module(".anamnesis", __name__)
+        module = importlib.import_module(f".{name}", __name__)
         globals()[name] = module
         return module
     if name in _NATIVE_ONLY_EXPORTS:
@@ -969,6 +969,7 @@ __all__ = [
     "terrain_scatter",
     "animation",
     "anamnesis",
+    "film_audit",
     "camera_rigs",
     "datasets",
     "widgets",
